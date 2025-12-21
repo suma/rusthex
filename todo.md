@@ -148,12 +148,12 @@
 - [x] スクロールイベントのハンドリング（render()内で実装）
 - [x] ScrollHandleからスクロール位置を取得（offset()メソッド使用）
 
-##### Phase 2: 表示領域の計算
-- [ ] ビューポートサイズの取得方法を調査
-- [ ] 表示範囲計算メソッドの実装
-  - [ ] first_visible_row の計算
-  - [ ] visible_row_count の計算
-  - [ ] バッファ行の追加（ちらつき防止）
+##### Phase 2: 表示領域の計算 ✅ 完了
+- [x] ビューポートサイズの取得方法を調査（ScrollHandle::bounds()使用）
+- [x] 表示範囲計算メソッドの実装（calculate_visible_range()）
+  - [x] first_visible_row の計算（scroll_offset / row_height）
+  - [x] visible_row_count の計算（viewport_height / row_height）
+  - [x] バッファ行の追加（前後5行、ちらつき防止）
 
 ##### Phase 3: レンダリングの最適化
 - [ ] コンテンツ全体の高さを設定

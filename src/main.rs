@@ -92,6 +92,25 @@ impl HexEditor {
         (self.document.len() + self.bytes_per_row - 1) / self.bytes_per_row
     }
 
+    // Calculate visible row range for virtual scrolling
+    fn calculate_visible_range(&self, viewport_height: Pixels) -> (usize, usize) {
+        let row_height = px(20.0);
+        let total_rows = self.row_count();
+
+        // Calculate first visible row
+        let first_visible_row = (self.scroll_offset / row_height).floor() as usize;
+
+        // Calculate number of visible rows
+        let visible_row_count = (viewport_height / row_height).ceil() as usize;
+
+        // Add buffer rows to prevent flickering during scroll
+        let buffer_rows = 5;
+        let render_start = first_visible_row.saturating_sub(buffer_rows);
+        let render_end = (first_visible_row + visible_row_count + buffer_rows).min(total_rows);
+
+        (render_start, render_end)
+    }
+
     // Cursor movement methods
     fn move_cursor_left(&mut self) {
         if self.cursor_position > 0 {
@@ -214,16 +233,15 @@ impl Render for HexEditor {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let row_count = self.row_count();
 
-        // Get current scroll position (Phase 1: Track scroll offset)
+        // Phase 1: Get current scroll position
         let scroll_position = self.scroll_handle.offset();
         self.scroll_offset = scroll_position.y;
 
-        // Virtual scrolling: Calculate visible range
-        // Phase 1 complete: scroll position tracking
-        // TODO Phase 2: Calculate visible range based on viewport height
-        // TODO Phase 3: Render only visible rows
-        let max_rendered_rows = 1000;
-        let rendered_row_count = row_count.min(max_rendered_rows);
+        // Phase 2: Calculate visible range based on viewport
+        let viewport_bounds = self.scroll_handle.bounds();
+        let viewport_height = viewport_bounds.size.height;
+        let (render_start, render_end) = self.calculate_visible_range(viewport_height);
+        let rendered_row_count = render_end - render_start;
 
         // Get display title
         let title = self.document.file_name()
@@ -390,7 +408,7 @@ impl Render for HexEditor {
                                     .flex_col()
                                     .font_family("Monaco")
                                     .text_sm()
-                                    .children((0..rendered_row_count).map(|row| {
+                                    .children((render_start..render_end).map(|row| {
                         let address = self.format_address(row * self.bytes_per_row);
                         let start = row * self.bytes_per_row;
                         let end = (start + self.bytes_per_row).min(self.document.len());
