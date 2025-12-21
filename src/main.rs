@@ -2,7 +2,7 @@ mod document;
 
 use document::Document;
 use gpui::{
-    App, Application, Bounds, Context, Focusable, FocusHandle, KeyDownEvent, Window, WindowBounds, WindowOptions,
+    App, Application, Bounds, Context, Focusable, FocusHandle, KeyDownEvent, Pixels, Window, WindowBounds, WindowOptions,
     div, prelude::*, px, rgb, size, ScrollHandle,
 };
 use gpui_component::scroll::{Scrollbar, ScrollbarState, ScrollbarShow};
@@ -30,6 +30,7 @@ struct HexEditor {
     edit_pane: EditPane,
     hex_nibble: HexNibble,
     save_message: Option<String>,
+    scroll_offset: Pixels, // Current scroll position in pixels
 }
 
 impl HexEditor {
@@ -44,6 +45,7 @@ impl HexEditor {
             edit_pane: EditPane::Hex,
             hex_nibble: HexNibble::High,
             save_message: None,
+            scroll_offset: px(0.0),
         }
     }
 
@@ -212,6 +214,17 @@ impl Render for HexEditor {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let row_count = self.row_count();
 
+        // Get current scroll position (Phase 1: Track scroll offset)
+        let scroll_position = self.scroll_handle.offset();
+        self.scroll_offset = scroll_position.y;
+
+        // Virtual scrolling: Calculate visible range
+        // Phase 1 complete: scroll position tracking
+        // TODO Phase 2: Calculate visible range based on viewport height
+        // TODO Phase 3: Render only visible rows
+        let max_rendered_rows = 1000;
+        let rendered_row_count = row_count.min(max_rendered_rows);
+
         // Get display title
         let title = self.document.file_name()
             .unwrap_or("Rust Hex Editor")
@@ -377,7 +390,7 @@ impl Render for HexEditor {
                                     .flex_col()
                                     .font_family("Monaco")
                                     .text_sm()
-                                    .children((0..row_count).map(|row| {
+                                    .children((0..rendered_row_count).map(|row| {
                         let address = self.format_address(row * self.bytes_per_row);
                         let start = row * self.bytes_per_row;
                         let end = (start + self.bytes_per_row).min(self.document.len());
