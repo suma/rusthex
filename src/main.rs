@@ -111,8 +111,15 @@ impl HexEditor {
 
         // Add buffer rows to prevent flickering during scroll
         let buffer_rows = 5;
-        let render_start = first_visible_row.saturating_sub(buffer_rows);
-        let render_end = (first_visible_row + visible_row_count + buffer_rows).min(total_rows);
+        let mut render_start = first_visible_row.saturating_sub(buffer_rows);
+        let mut render_end = (first_visible_row + visible_row_count + buffer_rows).min(total_rows);
+
+        // Ensure we render at least visible_row_count rows when near the end
+        if render_end == total_rows {
+            // At the end of the file, adjust render_start to show full viewport
+            let desired_render_count = visible_row_count + buffer_rows * 2;
+            render_start = total_rows.saturating_sub(desired_render_count);
+        }
 
         (render_start, render_end)
     }
