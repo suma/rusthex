@@ -241,7 +241,11 @@ impl Render for HexEditor {
         let viewport_bounds = self.scroll_handle.bounds();
         let viewport_height = viewport_bounds.size.height;
         let (render_start, render_end) = self.calculate_visible_range(viewport_height);
-        let rendered_row_count = render_end - render_start;
+
+        // Phase 3: Calculate spacer heights for virtual scrolling
+        let row_height = px(20.0);
+        let top_spacer_height = row_height * render_start as f32;
+        let bottom_spacer_height = row_height * (row_count - render_end) as f32;
 
         // Get display title
         let title = self.document.file_name()
@@ -408,6 +412,13 @@ impl Render for HexEditor {
                                     .flex_col()
                                     .font_family("Monaco")
                                     .text_sm()
+                                    // Phase 3: Top spacer for virtual scrolling
+                                    .when(render_start > 0, |parent| {
+                                        parent.child(
+                                            div().h(top_spacer_height)
+                                        )
+                                    })
+                                    // Render only visible rows
                                     .children((render_start..render_end).map(|row| {
                         let address = self.format_address(row * self.bytes_per_row);
                         let start = row * self.bytes_per_row;
@@ -482,6 +493,12 @@ impl Render for HexEditor {
                                     }))
                             )
                     }))
+                                    // Phase 3: Bottom spacer for virtual scrolling
+                                    .when(render_end < row_count, |parent| {
+                                        parent.child(
+                                            div().h(bottom_spacer_height)
+                                        )
+                                    })
                             )
                     )
                     .child(

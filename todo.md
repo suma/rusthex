@@ -155,11 +155,13 @@
   - [x] visible_row_count の計算（viewport_height / row_height）
   - [x] バッファ行の追加（前後5行、ちらつき防止）
 
-##### Phase 3: レンダリングの最適化
-- [ ] コンテンツ全体の高さを設定
-- [ ] 表示領域内の行のみレンダリング
-- [ ] 各行の位置を絶対座標で指定
-- [ ] スクロール用のスペーサー要素を追加
+##### Phase 3: レンダリングの最適化 ✅ 完了
+- [x] コンテンツ全体の高さを設定（top + bottom spacer）
+- [x] 表示領域内の行のみレンダリング（render_start..render_end）
+- [x] 各行の位置を絶対座標で指定（スペーサーによる自動配置）
+- [x] スクロール用のスペーサー要素を追加
+  - [x] 上部スペーサー（render_start * row_height）
+  - [x] 下部スペーサー（(row_count - render_end) * row_height）
 
 ##### Phase 4: スクロールイベントの処理
 - [ ] スクロールイベントで`scroll_offset`を更新
