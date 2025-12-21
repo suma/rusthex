@@ -1,5 +1,5 @@
 use gpui::{
-    App, Application, Bounds, Context, Window, WindowBounds, WindowOptions,
+    App, Application, Bounds, Context, Focusable, FocusHandle, KeyDownEvent, Window, WindowBounds, WindowOptions,
     div, prelude::*, px, rgb, size, ScrollHandle,
 };
 use gpui_component::scroll::{Scrollbar, ScrollbarState, ScrollbarShow};
@@ -11,16 +11,20 @@ struct HexEditor {
     file_path: Option<PathBuf>,
     scroll_handle: ScrollHandle,
     scrollbar_state: ScrollbarState,
+    cursor_position: usize,
+    focus_handle: FocusHandle,
 }
 
 impl HexEditor {
-    fn new() -> Self {
+    fn new(cx: &mut Context<Self>) -> Self {
         Self {
             data: Vec::new(),
             bytes_per_row: 16,
             file_path: None,
             scroll_handle: ScrollHandle::new(),
             scrollbar_state: ScrollbarState::default(),
+            cursor_position: 0,
+            focus_handle: cx.focus_handle(),
         }
     }
 
@@ -30,8 +34,8 @@ impl HexEditor {
         Ok(())
     }
 
-    fn with_sample_data() -> Self {
-        let mut editor = Self::new();
+    fn with_sample_data(cx: &mut Context<Self>) -> Self {
+        let mut editor = Self::new(cx);
         // Sample data: Generate more data to test scrolling
         let mut data = Vec::new();
 
@@ -63,48 +67,45 @@ impl HexEditor {
         format!("{:08X}", offset)
     }
 
-    fn format_hex_line(&self, row: usize) -> String {
-        let start = row * self.bytes_per_row;
-        let end = (start + self.bytes_per_row).min(self.data.len());
-
-        if start >= self.data.len() {
-            return String::new();
-        }
-
-        self.data[start..end]
-            .iter()
-            .map(|b| format!("{:02X}", b))
-            .collect::<Vec<_>>()
-            .join(" ")
-    }
-
-    fn format_ascii_line(&self, row: usize) -> String {
-        let start = row * self.bytes_per_row;
-        let end = (start + self.bytes_per_row).min(self.data.len());
-
-        if start >= self.data.len() {
-            return String::new();
-        }
-
-        self.data[start..end]
-            .iter()
-            .map(|&b| {
-                if b >= 0x20 && b <= 0x7E {
-                    b as char
-                } else {
-                    '.'
-                }
-            })
-            .collect()
-    }
-
     fn row_count(&self) -> usize {
         (self.data.len() + self.bytes_per_row - 1) / self.bytes_per_row
+    }
+
+    // Cursor movement methods
+    fn move_cursor_left(&mut self) {
+        if self.cursor_position > 0 {
+            self.cursor_position -= 1;
+        }
+    }
+
+    fn move_cursor_right(&mut self) {
+        if self.cursor_position < self.data.len().saturating_sub(1) {
+            self.cursor_position += 1;
+        }
+    }
+
+    fn move_cursor_up(&mut self) {
+        if self.cursor_position >= self.bytes_per_row {
+            self.cursor_position -= self.bytes_per_row;
+        }
+    }
+
+    fn move_cursor_down(&mut self) {
+        let new_pos = self.cursor_position + self.bytes_per_row;
+        if new_pos < self.data.len() {
+            self.cursor_position = new_pos;
+        }
+    }
+}
+
+impl Focusable for HexEditor {
+    fn focus_handle(&self, _cx: &App) -> FocusHandle {
+        self.focus_handle.clone()
     }
 }
 
 impl Render for HexEditor {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let row_count = self.row_count();
 
         // Get display title
@@ -123,6 +124,31 @@ impl Render for HexEditor {
             .bg(rgb(0x1e1e1e))
             .size_full()
             .p_4()
+            .track_focus(&self.focus_handle)
+            .on_mouse_down(gpui::MouseButton::Left, cx.listener(|_this, _event, window, cx| {
+                cx.focus_self(window);
+            }))
+            .on_key_down(cx.listener(|this: &mut Self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>| {
+                match event.keystroke.key.as_str() {
+                    "up" => {
+                        this.move_cursor_up();
+                        cx.notify();
+                    }
+                    "down" => {
+                        this.move_cursor_down();
+                        cx.notify();
+                    }
+                    "left" => {
+                        this.move_cursor_left();
+                        cx.notify();
+                    }
+                    "right" => {
+                        this.move_cursor_right();
+                        cx.notify();
+                    }
+                    _ => {}
+                }
+            }))
             .child(
                 // Header
                 div()
@@ -172,8 +198,9 @@ impl Render for HexEditor {
                                     .text_sm()
                                     .children((0..row_count).map(|row| {
                         let address = self.format_address(row * self.bytes_per_row);
-                        let hex_line = self.format_hex_line(row);
-                        let ascii_line = self.format_ascii_line(row);
+                        let start = row * self.bytes_per_row;
+                        let end = (start + self.bytes_per_row).min(self.data.len());
+                        let cursor_pos = self.cursor_position;
 
                         div()
                             .flex()
@@ -187,18 +214,51 @@ impl Render for HexEditor {
                                     .child(address)
                             )
                             .child(
-                                // Hex column
+                                // Hex column - each byte separately
                                 div()
+                                    .flex()
+                                    .gap_1()
                                     .flex_1()
-                                    .text_color(rgb(0x00ff00))
-                                    .child(hex_line)
+                                    .children((start..end).map(|byte_idx| {
+                                        let byte = self.data[byte_idx];
+                                        let hex_str = format!("{:02X}", byte);
+                                        let is_cursor = byte_idx == cursor_pos;
+
+                                        div()
+                                            .when(is_cursor, |div| {
+                                                div.bg(rgb(0x4a9eff))
+                                                    .text_color(rgb(0x000000))
+                                            })
+                                            .when(!is_cursor, |div| {
+                                                div.text_color(rgb(0x00ff00))
+                                            })
+                                            .child(hex_str)
+                                    }))
                             )
                             .child(
-                                // ASCII column
+                                // ASCII column - each byte separately
                                 div()
+                                    .flex()
                                     .w(px(160.0))
-                                    .text_color(rgb(0xffffff))
-                                    .child(ascii_line)
+                                    .children((start..end).map(|byte_idx| {
+                                        let byte = self.data[byte_idx];
+                                        let ascii_char = if byte >= 0x20 && byte <= 0x7E {
+                                            byte as char
+                                        } else {
+                                            '.'
+                                        };
+                                        let is_cursor = byte_idx == cursor_pos;
+
+                                        div()
+                                            .when(is_cursor, |div| {
+                                                div.bg(rgb(0x4a9eff))
+                                                    .text_color(rgb(0x000000))
+                                            })
+                                            .when(!is_cursor, |div| {
+                                                div.text_color(rgb(0xffffff))
+                                            })
+                                            .child(ascii_char.to_string())
+                                    }))
                             )
                     }))
                             )
@@ -235,22 +295,26 @@ fn main() {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 ..Default::default()
             },
-            move |_, cx| {
-                cx.new(move |_| {
+            move |window, cx| {
+                cx.new(move |cx| {
                     // If file path is provided, load it; otherwise use sample data
-                    if args.len() > 1 {
+                    let editor = if args.len() > 1 {
                         let file_path = PathBuf::from(&args[1]);
-                        let mut editor = HexEditor::new();
+                        let mut editor = HexEditor::new(cx);
                         match editor.load_file(file_path) {
                             Ok(_) => editor,
                             Err(e) => {
                                 eprintln!("Failed to load file: {}", e);
-                                HexEditor::with_sample_data()
+                                HexEditor::with_sample_data(cx)
                             }
                         }
                     } else {
-                        HexEditor::with_sample_data()
-                    }
+                        HexEditor::with_sample_data(cx)
+                    };
+
+                    // Set initial focus
+                    cx.focus_self(window);
+                    editor
                 })
             },
         )
