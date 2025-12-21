@@ -107,6 +107,16 @@ impl Render for HexEditor {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         let row_count = self.row_count();
 
+        // Get display title
+        let title = if let Some(path) = &self.file_path {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("Rust Hex Editor")
+                .to_string()
+        } else {
+            "Rust Hex Editor".to_string()
+        };
+
         div()
             .flex()
             .flex_col()
@@ -117,6 +127,7 @@ impl Render for HexEditor {
                 // Header
                 div()
                     .flex()
+                    .flex_col()
                     .pb_4()
                     .border_b_1()
                     .border_color(rgb(0x404040))
@@ -124,7 +135,13 @@ impl Render for HexEditor {
                         div()
                             .text_xl()
                             .text_color(rgb(0xffffff))
-                            .child("Rust Hex Editor")
+                            .child(title.clone())
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(rgb(0x808080))
+                            .child(format!("{} bytes", self.data.len()))
                     )
             )
             .child(
@@ -205,7 +222,10 @@ impl Render for HexEditor {
 }
 
 fn main() {
-    Application::new().run(|cx: &mut App| {
+    // Get command line arguments
+    let args: Vec<String> = std::env::args().collect();
+
+    Application::new().run(move |cx: &mut App| {
         // Initialize gpui-component theme for Scrollbar support
         gpui_component::theme::init(cx);
 
@@ -215,8 +235,23 @@ fn main() {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 ..Default::default()
             },
-            |_, cx| {
-                cx.new(|_| HexEditor::with_sample_data())
+            move |_, cx| {
+                cx.new(move |_| {
+                    // If file path is provided, load it; otherwise use sample data
+                    if args.len() > 1 {
+                        let file_path = PathBuf::from(&args[1]);
+                        let mut editor = HexEditor::new();
+                        match editor.load_file(file_path) {
+                            Ok(_) => editor,
+                            Err(e) => {
+                                eprintln!("Failed to load file: {}", e);
+                                HexEditor::with_sample_data()
+                            }
+                        }
+                    } else {
+                        HexEditor::with_sample_data()
+                    }
+                })
             },
         )
         .unwrap();
