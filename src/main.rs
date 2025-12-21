@@ -98,7 +98,13 @@ impl HexEditor {
         let total_rows = self.row_count();
 
         // Calculate first visible row
-        let first_visible_row = (self.scroll_offset / row_height).floor() as usize;
+        // Note: scroll_offset is negative when scrolling down in gpui
+        let scroll_offset_abs = self.scroll_offset * -1.0;
+        let first_visible_row = if scroll_offset_abs > px(0.0) {
+            (scroll_offset_abs / row_height).floor() as usize
+        } else {
+            0
+        };
 
         // Calculate number of visible rows
         let visible_row_count = (viewport_height / row_height).ceil() as usize;
@@ -111,11 +117,18 @@ impl HexEditor {
         (render_start, render_end)
     }
 
+    // Phase 5: Ensure cursor is visible by scrolling to its row
+    fn ensure_cursor_visible_by_row(&mut self) {
+        let cursor_row = self.cursor_position / self.bytes_per_row;
+        self.scroll_handle.scroll_to_item(cursor_row);
+    }
+
     // Cursor movement methods
     fn move_cursor_left(&mut self) {
         if self.cursor_position > 0 {
             self.cursor_position -= 1;
             self.hex_nibble = HexNibble::High;
+            self.ensure_cursor_visible_by_row();
         }
     }
 
@@ -123,6 +136,7 @@ impl HexEditor {
         if self.cursor_position < self.document.len().saturating_sub(1) {
             self.cursor_position += 1;
             self.hex_nibble = HexNibble::High;
+            self.ensure_cursor_visible_by_row();
         }
     }
 
@@ -130,6 +144,7 @@ impl HexEditor {
         if self.cursor_position >= self.bytes_per_row {
             self.cursor_position -= self.bytes_per_row;
             self.hex_nibble = HexNibble::High;
+            self.ensure_cursor_visible_by_row();
         }
     }
 
@@ -138,6 +153,7 @@ impl HexEditor {
         if new_pos < self.document.len() {
             self.cursor_position = new_pos;
             self.hex_nibble = HexNibble::High;
+            self.ensure_cursor_visible_by_row();
         }
     }
 
