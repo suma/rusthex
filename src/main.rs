@@ -5,6 +5,18 @@ use gpui::{
 use gpui_component::scroll::{Scrollbar, ScrollbarState, ScrollbarShow};
 use std::path::PathBuf;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum EditPane {
+    Hex,
+    Ascii,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum HexNibble {
+    High,  // Upper nibble (first hex digit)
+    Low,   // Lower nibble (second hex digit)
+}
+
 struct HexEditor {
     data: Vec<u8>,
     bytes_per_row: usize,
@@ -13,6 +25,8 @@ struct HexEditor {
     scrollbar_state: ScrollbarState,
     cursor_position: usize,
     focus_handle: FocusHandle,
+    edit_pane: EditPane,
+    hex_nibble: HexNibble,
 }
 
 impl HexEditor {
@@ -25,6 +39,8 @@ impl HexEditor {
             scrollbar_state: ScrollbarState::default(),
             cursor_position: 0,
             focus_handle: cx.focus_handle(),
+            edit_pane: EditPane::Hex,
+            hex_nibble: HexNibble::High,
         }
     }
 
@@ -75,18 +91,21 @@ impl HexEditor {
     fn move_cursor_left(&mut self) {
         if self.cursor_position > 0 {
             self.cursor_position -= 1;
+            self.hex_nibble = HexNibble::High;
         }
     }
 
     fn move_cursor_right(&mut self) {
         if self.cursor_position < self.data.len().saturating_sub(1) {
             self.cursor_position += 1;
+            self.hex_nibble = HexNibble::High;
         }
     }
 
     fn move_cursor_up(&mut self) {
         if self.cursor_position >= self.bytes_per_row {
             self.cursor_position -= self.bytes_per_row;
+            self.hex_nibble = HexNibble::High;
         }
     }
 
@@ -94,6 +113,61 @@ impl HexEditor {
         let new_pos = self.cursor_position + self.bytes_per_row;
         if new_pos < self.data.len() {
             self.cursor_position = new_pos;
+            self.hex_nibble = HexNibble::High;
+        }
+    }
+
+    // Toggle between Hex and ASCII pane
+    fn toggle_pane(&mut self) {
+        self.edit_pane = match self.edit_pane {
+            EditPane::Hex => EditPane::Ascii,
+            EditPane::Ascii => EditPane::Hex,
+        };
+        self.hex_nibble = HexNibble::High;
+    }
+
+    // Handle hex input (0-9, A-F)
+    fn input_hex(&mut self, c: char) {
+        if self.cursor_position >= self.data.len() {
+            return;
+        }
+
+        // Parse hex digit
+        let digit = match c.to_ascii_uppercase() {
+            '0'..='9' => c as u8 - b'0',
+            'A'..='F' => c.to_ascii_uppercase() as u8 - b'A' + 10,
+            _ => return, // Invalid hex character
+        };
+
+        let current_byte = self.data[self.cursor_position];
+
+        match self.hex_nibble {
+            HexNibble::High => {
+                // Update upper 4 bits
+                self.data[self.cursor_position] = (digit << 4) | (current_byte & 0x0F);
+                self.hex_nibble = HexNibble::Low;
+            }
+            HexNibble::Low => {
+                // Update lower 4 bits
+                self.data[self.cursor_position] = (current_byte & 0xF0) | digit;
+                self.hex_nibble = HexNibble::High;
+                // Auto-advance to next byte
+                self.move_cursor_right();
+            }
+        }
+    }
+
+    // Handle ASCII input
+    fn input_ascii(&mut self, c: char) {
+        if self.cursor_position >= self.data.len() {
+            return;
+        }
+
+        // Only accept printable ASCII characters
+        if c >= ' ' && c <= '~' {
+            self.data[self.cursor_position] = c as u8;
+            // Auto-advance to next byte
+            self.move_cursor_right();
         }
     }
 }
@@ -146,7 +220,30 @@ impl Render for HexEditor {
                         this.move_cursor_right();
                         cx.notify();
                     }
-                    _ => {}
+                    "tab" => {
+                        this.toggle_pane();
+                        cx.notify();
+                    }
+                    key => {
+                        // Handle character input
+                        if key.len() == 1 {
+                            let c = key.chars().next().unwrap();
+                            match this.edit_pane {
+                                EditPane::Hex => {
+                                    if c.is_ascii_hexdigit() {
+                                        this.input_hex(c);
+                                        cx.notify();
+                                    }
+                                }
+                                EditPane::Ascii => {
+                                    if c >= ' ' && c <= '~' {
+                                        this.input_ascii(c);
+                                        cx.notify();
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }))
             .child(
@@ -168,6 +265,16 @@ impl Render for HexEditor {
                             .text_sm()
                             .text_color(rgb(0x808080))
                             .child(format!("{} bytes", self.data.len()))
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(rgb(0x808080))
+                            .child(format!("Edit Mode: {} | Press Tab to switch",
+                                match self.edit_pane {
+                                    EditPane::Hex => "HEX",
+                                    EditPane::Ascii => "ASCII",
+                                }))
                     )
             )
             .child(
@@ -201,6 +308,7 @@ impl Render for HexEditor {
                         let start = row * self.bytes_per_row;
                         let end = (start + self.bytes_per_row).min(self.data.len());
                         let cursor_pos = self.cursor_position;
+                        let edit_pane = self.edit_pane;
 
                         div()
                             .flex()
@@ -225,9 +333,13 @@ impl Render for HexEditor {
                                         let is_cursor = byte_idx == cursor_pos;
 
                                         div()
-                                            .when(is_cursor, |div| {
+                                            .when(is_cursor && edit_pane == EditPane::Hex, |div| {
                                                 div.bg(rgb(0x4a9eff))
                                                     .text_color(rgb(0x000000))
+                                            })
+                                            .when(is_cursor && edit_pane == EditPane::Ascii, |div| {
+                                                div.bg(rgb(0x333333))
+                                                    .text_color(rgb(0x00ff00))
                                             })
                                             .when(!is_cursor, |div| {
                                                 div.text_color(rgb(0x00ff00))
@@ -250,9 +362,13 @@ impl Render for HexEditor {
                                         let is_cursor = byte_idx == cursor_pos;
 
                                         div()
-                                            .when(is_cursor, |div| {
-                                                div.bg(rgb(0x4a9eff))
+                                            .when(is_cursor && edit_pane == EditPane::Ascii, |div| {
+                                                div.bg(rgb(0xff8c00))
                                                     .text_color(rgb(0x000000))
+                                            })
+                                            .when(is_cursor && edit_pane == EditPane::Hex, |div| {
+                                                div.bg(rgb(0x333333))
+                                                    .text_color(rgb(0xffffff))
                                             })
                                             .when(!is_cursor, |div| {
                                                 div.text_color(rgb(0xffffff))
