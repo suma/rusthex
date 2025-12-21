@@ -131,8 +131,8 @@ impl HexEditor {
         // Cancel any ongoing search
         self.search_cancel_flag.store(true, Ordering::Relaxed);
 
-        // Wait briefly for the previous search to cancel
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        // Note: We don't wait for cancellation to complete here to avoid blocking UI thread.
+        // The background thread will check the cancel flag periodically and stop on its own.
 
         self.search_results.clear();
         self.current_search_index = None;
