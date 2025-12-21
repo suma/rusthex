@@ -221,6 +221,49 @@
 
 ---
 
+## 🔄 進行中: Document構造体リファクタリング
+
+### 目的
+データ管理とUI表示の責務を分離し、巨大ファイル対応とUndo/Redo機能の基盤を構築する。
+
+### アーキテクチャ
+- **DataBackend**: 小ファイル用のInMemory、大ファイル用のMemoryMapped
+- **Overlay**: 編集バッファ（HashMap<offset, u8>）で変更箇所のみ保持
+- **Edit History**: Undo/Redoスタック管理
+
+### タスクリスト
+
+#### Phase 1: Document基本実装 ✅ 完了
+- [x] memmap2クレートをCargo.tomlに追加
+- [x] src/document.rsファイルを作成
+- [x] DataBackend enum実装（InMemory/MemoryMapped）
+- [x] Edit構造体実装
+- [x] Document構造体の基本定義
+- [x] コンストラクタ実装（new, with_data, from_file）
+- [x] ファイルI/O実装（load, save, save_as）
+- [x] データアクセスメソッド実装（get_byte, get_slice, len）
+
+#### Phase 2: 編集機能 ✅ 完了
+- [x] Overlayベースのset_byte実装
+- [x] 変更追跡機能（has_unsaved_changes, is_modified）
+- [x] Undo/Redo実装（undo, redo, can_undo, can_redo）
+
+#### Phase 3: HexEditorのリファクタリング
+- [ ] HexEditor構造体をDocument使用に変更
+- [ ] データアクセスをdocument経由に移行
+- [ ] 編集操作をdocument.set_byte()に移行
+- [ ] ファイルI/Oをdocument経由に移行
+- [ ] 変更追跡ロジックをDocumentに委譲
+
+#### Phase 4: テストと検証
+- [ ] 小ファイル（< 10MB）での動作確認
+- [ ] 大ファイル（> 10MB）でのmmap動作確認
+- [ ] Undo/Redo機能テスト
+- [ ] 保存機能テスト
+- [ ] パフォーマンス確認
+
+---
+
 ## 📝 実装ノート
 
 ### 技術的な検討事項

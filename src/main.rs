@@ -1,3 +1,5 @@
+mod document;
+
 use gpui::{
     App, Application, Bounds, Context, Focusable, FocusHandle, KeyDownEvent, Window, WindowBounds, WindowOptions,
     div, prelude::*, px, rgb, size, ScrollHandle,
