@@ -217,11 +217,10 @@ impl HexEditor {
             self.search_results = results;
             self.is_searching = false;
 
-            // Set current index to first result
+            // Set current index to first result and scroll to it
             if !self.search_results.is_empty() {
                 self.current_search_index = Some(0);
-                self.cursor_position = self.search_results[0];
-                self.ensure_cursor_visible_by_row();
+                self.scroll_to_search_result(self.search_results[0]);
             }
             return true;
         }
@@ -237,8 +236,7 @@ impl HexEditor {
         if let Some(current_idx) = self.current_search_index {
             let next_idx = (current_idx + 1) % self.search_results.len();
             self.current_search_index = Some(next_idx);
-            self.cursor_position = self.search_results[next_idx];
-            self.ensure_cursor_visible_by_row();
+            self.scroll_to_search_result(self.search_results[next_idx]);
         }
     }
 
@@ -254,8 +252,7 @@ impl HexEditor {
                 current_idx - 1
             };
             self.current_search_index = Some(prev_idx);
-            self.cursor_position = self.search_results[prev_idx];
-            self.ensure_cursor_visible_by_row();
+            self.scroll_to_search_result(self.search_results[prev_idx]);
         }
     }
 
@@ -332,6 +329,18 @@ impl HexEditor {
     fn ensure_cursor_visible_by_row(&mut self) {
         let cursor_row = self.cursor_position / self.bytes_per_row;
         self.scroll_handle.scroll_to_item(cursor_row);
+    }
+
+    // Scroll to make the search result visible, preferably centered
+    fn scroll_to_search_result(&mut self, result_position: usize) {
+        let result_row = result_position / self.bytes_per_row;
+
+        // Try to center the result in the viewport
+        // This provides better visibility than just making it visible
+        self.scroll_handle.scroll_to_item(result_row);
+
+        // Update cursor position to the search result
+        self.cursor_position = result_position;
     }
 
     // Cursor movement methods
