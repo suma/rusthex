@@ -248,19 +248,20 @@
 - [x] 変更追跡機能（has_unsaved_changes, is_modified）
 - [x] Undo/Redo実装（undo, redo, can_undo, can_redo）
 
-#### Phase 3: HexEditorのリファクタリング
-- [ ] HexEditor構造体をDocument使用に変更
-- [ ] データアクセスをdocument経由に移行
-- [ ] 編集操作をdocument.set_byte()に移行
-- [ ] ファイルI/Oをdocument経由に移行
-- [ ] 変更追跡ロジックをDocumentに委譲
+#### Phase 3: HexEditorのリファクタリング ✅ 完了
+- [x] HexEditor構造体をDocument使用に変更
+- [x] データアクセスをdocument経由に移行
+- [x] 編集操作をdocument.set_byte()に移行
+- [x] ファイルI/Oをdocument経由に移行
+- [x] 変更追跡ロジックをDocumentに委譲
+- [x] Undo/Redoキーボードショートカット追加（Ctrl+Z / Ctrl+Y）
 
-#### Phase 4: テストと検証
-- [ ] 小ファイル（< 10MB）での動作確認
+#### Phase 4: テストと検証（進行中）
+- [x] 小ファイル（< 10MB）での動作確認
 - [ ] 大ファイル（> 10MB）でのmmap動作確認
-- [ ] Undo/Redo機能テスト
-- [ ] 保存機能テスト
-- [ ] パフォーマンス確認
+- [x] Undo/Redo機能実装完了
+- [x] 保存機能動作確認
+- [ ] パフォーマンス最適化（大量行のレンダリング問題）
 
 ---
 

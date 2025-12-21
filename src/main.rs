@@ -1,5 +1,6 @@
 mod document;
 
+use document::Document;
 use gpui::{
     App, Application, Bounds, Context, Focusable, FocusHandle, KeyDownEvent, Window, WindowBounds, WindowOptions,
     div, prelude::*, px, rgb, size, ScrollHandle,
@@ -20,40 +21,35 @@ enum HexNibble {
 }
 
 struct HexEditor {
-    data: Vec<u8>,
+    document: Document,
     bytes_per_row: usize,
-    file_path: Option<PathBuf>,
     scroll_handle: ScrollHandle,
     scrollbar_state: ScrollbarState,
     cursor_position: usize,
     focus_handle: FocusHandle,
     edit_pane: EditPane,
     hex_nibble: HexNibble,
-    has_unsaved_changes: bool,
     save_message: Option<String>,
 }
 
 impl HexEditor {
     fn new(cx: &mut Context<Self>) -> Self {
         Self {
-            data: Vec::new(),
+            document: Document::new(),
             bytes_per_row: 16,
-            file_path: None,
             scroll_handle: ScrollHandle::new(),
             scrollbar_state: ScrollbarState::default(),
             cursor_position: 0,
             focus_handle: cx.focus_handle(),
             edit_pane: EditPane::Hex,
             hex_nibble: HexNibble::High,
-            has_unsaved_changes: false,
             save_message: None,
         }
     }
 
     fn load_file(&mut self, path: PathBuf) -> std::io::Result<()> {
-        self.data = std::fs::read(&path)?;
-        self.file_path = Some(path);
-        self.has_unsaved_changes = false;
+        self.document.load(path)?;
+        self.cursor_position = 0;
         Ok(())
     }
 
@@ -82,7 +78,7 @@ impl HexEditor {
             }
         }
 
-        editor.data = data;
+        editor.document = Document::with_data(data);
         editor
     }
 
@@ -91,7 +87,7 @@ impl HexEditor {
     }
 
     fn row_count(&self) -> usize {
-        (self.data.len() + self.bytes_per_row - 1) / self.bytes_per_row
+        (self.document.len() + self.bytes_per_row - 1) / self.bytes_per_row
     }
 
     // Cursor movement methods
@@ -103,7 +99,7 @@ impl HexEditor {
     }
 
     fn move_cursor_right(&mut self) {
-        if self.cursor_position < self.data.len().saturating_sub(1) {
+        if self.cursor_position < self.document.len().saturating_sub(1) {
             self.cursor_position += 1;
             self.hex_nibble = HexNibble::High;
         }
@@ -118,7 +114,7 @@ impl HexEditor {
 
     fn move_cursor_down(&mut self) {
         let new_pos = self.cursor_position + self.bytes_per_row;
-        if new_pos < self.data.len() {
+        if new_pos < self.document.len() {
             self.cursor_position = new_pos;
             self.hex_nibble = HexNibble::High;
         }
@@ -135,7 +131,7 @@ impl HexEditor {
 
     // Handle hex input (0-9, A-F)
     fn input_hex(&mut self, c: char) {
-        if self.cursor_position >= self.data.len() {
+        if self.cursor_position >= self.document.len() {
             return;
         }
 
@@ -146,36 +142,44 @@ impl HexEditor {
             _ => return, // Invalid hex character
         };
 
-        let current_byte = self.data[self.cursor_position];
+        let current_byte = self.document.get_byte(self.cursor_position).unwrap();
 
-        match self.hex_nibble {
+        let new_byte = match self.hex_nibble {
             HexNibble::High => {
                 // Update upper 4 bits
-                self.data[self.cursor_position] = (digit << 4) | (current_byte & 0x0F);
                 self.hex_nibble = HexNibble::Low;
-                self.has_unsaved_changes = true;
+                (digit << 4) | (current_byte & 0x0F)
             }
             HexNibble::Low => {
                 // Update lower 4 bits
-                self.data[self.cursor_position] = (current_byte & 0xF0) | digit;
                 self.hex_nibble = HexNibble::High;
-                self.has_unsaved_changes = true;
-                // Auto-advance to next byte
-                self.move_cursor_right();
+                (current_byte & 0xF0) | digit
             }
+        };
+
+        if let Err(e) = self.document.set_byte(self.cursor_position, new_byte) {
+            eprintln!("Failed to set byte: {}", e);
+            return;
+        }
+
+        // Auto-advance to next byte after completing a full byte edit
+        if self.hex_nibble == HexNibble::High {
+            self.move_cursor_right();
         }
     }
 
     // Handle ASCII input
     fn input_ascii(&mut self, c: char) {
-        if self.cursor_position >= self.data.len() {
+        if self.cursor_position >= self.document.len() {
             return;
         }
 
         // Only accept printable ASCII characters
         if c >= ' ' && c <= '~' {
-            self.data[self.cursor_position] = c as u8;
-            self.has_unsaved_changes = true;
+            if let Err(e) = self.document.set_byte(self.cursor_position, c as u8) {
+                eprintln!("Failed to set byte: {}", e);
+                return;
+            }
             // Auto-advance to next byte
             self.move_cursor_right();
         }
@@ -183,24 +187,16 @@ impl HexEditor {
 
     // Save file to current path
     fn save_file(&mut self) -> std::io::Result<()> {
-        if let Some(path) = &self.file_path {
-            std::fs::write(path, &self.data)?;
-            self.has_unsaved_changes = false;
+        self.document.save()?;
+        if let Some(path) = self.document.file_path() {
             self.save_message = Some(format!("Saved to {}", path.display()));
-            Ok(())
-        } else {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                "No file path set. Use 'Save As' to specify a file path.",
-            ))
         }
+        Ok(())
     }
 
     // Save file to a new path
     fn save_file_as(&mut self, path: PathBuf) -> std::io::Result<()> {
-        std::fs::write(&path, &self.data)?;
-        self.file_path = Some(path.clone());
-        self.has_unsaved_changes = false;
+        self.document.save_as(path.clone())?;
         self.save_message = Some(format!("Saved to {}", path.display()));
         Ok(())
     }
@@ -217,14 +213,9 @@ impl Render for HexEditor {
         let row_count = self.row_count();
 
         // Get display title
-        let title = if let Some(path) = &self.file_path {
-            path.file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("Rust Hex Editor")
-                .to_string()
-        } else {
-            "Rust Hex Editor".to_string()
-        };
+        let title = self.document.file_name()
+            .unwrap_or("Rust Hex Editor")
+            .to_string();
 
         div()
             .flex()
@@ -249,6 +240,25 @@ impl Render for HexEditor {
                             this.save_message = Some(format!("Error: {}", e));
                             cx.notify();
                         }
+                    }
+                    return;
+                }
+
+                // Check for Ctrl+Z or Cmd+Z (undo)
+                if event.keystroke.key == "z" && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform) && !event.keystroke.modifiers.shift {
+                    if this.document.undo() {
+                        this.save_message = Some("Undo".to_string());
+                        cx.notify();
+                    }
+                    return;
+                }
+
+                // Check for Ctrl+Y or Cmd+Y or Ctrl+Shift+Z (redo)
+                if (event.keystroke.key == "y" && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)) ||
+                   (event.keystroke.key == "z" && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform) && event.keystroke.modifiers.shift) {
+                    if this.document.redo() {
+                        this.save_message = Some("Redo".to_string());
+                        cx.notify();
                     }
                     return;
                 }
@@ -310,7 +320,7 @@ impl Render for HexEditor {
                             .text_color(rgb(0xffffff))
                             .child(format!("{}{}",
                                 title.clone(),
-                                if self.has_unsaved_changes { " *" } else { "" }
+                                if self.document.has_unsaved_changes() { " *" } else { "" }
                             ))
                     )
                     .child(
@@ -318,15 +328,15 @@ impl Render for HexEditor {
                             .text_sm()
                             .text_color(rgb(0x808080))
                             .child(format!("{} bytes{}",
-                                self.data.len(),
-                                if self.has_unsaved_changes { " (modified)" } else { "" }
+                                self.document.len(),
+                                if self.document.has_unsaved_changes() { " (modified)" } else { "" }
                             ))
                     )
                     .child(
                         div()
                             .text_sm()
                             .text_color(rgb(0x808080))
-                            .child(format!("Edit Mode: {} | Press Tab to switch | Ctrl+S to save",
+                            .child(format!("Edit Mode: {} | Tab: switch | Ctrl+S: save | Ctrl+Z: undo | Ctrl+Y: redo",
                                 match self.edit_pane {
                                     EditPane::Hex => "HEX",
                                     EditPane::Ascii => "ASCII",
@@ -370,7 +380,7 @@ impl Render for HexEditor {
                                     .children((0..row_count).map(|row| {
                         let address = self.format_address(row * self.bytes_per_row);
                         let start = row * self.bytes_per_row;
-                        let end = (start + self.bytes_per_row).min(self.data.len());
+                        let end = (start + self.bytes_per_row).min(self.document.len());
                         let cursor_pos = self.cursor_position;
                         let edit_pane = self.edit_pane;
 
@@ -392,7 +402,7 @@ impl Render for HexEditor {
                                     .gap_1()
                                     .flex_1()
                                     .children((start..end).map(|byte_idx| {
-                                        let byte = self.data[byte_idx];
+                                        let byte = self.document.get_byte(byte_idx).unwrap();
                                         let hex_str = format!("{:02X}", byte);
                                         let is_cursor = byte_idx == cursor_pos;
 
@@ -417,7 +427,7 @@ impl Render for HexEditor {
                                     .flex()
                                     .w(px(160.0))
                                     .children((start..end).map(|byte_idx| {
-                                        let byte = self.data[byte_idx];
+                                        let byte = self.document.get_byte(byte_idx).unwrap();
                                         let ascii_char = if byte >= 0x20 && byte <= 0x7E {
                                             byte as char
                                         } else {
@@ -481,7 +491,7 @@ fn main() {
                     let editor = if args.len() > 1 {
                         let file_path = PathBuf::from(&args[1]);
                         let mut editor = HexEditor::new(cx);
-                        match editor.load_file(file_path) {
+                        match editor.load_file(file_path.clone()) {
                             Ok(_) => editor,
                             Err(e) => {
                                 eprintln!("Failed to load file: {}", e);
