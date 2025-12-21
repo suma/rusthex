@@ -309,6 +309,33 @@ impl Document {
     pub fn is_modified(&self, offset: usize) -> bool {
         self.overlay.contains_key(&offset)
     }
+
+    /// Efficiently copy all document data with overlay applied
+    /// This is optimized for large files by copying the backend data in bulk
+    /// and then applying overlay modifications
+    pub fn to_vec(&self) -> Vec<u8> {
+        let len = self.len();
+        let mut result = Vec::with_capacity(len);
+
+        // Copy backend data in bulk (very fast, especially for mmap)
+        match &self.backend {
+            DataBackend::InMemory(vec) => {
+                result.extend_from_slice(vec);
+            }
+            DataBackend::MemoryMapped { mmap, .. } => {
+                result.extend_from_slice(&mmap[..]);
+            }
+        }
+
+        // Apply overlay modifications
+        for (&offset, &byte) in &self.overlay {
+            if offset < len {
+                result[offset] = byte;
+            }
+        }
+
+        result
+    }
 }
 
 impl Default for Document {

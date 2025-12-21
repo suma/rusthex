@@ -9,6 +9,7 @@ use gpui_component::scroll::{Scrollbar, ScrollbarState, ScrollbarShow};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::collections::HashSet;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum EditPane {
@@ -50,6 +51,7 @@ struct HexEditor {
     is_searching: bool, // Flag indicating search is in progress
     search_cancel_flag: Arc<AtomicBool>, // Flag to cancel ongoing search
     shared_search_results: Arc<Mutex<Option<Vec<usize>>>>, // Shared results from background thread
+    search_match_set: HashSet<usize>, // Set of all byte positions that are part of search matches (for O(1) lookup)
 }
 
 impl HexEditor {
@@ -75,6 +77,7 @@ impl HexEditor {
             is_searching: false,
             search_cancel_flag: Arc::new(AtomicBool::new(false)),
             shared_search_results: Arc::new(Mutex::new(None)),
+            search_match_set: HashSet::new(),
         }
     }
 
@@ -106,6 +109,24 @@ impl HexEditor {
     }
 
     // Search methods
+
+    /// Build HashSet of all byte positions that are part of search matches
+    /// This enables O(1) lookup during rendering instead of O(n) iteration
+    fn build_search_match_set(&mut self) {
+        self.search_match_set.clear();
+
+        let pattern_len = match self.search_mode {
+            SearchMode::Ascii => self.search_query.len(),
+            SearchMode::Hex => self.search_query.split_whitespace().count(),
+        };
+
+        for &match_start in &self.search_results {
+            for offset in 0..pattern_len {
+                self.search_match_set.insert(match_start + offset);
+            }
+        }
+    }
+
     fn perform_search(&mut self) {
         // Cancel any ongoing search
         self.search_cancel_flag.store(true, Ordering::Relaxed);
@@ -115,6 +136,7 @@ impl HexEditor {
 
         self.search_results.clear();
         self.current_search_index = None;
+        self.search_match_set.clear();
 
         if self.search_query.is_empty() {
             self.is_searching = false;
@@ -148,11 +170,6 @@ impl HexEditor {
             return;
         }
 
-        // Copy document data for background search
-        let data: Vec<u8> = (0..self.document.len())
-            .filter_map(|i| self.document.get_byte(i))
-            .collect();
-
         // Reset cancel flag and set searching flag
         self.search_cancel_flag.store(false, Ordering::Relaxed);
         self.is_searching = true;
@@ -165,6 +182,10 @@ impl HexEditor {
         // Clone Arc references for the thread
         let shared_results = Arc::clone(&self.shared_search_results);
         let cancel_flag = Arc::clone(&self.search_cancel_flag);
+
+        // Efficiently copy document data using optimized to_vec() method
+        // This is fast even for large files (bulk memory copy for mmap)
+        let data = self.document.to_vec();
 
         // Spawn background search thread
         std::thread::spawn(move || {
@@ -216,6 +237,9 @@ impl HexEditor {
             // Search completed
             self.search_results = results;
             self.is_searching = false;
+
+            // Build HashSet for efficient O(1) lookup during rendering
+            self.build_search_match_set();
 
             // Set current index to first result and scroll to it
             if !self.search_results.is_empty() {
@@ -887,22 +911,20 @@ impl Render for HexEditor {
                                             .map(|(sel_start, sel_end)| byte_idx >= sel_start && byte_idx <= sel_end)
                                             .unwrap_or(false);
 
-                                        // Check if this byte is part of a search result
-                                        let is_search_match = self.search_results.iter().any(|&match_start| {
-                                            let pattern_len = match self.search_mode {
-                                                SearchMode::Ascii => self.search_query.len(),
-                                                SearchMode::Hex => self.search_query.split_whitespace().count(),
-                                            };
-                                            byte_idx >= match_start && byte_idx < match_start + pattern_len
-                                        });
-                                        let is_current_search = self.current_search_index.map(|idx| {
+                                        // Check if this byte is part of a search result (O(1) lookup)
+                                        let is_search_match = self.search_match_set.contains(&byte_idx);
+
+                                        // Check if this byte is part of the current (highlighted) search result
+                                        let is_current_search = if let Some(idx) = self.current_search_index {
                                             let match_start = self.search_results[idx];
                                             let pattern_len = match self.search_mode {
                                                 SearchMode::Ascii => self.search_query.len(),
                                                 SearchMode::Hex => self.search_query.split_whitespace().count(),
                                             };
                                             byte_idx >= match_start && byte_idx < match_start + pattern_len
-                                        }).unwrap_or(false);
+                                        } else {
+                                            false
+                                        };
 
                                         div()
                                             .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event, _window, cx| {
@@ -962,22 +984,20 @@ impl Render for HexEditor {
                                             .map(|(sel_start, sel_end)| byte_idx >= sel_start && byte_idx <= sel_end)
                                             .unwrap_or(false);
 
-                                        // Check if this byte is part of a search result
-                                        let is_search_match = self.search_results.iter().any(|&match_start| {
-                                            let pattern_len = match self.search_mode {
-                                                SearchMode::Ascii => self.search_query.len(),
-                                                SearchMode::Hex => self.search_query.split_whitespace().count(),
-                                            };
-                                            byte_idx >= match_start && byte_idx < match_start + pattern_len
-                                        });
-                                        let is_current_search = self.current_search_index.map(|idx| {
+                                        // Check if this byte is part of a search result (O(1) lookup)
+                                        let is_search_match = self.search_match_set.contains(&byte_idx);
+
+                                        // Check if this byte is part of the current (highlighted) search result
+                                        let is_current_search = if let Some(idx) = self.current_search_index {
                                             let match_start = self.search_results[idx];
                                             let pattern_len = match self.search_mode {
                                                 SearchMode::Ascii => self.search_query.len(),
                                                 SearchMode::Hex => self.search_query.split_whitespace().count(),
                                             };
                                             byte_idx >= match_start && byte_idx < match_start + pattern_len
-                                        }).unwrap_or(false);
+                                        } else {
+                                            false
+                                        };
 
                                         div()
                                             .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event, _window, cx| {
