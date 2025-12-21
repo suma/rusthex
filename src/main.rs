@@ -20,6 +20,12 @@ enum HexNibble {
     Low,   // Lower nibble (second hex digit)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum SearchMode {
+    Ascii,
+    Hex,
+}
+
 struct HexEditor {
     document: Document,
     bytes_per_row: usize,
@@ -33,6 +39,12 @@ struct HexEditor {
     scroll_offset: Pixels, // Current scroll position in pixels
     selection_start: Option<usize>, // Selection anchor point
     is_dragging: bool, // Track if user is currently dragging
+    // Search state
+    search_visible: bool,
+    search_query: String,
+    search_mode: SearchMode,
+    search_results: Vec<usize>, // List of byte positions where matches start
+    current_search_index: Option<usize>, // Index into search_results
 }
 
 impl HexEditor {
@@ -50,6 +62,11 @@ impl HexEditor {
             scroll_offset: px(0.0),
             selection_start: None,
             is_dragging: false,
+            search_visible: false,
+            search_query: String::new(),
+            search_mode: SearchMode::Ascii,
+            search_results: Vec::new(),
+            current_search_index: None,
         }
     }
 
@@ -78,6 +95,99 @@ impl HexEditor {
 
     fn clear_selection(&mut self) {
         self.selection_start = None;
+    }
+
+    // Search methods
+    fn perform_search(&mut self) {
+        self.search_results.clear();
+        self.current_search_index = None;
+
+        if self.search_query.is_empty() {
+            return;
+        }
+
+        let pattern = match self.search_mode {
+            SearchMode::Ascii => {
+                // ASCII search: convert query string to bytes
+                self.search_query.as_bytes().to_vec()
+            }
+            SearchMode::Hex => {
+                // Hex search: parse space-separated hex values
+                let hex_parts: Vec<&str> = self.search_query.split_whitespace().collect();
+                let mut pattern = Vec::new();
+                for part in hex_parts {
+                    if let Ok(byte) = u8::from_str_radix(part, 16) {
+                        pattern.push(byte);
+                    } else {
+                        // Invalid hex, abort search
+                        return;
+                    }
+                }
+                pattern
+            }
+        };
+
+        if pattern.is_empty() {
+            return;
+        }
+
+        // Search for pattern in document
+        let data_len = self.document.len();
+        let pattern_len = pattern.len();
+
+        for i in 0..=data_len.saturating_sub(pattern_len) {
+            let mut matches = true;
+            for j in 0..pattern_len {
+                if let Some(byte) = self.document.get_byte(i + j) {
+                    if byte != pattern[j] {
+                        matches = false;
+                        break;
+                    }
+                } else {
+                    matches = false;
+                    break;
+                }
+            }
+            if matches {
+                self.search_results.push(i);
+            }
+        }
+
+        // Set current index to first result
+        if !self.search_results.is_empty() {
+            self.current_search_index = Some(0);
+            self.cursor_position = self.search_results[0];
+        }
+    }
+
+    fn next_search_result(&mut self) {
+        if self.search_results.is_empty() {
+            return;
+        }
+
+        if let Some(current_idx) = self.current_search_index {
+            let next_idx = (current_idx + 1) % self.search_results.len();
+            self.current_search_index = Some(next_idx);
+            self.cursor_position = self.search_results[next_idx];
+            self.ensure_cursor_visible_by_row();
+        }
+    }
+
+    fn prev_search_result(&mut self) {
+        if self.search_results.is_empty() {
+            return;
+        }
+
+        if let Some(current_idx) = self.current_search_index {
+            let prev_idx = if current_idx == 0 {
+                self.search_results.len() - 1
+            } else {
+                current_idx - 1
+            };
+            self.current_search_index = Some(prev_idx);
+            self.cursor_position = self.search_results[prev_idx];
+            self.ensure_cursor_visible_by_row();
+        }
     }
 
     fn with_sample_data(cx: &mut Context<Self>) -> Self {
@@ -317,6 +427,40 @@ impl Render for HexEditor {
                 }
             }))
             .on_key_down(cx.listener(|this: &mut Self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>| {
+                // Check for Ctrl+F or Cmd+F (toggle search)
+                if event.keystroke.key == "f" && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform) {
+                    this.search_visible = !this.search_visible;
+                    if !this.search_visible {
+                        this.search_results.clear();
+                        this.current_search_index = None;
+                    }
+                    cx.notify();
+                    return;
+                }
+
+                // Check for Escape (close search)
+                if event.keystroke.key == "escape" && this.search_visible {
+                    this.search_visible = false;
+                    this.search_results.clear();
+                    this.current_search_index = None;
+                    cx.notify();
+                    return;
+                }
+
+                // Check for F3 (next search result)
+                if event.keystroke.key == "f3" && !event.keystroke.modifiers.shift {
+                    this.next_search_result();
+                    cx.notify();
+                    return;
+                }
+
+                // Check for Shift+F3 (previous search result)
+                if event.keystroke.key == "f3" && event.keystroke.modifiers.shift {
+                    this.prev_search_result();
+                    cx.notify();
+                    return;
+                }
+
                 // Check for Ctrl+A or Cmd+A (select all)
                 if event.keystroke.key == "a" && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform) && !event.keystroke.modifiers.shift {
                     if this.document.len() > 0 {
@@ -414,24 +558,57 @@ impl Render for HexEditor {
                         cx.notify();
                     }
                     "tab" => {
-                        this.toggle_pane();
+                        if this.search_visible {
+                            // Toggle search mode
+                            this.search_mode = match this.search_mode {
+                                SearchMode::Ascii => SearchMode::Hex,
+                                SearchMode::Hex => SearchMode::Ascii,
+                            };
+                            this.perform_search();
+                        } else {
+                            this.toggle_pane();
+                        }
                         cx.notify();
+                    }
+                    "backspace" => {
+                        if this.search_visible {
+                            this.search_query.pop();
+                            this.perform_search();
+                            cx.notify();
+                        }
+                    }
+                    "enter" => {
+                        if this.search_visible {
+                            this.next_search_result();
+                            cx.notify();
+                        }
                     }
                     key => {
                         // Handle character input
                         if key.len() == 1 {
                             let c = key.chars().next().unwrap();
-                            match this.edit_pane {
-                                EditPane::Hex => {
-                                    if c.is_ascii_hexdigit() {
-                                        this.input_hex(c);
-                                        cx.notify();
-                                    }
+
+                            if this.search_visible {
+                                // Add character to search query
+                                if (c >= ' ' && c <= '~') || c.is_whitespace() {
+                                    this.search_query.push(c);
+                                    this.perform_search();
+                                    cx.notify();
                                 }
-                                EditPane::Ascii => {
-                                    if c >= ' ' && c <= '~' {
-                                        this.input_ascii(c);
-                                        cx.notify();
+                            } else {
+                                // Normal editing
+                                match this.edit_pane {
+                                    EditPane::Hex => {
+                                        if c.is_ascii_hexdigit() {
+                                            this.input_hex(c);
+                                            cx.notify();
+                                        }
+                                    }
+                                    EditPane::Ascii => {
+                                        if c >= ' ' && c <= '~' {
+                                            this.input_ascii(c);
+                                            cx.notify();
+                                        }
                                     }
                                 }
                             }
@@ -490,6 +667,64 @@ impl Render for HexEditor {
                         )
                     })
             )
+            .when(self.search_visible, |parent| {
+                let search_mode_label = match self.search_mode {
+                    SearchMode::Ascii => "ASCII",
+                    SearchMode::Hex => "HEX",
+                };
+                let result_count = self.search_results.len();
+                let current_pos = if let Some(idx) = self.current_search_index {
+                    idx + 1
+                } else {
+                    0
+                };
+
+                parent.child(
+                    // Search bar
+                    div()
+                        .flex()
+                        .flex_col()
+                        .py_2()
+                        .px_4()
+                        .bg(rgb(0x2a2a2a))
+                        .border_b_1()
+                        .border_color(rgb(0x404040))
+                        .child(
+                            div()
+                                .flex()
+                                .gap_4()
+                                .items_center()
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .text_color(rgb(0xffffff))
+                                        .child(format!("Search ({}): {}", search_mode_label, self.search_query))
+                                )
+                                .when(result_count > 0, |d| {
+                                    d.child(
+                                        div()
+                                            .text_sm()
+                                            .text_color(rgb(0x00ff00))
+                                            .child(format!("{} / {} matches", current_pos, result_count))
+                                    )
+                                })
+                                .when(result_count == 0 && !self.search_query.is_empty(), |d| {
+                                    d.child(
+                                        div()
+                                            .text_sm()
+                                            .text_color(rgb(0xff0000))
+                                            .child("No matches")
+                                    )
+                                })
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(rgb(0x808080))
+                                .child("Type to search | Tab: switch mode | Enter/F3: next | Shift+F3: prev | Backspace: delete | Esc: close")
+                        )
+                )
+            })
             .child(
                 // Content area with scrollbar
                 div()
@@ -556,6 +791,23 @@ impl Render for HexEditor {
                                             .map(|(sel_start, sel_end)| byte_idx >= sel_start && byte_idx <= sel_end)
                                             .unwrap_or(false);
 
+                                        // Check if this byte is part of a search result
+                                        let is_search_match = self.search_results.iter().any(|&match_start| {
+                                            let pattern_len = match self.search_mode {
+                                                SearchMode::Ascii => self.search_query.len(),
+                                                SearchMode::Hex => self.search_query.split_whitespace().count(),
+                                            };
+                                            byte_idx >= match_start && byte_idx < match_start + pattern_len
+                                        });
+                                        let is_current_search = self.current_search_index.map(|idx| {
+                                            let match_start = self.search_results[idx];
+                                            let pattern_len = match self.search_mode {
+                                                SearchMode::Ascii => self.search_query.len(),
+                                                SearchMode::Hex => self.search_query.split_whitespace().count(),
+                                            };
+                                            byte_idx >= match_start && byte_idx < match_start + pattern_len
+                                        }).unwrap_or(false);
+
                                         div()
                                             .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event, _window, cx| {
                                                 this.cursor_position = byte_idx;
@@ -579,11 +831,19 @@ impl Render for HexEditor {
                                                 div.bg(rgb(0x333333))
                                                     .text_color(rgb(0x00ff00))
                                             })
-                                            .when(!is_cursor && is_selected, |div| {
+                                            .when(!is_cursor && is_current_search, |div| {
+                                                div.bg(rgb(0xff8c00))
+                                                    .text_color(rgb(0x000000))
+                                            })
+                                            .when(!is_cursor && !is_current_search && is_search_match, |div| {
+                                                div.bg(rgb(0xffff00))
+                                                    .text_color(rgb(0x000000))
+                                            })
+                                            .when(!is_cursor && !is_current_search && !is_search_match && is_selected, |div| {
                                                 div.bg(rgb(0x505050))
                                                     .text_color(rgb(0xffffff))
                                             })
-                                            .when(!is_cursor && !is_selected, |div| {
+                                            .when(!is_cursor && !is_current_search && !is_search_match && !is_selected, |div| {
                                                 div.text_color(rgb(0x00ff00))
                                             })
                                             .child(hex_str)
@@ -605,6 +865,23 @@ impl Render for HexEditor {
                                         let is_selected = selection_range
                                             .map(|(sel_start, sel_end)| byte_idx >= sel_start && byte_idx <= sel_end)
                                             .unwrap_or(false);
+
+                                        // Check if this byte is part of a search result
+                                        let is_search_match = self.search_results.iter().any(|&match_start| {
+                                            let pattern_len = match self.search_mode {
+                                                SearchMode::Ascii => self.search_query.len(),
+                                                SearchMode::Hex => self.search_query.split_whitespace().count(),
+                                            };
+                                            byte_idx >= match_start && byte_idx < match_start + pattern_len
+                                        });
+                                        let is_current_search = self.current_search_index.map(|idx| {
+                                            let match_start = self.search_results[idx];
+                                            let pattern_len = match self.search_mode {
+                                                SearchMode::Ascii => self.search_query.len(),
+                                                SearchMode::Hex => self.search_query.split_whitespace().count(),
+                                            };
+                                            byte_idx >= match_start && byte_idx < match_start + pattern_len
+                                        }).unwrap_or(false);
 
                                         div()
                                             .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event, _window, cx| {
@@ -629,11 +906,19 @@ impl Render for HexEditor {
                                                 div.bg(rgb(0x333333))
                                                     .text_color(rgb(0xffffff))
                                             })
-                                            .when(!is_cursor && is_selected, |div| {
+                                            .when(!is_cursor && is_current_search, |div| {
+                                                div.bg(rgb(0xff8c00))
+                                                    .text_color(rgb(0x000000))
+                                            })
+                                            .when(!is_cursor && !is_current_search && is_search_match, |div| {
+                                                div.bg(rgb(0xffff00))
+                                                    .text_color(rgb(0x000000))
+                                            })
+                                            .when(!is_cursor && !is_current_search && !is_search_match && is_selected, |div| {
                                                 div.bg(rgb(0x505050))
                                                     .text_color(rgb(0xffffff))
                                             })
-                                            .when(!is_cursor && !is_selected, |div| {
+                                            .when(!is_cursor && !is_current_search && !is_search_match && !is_selected, |div| {
                                                 div.text_color(rgb(0xffffff))
                                             })
                                             .child(ascii_char.to_string())
