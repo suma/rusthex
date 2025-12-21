@@ -1,33 +1,31 @@
+//! RustHex - A modern hex editor built with gpui
+//!
+//! This is the main module containing the HexEditor struct and core editor functionality.
+//!
+//! ## Module Organization
+//!
+//! - `document` - Document model and file I/O
+//! - `search` - Search functionality (ASCII and Hex search)
+//! - `keyboard` - Keyboard event handling and shortcuts
+//! - `ui` - UI types and utility functions
+
 mod document;
+mod keyboard;
+mod search;
+mod ui;
 
 use document::Document;
+pub use search::SearchMode;
+pub use ui::{EditPane, HexNibble};
 use gpui::{
-    App, Application, Bounds, Context, Focusable, FocusHandle, KeyDownEvent, Pixels, Window, WindowBounds, WindowOptions,
+    App, Application, Bounds, Context, Focusable, FocusHandle, Pixels, Window, WindowBounds, WindowOptions,
     div, prelude::*, px, rgb, size, ScrollHandle,
 };
 use gpui_component::scroll::{Scrollbar, ScrollbarState, ScrollbarShow};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::collections::HashSet;
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum EditPane {
-    Hex,
-    Ascii,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum HexNibble {
-    High,  // Upper nibble (first hex digit)
-    Low,   // Lower nibble (second hex digit)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum SearchMode {
-    Ascii,
-    Hex,
-}
 
 struct HexEditor {
     document: Document,
@@ -108,178 +106,6 @@ impl HexEditor {
         self.selection_start = None;
     }
 
-    // Search methods
-
-    /// Build HashSet of all byte positions that are part of search matches
-    /// This enables O(1) lookup during rendering instead of O(n) iteration
-    fn build_search_match_set(&mut self) {
-        self.search_match_set.clear();
-
-        let pattern_len = match self.search_mode {
-            SearchMode::Ascii => self.search_query.len(),
-            SearchMode::Hex => self.search_query.split_whitespace().count(),
-        };
-
-        for &match_start in &self.search_results {
-            for offset in 0..pattern_len {
-                self.search_match_set.insert(match_start + offset);
-            }
-        }
-    }
-
-    fn perform_search(&mut self) {
-        // Cancel any ongoing search
-        self.search_cancel_flag.store(true, Ordering::Relaxed);
-
-        // Note: We don't wait for cancellation to complete here to avoid blocking UI thread.
-        // The background thread will check the cancel flag periodically and stop on its own.
-
-        self.search_results.clear();
-        self.current_search_index = None;
-        self.search_match_set.clear();
-
-        if self.search_query.is_empty() {
-            self.is_searching = false;
-            return;
-        }
-
-        let pattern = match self.search_mode {
-            SearchMode::Ascii => {
-                // ASCII search: convert query string to bytes
-                self.search_query.as_bytes().to_vec()
-            }
-            SearchMode::Hex => {
-                // Hex search: parse space-separated hex values
-                let hex_parts: Vec<&str> = self.search_query.split_whitespace().collect();
-                let mut pattern = Vec::new();
-                for part in hex_parts {
-                    if let Ok(byte) = u8::from_str_radix(part, 16) {
-                        pattern.push(byte);
-                    } else {
-                        // Invalid hex, abort search
-                        self.is_searching = false;
-                        return;
-                    }
-                }
-                pattern
-            }
-        };
-
-        if pattern.is_empty() {
-            self.is_searching = false;
-            return;
-        }
-
-        // Reset cancel flag and set searching flag
-        self.search_cancel_flag.store(false, Ordering::Relaxed);
-        self.is_searching = true;
-
-        // Clear shared results
-        if let Ok(mut results) = self.shared_search_results.lock() {
-            *results = None;
-        }
-
-        // Clone Arc references for the thread
-        let shared_results = Arc::clone(&self.shared_search_results);
-        let cancel_flag = Arc::clone(&self.search_cancel_flag);
-
-        // Efficiently copy document data using optimized to_vec() method
-        // This is fast even for large files (bulk memory copy for mmap)
-        let data = self.document.to_vec();
-
-        // Spawn background search thread
-        std::thread::spawn(move || {
-            let data_len = data.len();
-            let pattern_len = pattern.len();
-            let mut local_results = Vec::new();
-
-            for i in 0..=data_len.saturating_sub(pattern_len) {
-                // Check for cancellation every 1000 iterations
-                if i % 1000 == 0 && cancel_flag.load(Ordering::Relaxed) {
-                    return; // Search cancelled
-                }
-
-                let mut matches = true;
-                for j in 0..pattern_len {
-                    if data[i + j] != pattern[j] {
-                        matches = false;
-                        break;
-                    }
-                }
-                if matches {
-                    local_results.push(i);
-                }
-            }
-
-            // Store results
-            if let Ok(mut results) = shared_results.lock() {
-                *results = Some(local_results);
-            }
-        });
-
-        // Poll for results (simple approach - check on next render)
-        // Results will be picked up in update_search_results()
-    }
-
-    fn update_search_results(&mut self) -> bool {
-        if !self.is_searching {
-            return false;
-        }
-
-        // Check if search completed
-        let results_opt = if let Ok(mut shared_results) = self.shared_search_results.lock() {
-            shared_results.take()
-        } else {
-            None
-        };
-
-        if let Some(results) = results_opt {
-            // Search completed
-            self.search_results = results;
-            self.is_searching = false;
-
-            // Build HashSet for efficient O(1) lookup during rendering
-            self.build_search_match_set();
-
-            // Set current index to first result and scroll to it
-            if !self.search_results.is_empty() {
-                self.current_search_index = Some(0);
-                self.scroll_to_search_result(self.search_results[0]);
-            }
-            return true;
-        }
-
-        false
-    }
-
-    fn next_search_result(&mut self) {
-        if self.search_results.is_empty() {
-            return;
-        }
-
-        if let Some(current_idx) = self.current_search_index {
-            let next_idx = (current_idx + 1) % self.search_results.len();
-            self.current_search_index = Some(next_idx);
-            self.scroll_to_search_result(self.search_results[next_idx]);
-        }
-    }
-
-    fn prev_search_result(&mut self) {
-        if self.search_results.is_empty() {
-            return;
-        }
-
-        if let Some(current_idx) = self.current_search_index {
-            let prev_idx = if current_idx == 0 {
-                self.search_results.len() - 1
-            } else {
-                current_idx - 1
-            };
-            self.current_search_index = Some(prev_idx);
-            self.scroll_to_search_result(self.search_results[prev_idx]);
-        }
-    }
-
     fn with_sample_data(cx: &mut Context<Self>) -> Self {
         let mut editor = Self::new(cx);
         // Sample data: Generate more data to test scrolling
@@ -309,62 +135,10 @@ impl HexEditor {
         editor
     }
 
-    fn format_address(&self, offset: usize) -> String {
-        format!("{:08X}", offset)
-    }
-
-    fn row_count(&self) -> usize {
-        (self.document.len() + self.bytes_per_row - 1) / self.bytes_per_row
-    }
-
-    // Calculate visible row range for virtual scrolling
-    fn calculate_visible_range(&self, viewport_height: Pixels) -> (usize, usize) {
-        let row_height = px(20.0);
-        let total_rows = self.row_count();
-
-        // Calculate first visible row
-        // Note: scroll_offset is negative when scrolling down in gpui
-        let scroll_offset_abs = self.scroll_offset * -1.0;
-        let first_visible_row = if scroll_offset_abs > px(0.0) {
-            (scroll_offset_abs / row_height).floor() as usize
-        } else {
-            0
-        };
-
-        // Calculate number of visible rows
-        let visible_row_count = (viewport_height / row_height).ceil() as usize;
-
-        // Add buffer rows to prevent flickering during scroll
-        let buffer_rows = 5;
-        let mut render_start = first_visible_row.saturating_sub(buffer_rows);
-        let render_end = (first_visible_row + visible_row_count + buffer_rows).min(total_rows);
-
-        // Ensure we render at least visible_row_count rows when near the end
-        if render_end == total_rows {
-            // At the end of the file, adjust render_start to show full viewport
-            let desired_render_count = visible_row_count + buffer_rows * 2;
-            render_start = total_rows.saturating_sub(desired_render_count);
-        }
-
-        (render_start, render_end)
-    }
-
     // Phase 5: Ensure cursor is visible by scrolling to its row
     fn ensure_cursor_visible_by_row(&mut self) {
         let cursor_row = self.cursor_position / self.bytes_per_row;
         self.scroll_handle.scroll_to_item(cursor_row);
-    }
-
-    // Scroll to make the search result visible, preferably centered
-    fn scroll_to_search_result(&mut self, result_position: usize) {
-        let result_row = result_position / self.bytes_per_row;
-
-        // Try to center the result in the viewport
-        // This provides better visibility than just making it visible
-        self.scroll_handle.scroll_to_item(result_row);
-
-        // Update cursor position to the search result
-        self.cursor_position = result_position;
     }
 
     // Cursor movement methods
@@ -496,7 +270,7 @@ impl Render for HexEditor {
             cx.notify(); // Trigger re-render
         }
 
-        let row_count = self.row_count();
+        let row_count = ui::row_count(self.document.len(), self.bytes_per_row);
 
         // Phase 1: Get current scroll position
         let scroll_position = self.scroll_handle.offset();
@@ -505,7 +279,12 @@ impl Render for HexEditor {
         // Phase 2: Calculate visible range based on viewport
         let viewport_bounds = self.scroll_handle.bounds();
         let viewport_height = viewport_bounds.size.height;
-        let (render_start, render_end) = self.calculate_visible_range(viewport_height);
+        let (render_start, render_end) = ui::calculate_visible_range(
+            self.scroll_offset,
+            viewport_height,
+            row_count,
+            self.bytes_per_row,
+        );
 
         // Phase 3: Calculate spacer heights for virtual scrolling
         let row_height = px(20.0);
@@ -533,201 +312,7 @@ impl Render for HexEditor {
                     cx.notify();
                 }
             }))
-            .on_key_down(cx.listener(|this: &mut Self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>| {
-                // Check for Ctrl+F or Cmd+F (toggle search)
-                if event.keystroke.key == "f" && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform) {
-                    this.search_visible = !this.search_visible;
-                    if !this.search_visible {
-                        this.search_results.clear();
-                        this.current_search_index = None;
-                    }
-                    cx.notify();
-                    return;
-                }
-
-                // Check for Escape (close search or cancel ongoing search)
-                if event.keystroke.key == "escape" && this.search_visible {
-                    if this.is_searching {
-                        // Cancel ongoing search
-                        this.search_cancel_flag.store(true, Ordering::Relaxed);
-                        this.is_searching = false;
-                    }
-                    this.search_visible = false;
-                    this.search_results.clear();
-                    this.current_search_index = None;
-                    cx.notify();
-                    return;
-                }
-
-                // Check for F3 (next search result)
-                if event.keystroke.key == "f3" && !event.keystroke.modifiers.shift {
-                    this.next_search_result();
-                    cx.notify();
-                    return;
-                }
-
-                // Check for Shift+F3 (previous search result)
-                if event.keystroke.key == "f3" && event.keystroke.modifiers.shift {
-                    this.prev_search_result();
-                    cx.notify();
-                    return;
-                }
-
-                // Check for Ctrl+A or Cmd+A (select all)
-                if event.keystroke.key == "a" && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform) && !event.keystroke.modifiers.shift {
-                    if this.document.len() > 0 {
-                        this.selection_start = Some(0);
-                        this.cursor_position = this.document.len().saturating_sub(1);
-                        this.save_message = Some("Selected all".to_string());
-                        cx.notify();
-                    }
-                    return;
-                }
-
-                // Check for Ctrl+S or Cmd+S (save)
-                if event.keystroke.key == "s" && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform) {
-                    match this.save_file() {
-                        Ok(_) => {
-                            eprintln!("File saved successfully");
-                            cx.notify();
-                        }
-                        Err(e) => {
-                            eprintln!("Failed to save file: {}", e);
-                            this.save_message = Some(format!("Error: {}", e));
-                            cx.notify();
-                        }
-                    }
-                    return;
-                }
-
-                // Check for Ctrl+Z or Cmd+Z (undo)
-                if event.keystroke.key == "z" && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform) && !event.keystroke.modifiers.shift {
-                    if this.document.undo() {
-                        this.save_message = Some("Undo".to_string());
-                        cx.notify();
-                    }
-                    return;
-                }
-
-                // Check for Ctrl+Y or Cmd+Y or Ctrl+Shift+Z (redo)
-                if (event.keystroke.key == "y" && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)) ||
-                   (event.keystroke.key == "z" && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform) && event.keystroke.modifiers.shift) {
-                    if this.document.redo() {
-                        this.save_message = Some("Redo".to_string());
-                        cx.notify();
-                    }
-                    return;
-                }
-
-                match event.keystroke.key.as_str() {
-                    "up" => {
-                        if event.keystroke.modifiers.shift {
-                            // Start selection if not already selecting
-                            if this.selection_start.is_none() {
-                                this.selection_start = Some(this.cursor_position);
-                            }
-                            this.move_cursor_up();
-                        } else {
-                            this.clear_selection();
-                            this.move_cursor_up();
-                        }
-                        cx.notify();
-                    }
-                    "down" => {
-                        if event.keystroke.modifiers.shift {
-                            if this.selection_start.is_none() {
-                                this.selection_start = Some(this.cursor_position);
-                            }
-                            this.move_cursor_down();
-                        } else {
-                            this.clear_selection();
-                            this.move_cursor_down();
-                        }
-                        cx.notify();
-                    }
-                    "left" => {
-                        if event.keystroke.modifiers.shift {
-                            if this.selection_start.is_none() {
-                                this.selection_start = Some(this.cursor_position);
-                            }
-                            this.move_cursor_left();
-                        } else {
-                            this.clear_selection();
-                            this.move_cursor_left();
-                        }
-                        cx.notify();
-                    }
-                    "right" => {
-                        if event.keystroke.modifiers.shift {
-                            if this.selection_start.is_none() {
-                                this.selection_start = Some(this.cursor_position);
-                            }
-                            this.move_cursor_right();
-                        } else {
-                            this.clear_selection();
-                            this.move_cursor_right();
-                        }
-                        cx.notify();
-                    }
-                    "tab" => {
-                        if this.search_visible {
-                            // Toggle search mode
-                            this.search_mode = match this.search_mode {
-                                SearchMode::Ascii => SearchMode::Hex,
-                                SearchMode::Hex => SearchMode::Ascii,
-                            };
-                            this.perform_search();
-                        } else {
-                            this.toggle_pane();
-                        }
-                        cx.notify();
-                    }
-                    "backspace" => {
-                        if this.search_visible {
-                            this.search_query.pop();
-                            this.perform_search();
-                            cx.notify();
-                        }
-                    }
-                    "enter" => {
-                        if this.search_visible {
-                            this.next_search_result();
-                            cx.notify();
-                        }
-                    }
-                    key => {
-                        // Handle character input
-                        if key.len() == 1 {
-                            let c = key.chars().next().unwrap();
-
-                            if this.search_visible {
-                                // Add character to search query
-                                if (c >= ' ' && c <= '~') || c.is_whitespace() {
-                                    this.search_query.push(c);
-                                    this.perform_search();
-                                    cx.notify();
-                                }
-                            } else {
-                                // Normal editing
-                                match this.edit_pane {
-                                    EditPane::Hex => {
-                                        if c.is_ascii_hexdigit() {
-                                            this.input_hex(c);
-                                            cx.notify();
-                                        }
-                                    }
-                                    EditPane::Ascii => {
-                                        if c >= ' ' && c <= '~' {
-                                            this.input_ascii(c);
-                                            cx.notify();
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }))
+            .on_key_down(cx.listener(keyboard::handle_key_event))
             .child(
                 // Header
                 div()
@@ -879,7 +464,7 @@ impl Render for HexEditor {
                                     })
                                     // Render only visible rows
                                     .children((render_start..render_end).map(|row| {
-                        let address = self.format_address(row * self.bytes_per_row);
+                        let address = ui::format_address(row * self.bytes_per_row);
                         let start = row * self.bytes_per_row;
                         let end = (start + self.bytes_per_row).min(self.document.len());
                         let cursor_pos = self.cursor_position;
@@ -1064,7 +649,7 @@ impl Render for HexEditor {
                             )
                             // Add search result markers on scrollbar
                             .children({
-                                let total_rows = self.row_count();
+                                let total_rows = ui::row_count(self.document.len(), self.bytes_per_row);
                                 let viewport_height = viewport_bounds.size.height;
 
                                 if total_rows == 0 || viewport_height <= px(0.0) {
