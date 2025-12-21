@@ -27,6 +27,8 @@ struct HexEditor {
     focus_handle: FocusHandle,
     edit_pane: EditPane,
     hex_nibble: HexNibble,
+    has_unsaved_changes: bool,
+    save_message: Option<String>,
 }
 
 impl HexEditor {
@@ -41,12 +43,15 @@ impl HexEditor {
             focus_handle: cx.focus_handle(),
             edit_pane: EditPane::Hex,
             hex_nibble: HexNibble::High,
+            has_unsaved_changes: false,
+            save_message: None,
         }
     }
 
     fn load_file(&mut self, path: PathBuf) -> std::io::Result<()> {
         self.data = std::fs::read(&path)?;
         self.file_path = Some(path);
+        self.has_unsaved_changes = false;
         Ok(())
     }
 
@@ -146,11 +151,13 @@ impl HexEditor {
                 // Update upper 4 bits
                 self.data[self.cursor_position] = (digit << 4) | (current_byte & 0x0F);
                 self.hex_nibble = HexNibble::Low;
+                self.has_unsaved_changes = true;
             }
             HexNibble::Low => {
                 // Update lower 4 bits
                 self.data[self.cursor_position] = (current_byte & 0xF0) | digit;
                 self.hex_nibble = HexNibble::High;
+                self.has_unsaved_changes = true;
                 // Auto-advance to next byte
                 self.move_cursor_right();
             }
@@ -166,9 +173,34 @@ impl HexEditor {
         // Only accept printable ASCII characters
         if c >= ' ' && c <= '~' {
             self.data[self.cursor_position] = c as u8;
+            self.has_unsaved_changes = true;
             // Auto-advance to next byte
             self.move_cursor_right();
         }
+    }
+
+    // Save file to current path
+    fn save_file(&mut self) -> std::io::Result<()> {
+        if let Some(path) = &self.file_path {
+            std::fs::write(path, &self.data)?;
+            self.has_unsaved_changes = false;
+            self.save_message = Some(format!("Saved to {}", path.display()));
+            Ok(())
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "No file path set. Use 'Save As' to specify a file path.",
+            ))
+        }
+    }
+
+    // Save file to a new path
+    fn save_file_as(&mut self, path: PathBuf) -> std::io::Result<()> {
+        std::fs::write(&path, &self.data)?;
+        self.file_path = Some(path.clone());
+        self.has_unsaved_changes = false;
+        self.save_message = Some(format!("Saved to {}", path.display()));
+        Ok(())
     }
 }
 
@@ -203,6 +235,22 @@ impl Render for HexEditor {
                 cx.focus_self(window);
             }))
             .on_key_down(cx.listener(|this: &mut Self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>| {
+                // Check for Ctrl+S or Cmd+S (save)
+                if event.keystroke.key == "s" && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform) {
+                    match this.save_file() {
+                        Ok(_) => {
+                            eprintln!("File saved successfully");
+                            cx.notify();
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to save file: {}", e);
+                            this.save_message = Some(format!("Error: {}", e));
+                            cx.notify();
+                        }
+                    }
+                    return;
+                }
+
                 match event.keystroke.key.as_str() {
                     "up" => {
                         this.move_cursor_up();
@@ -258,24 +306,38 @@ impl Render for HexEditor {
                         div()
                             .text_xl()
                             .text_color(rgb(0xffffff))
-                            .child(title.clone())
+                            .child(format!("{}{}",
+                                title.clone(),
+                                if self.has_unsaved_changes { " *" } else { "" }
+                            ))
                     )
                     .child(
                         div()
                             .text_sm()
                             .text_color(rgb(0x808080))
-                            .child(format!("{} bytes", self.data.len()))
+                            .child(format!("{} bytes{}",
+                                self.data.len(),
+                                if self.has_unsaved_changes { " (modified)" } else { "" }
+                            ))
                     )
                     .child(
                         div()
                             .text_sm()
                             .text_color(rgb(0x808080))
-                            .child(format!("Edit Mode: {} | Press Tab to switch",
+                            .child(format!("Edit Mode: {} | Press Tab to switch | Ctrl+S to save",
                                 match self.edit_pane {
                                     EditPane::Hex => "HEX",
                                     EditPane::Ascii => "ASCII",
                                 }))
                     )
+                    .when(self.save_message.is_some(), |header| {
+                        header.child(
+                            div()
+                                .text_sm()
+                                .text_color(rgb(0x00ff00))
+                                .child(self.save_message.as_ref().unwrap().clone())
+                        )
+                    })
             )
             .child(
                 // Content area with scrollbar
