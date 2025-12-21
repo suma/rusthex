@@ -7,6 +7,8 @@ use gpui::{
 };
 use gpui_component::scroll::{Scrollbar, ScrollbarState, ScrollbarShow};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum EditPane {
@@ -45,6 +47,9 @@ struct HexEditor {
     search_mode: SearchMode,
     search_results: Vec<usize>, // List of byte positions where matches start
     current_search_index: Option<usize>, // Index into search_results
+    is_searching: bool, // Flag indicating search is in progress
+    search_cancel_flag: Arc<AtomicBool>, // Flag to cancel ongoing search
+    shared_search_results: Arc<Mutex<Option<Vec<usize>>>>, // Shared results from background thread
 }
 
 impl HexEditor {
@@ -67,6 +72,9 @@ impl HexEditor {
             search_mode: SearchMode::Ascii,
             search_results: Vec::new(),
             current_search_index: None,
+            is_searching: false,
+            search_cancel_flag: Arc::new(AtomicBool::new(false)),
+            shared_search_results: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -99,10 +107,17 @@ impl HexEditor {
 
     // Search methods
     fn perform_search(&mut self) {
+        // Cancel any ongoing search
+        self.search_cancel_flag.store(true, Ordering::Relaxed);
+
+        // Wait briefly for the previous search to cancel
+        std::thread::sleep(std::time::Duration::from_millis(10));
+
         self.search_results.clear();
         self.current_search_index = None;
 
         if self.search_query.is_empty() {
+            self.is_searching = false;
             return;
         }
 
@@ -120,6 +135,7 @@ impl HexEditor {
                         pattern.push(byte);
                     } else {
                         // Invalid hex, abort search
+                        self.is_searching = false;
                         return;
                     }
                 }
@@ -128,36 +144,89 @@ impl HexEditor {
         };
 
         if pattern.is_empty() {
+            self.is_searching = false;
             return;
         }
 
-        // Search for pattern in document
-        let data_len = self.document.len();
-        let pattern_len = pattern.len();
+        // Copy document data for background search
+        let data: Vec<u8> = (0..self.document.len())
+            .filter_map(|i| self.document.get_byte(i))
+            .collect();
 
-        for i in 0..=data_len.saturating_sub(pattern_len) {
-            let mut matches = true;
-            for j in 0..pattern_len {
-                if let Some(byte) = self.document.get_byte(i + j) {
-                    if byte != pattern[j] {
+        // Reset cancel flag and set searching flag
+        self.search_cancel_flag.store(false, Ordering::Relaxed);
+        self.is_searching = true;
+
+        // Clear shared results
+        if let Ok(mut results) = self.shared_search_results.lock() {
+            *results = None;
+        }
+
+        // Clone Arc references for the thread
+        let shared_results = Arc::clone(&self.shared_search_results);
+        let cancel_flag = Arc::clone(&self.search_cancel_flag);
+
+        // Spawn background search thread
+        std::thread::spawn(move || {
+            let data_len = data.len();
+            let pattern_len = pattern.len();
+            let mut local_results = Vec::new();
+
+            for i in 0..=data_len.saturating_sub(pattern_len) {
+                // Check for cancellation every 1000 iterations
+                if i % 1000 == 0 && cancel_flag.load(Ordering::Relaxed) {
+                    return; // Search cancelled
+                }
+
+                let mut matches = true;
+                for j in 0..pattern_len {
+                    if data[i + j] != pattern[j] {
                         matches = false;
                         break;
                     }
-                } else {
-                    matches = false;
-                    break;
+                }
+                if matches {
+                    local_results.push(i);
                 }
             }
-            if matches {
-                self.search_results.push(i);
+
+            // Store results
+            if let Ok(mut results) = shared_results.lock() {
+                *results = Some(local_results);
             }
+        });
+
+        // Poll for results (simple approach - check on next render)
+        // Results will be picked up in update_search_results()
+    }
+
+    fn update_search_results(&mut self) -> bool {
+        if !self.is_searching {
+            return false;
         }
 
-        // Set current index to first result
-        if !self.search_results.is_empty() {
-            self.current_search_index = Some(0);
-            self.cursor_position = self.search_results[0];
+        // Check if search completed
+        let results_opt = if let Ok(mut shared_results) = self.shared_search_results.lock() {
+            shared_results.take()
+        } else {
+            None
+        };
+
+        if let Some(results) = results_opt {
+            // Search completed
+            self.search_results = results;
+            self.is_searching = false;
+
+            // Set current index to first result
+            if !self.search_results.is_empty() {
+                self.current_search_index = Some(0);
+                self.cursor_position = self.search_results[0];
+                self.ensure_cursor_visible_by_row();
+            }
+            return true;
         }
+
+        false
     }
 
     fn next_search_result(&mut self) {
@@ -389,6 +458,11 @@ impl Focusable for HexEditor {
 
 impl Render for HexEditor {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Update search results if search completed
+        if self.update_search_results() {
+            cx.notify(); // Trigger re-render
+        }
+
         let row_count = self.row_count();
 
         // Phase 1: Get current scroll position
@@ -438,8 +512,13 @@ impl Render for HexEditor {
                     return;
                 }
 
-                // Check for Escape (close search)
+                // Check for Escape (close search or cancel ongoing search)
                 if event.keystroke.key == "escape" && this.search_visible {
+                    if this.is_searching {
+                        // Cancel ongoing search
+                        this.search_cancel_flag.store(true, Ordering::Relaxed);
+                        this.is_searching = false;
+                    }
                     this.search_visible = false;
                     this.search_results.clear();
                     this.current_search_index = None;
@@ -700,7 +779,15 @@ impl Render for HexEditor {
                                         .text_color(rgb(0xffffff))
                                         .child(format!("Search ({}): {}", search_mode_label, self.search_query))
                                 )
-                                .when(result_count > 0, |d| {
+                                .when(self.is_searching, |d| {
+                                    d.child(
+                                        div()
+                                            .text_sm()
+                                            .text_color(rgb(0xffff00))
+                                            .child("Searching...")
+                                    )
+                                })
+                                .when(!self.is_searching && result_count > 0, |d| {
                                     d.child(
                                         div()
                                             .text_sm()
@@ -708,7 +795,7 @@ impl Render for HexEditor {
                                             .child(format!("{} / {} matches", current_pos, result_count))
                                     )
                                 })
-                                .when(result_count == 0 && !self.search_query.is_empty(), |d| {
+                                .when(!self.is_searching && result_count == 0 && !self.search_query.is_empty(), |d| {
                                     d.child(
                                         div()
                                             .text_sm()
