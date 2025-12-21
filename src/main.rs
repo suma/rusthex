@@ -1,13 +1,16 @@
 use gpui::{
     App, Application, Bounds, Context, Window, WindowBounds, WindowOptions,
-    div, prelude::*, px, rgb, size,
+    div, prelude::*, px, rgb, size, ScrollHandle,
 };
+use gpui_component::scroll::{Scrollbar, ScrollbarState, ScrollbarShow};
 use std::path::PathBuf;
 
 struct HexEditor {
     data: Vec<u8>,
     bytes_per_row: usize,
     file_path: Option<PathBuf>,
+    scroll_handle: ScrollHandle,
+    scrollbar_state: ScrollbarState,
 }
 
 impl HexEditor {
@@ -16,6 +19,8 @@ impl HexEditor {
             data: Vec::new(),
             bytes_per_row: 16,
             file_path: None,
+            scroll_handle: ScrollHandle::new(),
+            scrollbar_state: ScrollbarState::default(),
         }
     }
 
@@ -123,21 +128,32 @@ impl Render for HexEditor {
                     )
             )
             .child(
-                // Content area
+                // Content area with scrollbar
                 div()
                     .flex()
-                    .flex_col()
                     .flex_1()
                     .pt_4()
-                    .id("hex-content")
-                    .overflow_scroll()
+                    .relative()
+                    .overflow_hidden()
                     .child(
+                        // Scrollable content
                         div()
-                            .flex()
-                            .flex_col()
-                            .font_family("Monaco")
-                            .text_sm()
-                            .children((0..row_count).map(|row| {
+                            .id("hex-content")
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .right_0()
+                            .bottom_0()
+                            .overflow_y_scroll()
+                            .track_scroll(&self.scroll_handle)
+                            .pr(px(24.0))
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .font_family("Monaco")
+                                    .text_sm()
+                                    .children((0..row_count).map(|row| {
                         let address = self.format_address(row * self.bytes_per_row);
                         let hex_line = self.format_hex_line(row);
                         let ascii_line = self.format_ascii_line(row);
@@ -168,6 +184,21 @@ impl Render for HexEditor {
                                     .child(ascii_line)
                             )
                     }))
+                            )
+                    )
+                    .child(
+                        // Scrollbar with visible background
+                        div()
+                            .absolute()
+                            .top_0()
+                            .right_0()
+                            .bottom_0()
+                            .w(px(12.0))
+                            .bg(rgb(0x2a2a2a))
+                            .child(
+                                Scrollbar::vertical(&self.scrollbar_state, &self.scroll_handle)
+                                    .scrollbar_show(ScrollbarShow::Always)
+                            )
                     )
             )
     }
@@ -175,6 +206,9 @@ impl Render for HexEditor {
 
 fn main() {
     Application::new().run(|cx: &mut App| {
+        // Initialize gpui-component theme for Scrollbar support
+        gpui_component::theme::init(cx);
+
         let bounds = Bounds::centered(None, size(px(800.0), px(600.0)), cx);
         cx.open_window(
             WindowOptions {
