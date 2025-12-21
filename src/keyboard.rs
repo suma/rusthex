@@ -197,7 +197,37 @@ pub fn handle_key_event(
         key => {
             // Handle character input
             if key.len() == 1 {
-                let c = key.chars().next().unwrap();
+                let mut c = key.chars().next().unwrap();
+
+                // Handle Shift modifier for uppercase and symbols
+                if event.keystroke.modifiers.shift {
+                    c = match c {
+                        'a'..='z' => c.to_ascii_uppercase(),
+                        // Handle shifted number row symbols
+                        '1' => '!',
+                        '2' => '@',
+                        '3' => '#',
+                        '4' => '$',
+                        '5' => '%',
+                        '6' => '^',
+                        '7' => '&',
+                        '8' => '*',
+                        '9' => '(',
+                        '0' => ')',
+                        '-' => '_',
+                        '=' => '+',
+                        '[' => '{',
+                        ']' => '}',
+                        '\\' => '|',
+                        ';' => ':',
+                        '\'' => '"',
+                        ',' => '<',
+                        '.' => '>',
+                        '/' => '?',
+                        '`' => '~',
+                        _ => c, // Keep other characters as-is
+                    };
+                }
 
                 if editor.search_visible {
                     // Add character to search query
