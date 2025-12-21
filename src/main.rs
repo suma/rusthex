@@ -31,6 +31,7 @@ struct HexEditor {
     hex_nibble: HexNibble,
     save_message: Option<String>,
     scroll_offset: Pixels, // Current scroll position in pixels
+    selection_start: Option<usize>, // Selection anchor point
 }
 
 impl HexEditor {
@@ -46,13 +47,35 @@ impl HexEditor {
             hex_nibble: HexNibble::High,
             save_message: None,
             scroll_offset: px(0.0),
+            selection_start: None,
         }
     }
 
     fn load_file(&mut self, path: PathBuf) -> std::io::Result<()> {
         self.document.load(path)?;
         self.cursor_position = 0;
+        self.selection_start = None;
         Ok(())
+    }
+
+    // Selection helper methods
+    fn has_selection(&self) -> bool {
+        self.selection_start.is_some()
+    }
+
+    fn selection_range(&self) -> Option<(usize, usize)> {
+        self.selection_start.map(|start| {
+            let end = self.cursor_position;
+            if start <= end {
+                (start, end)
+            } else {
+                (end, start)
+            }
+        })
+    }
+
+    fn clear_selection(&mut self) {
+        self.selection_start = None;
     }
 
     fn with_sample_data(cx: &mut Context<Self>) -> Self {
@@ -112,7 +135,7 @@ impl HexEditor {
         // Add buffer rows to prevent flickering during scroll
         let buffer_rows = 5;
         let mut render_start = first_visible_row.saturating_sub(buffer_rows);
-        let mut render_end = (first_visible_row + visible_row_count + buffer_rows).min(total_rows);
+        let render_end = (first_visible_row + visible_row_count + buffer_rows).min(total_rows);
 
         // Ensure we render at least visible_row_count rows when near the end
         if render_end == total_rows {
@@ -286,6 +309,17 @@ impl Render for HexEditor {
                 cx.focus_self(window);
             }))
             .on_key_down(cx.listener(|this: &mut Self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>| {
+                // Check for Ctrl+A or Cmd+A (select all)
+                if event.keystroke.key == "a" && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform) && !event.keystroke.modifiers.shift {
+                    if this.document.len() > 0 {
+                        this.selection_start = Some(0);
+                        this.cursor_position = this.document.len().saturating_sub(1);
+                        this.save_message = Some("Selected all".to_string());
+                        cx.notify();
+                    }
+                    return;
+                }
+
                 // Check for Ctrl+S or Cmd+S (save)
                 if event.keystroke.key == "s" && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform) {
                     match this.save_file() {
@@ -323,19 +357,52 @@ impl Render for HexEditor {
 
                 match event.keystroke.key.as_str() {
                     "up" => {
-                        this.move_cursor_up();
+                        if event.keystroke.modifiers.shift {
+                            // Start selection if not already selecting
+                            if this.selection_start.is_none() {
+                                this.selection_start = Some(this.cursor_position);
+                            }
+                            this.move_cursor_up();
+                        } else {
+                            this.clear_selection();
+                            this.move_cursor_up();
+                        }
                         cx.notify();
                     }
                     "down" => {
-                        this.move_cursor_down();
+                        if event.keystroke.modifiers.shift {
+                            if this.selection_start.is_none() {
+                                this.selection_start = Some(this.cursor_position);
+                            }
+                            this.move_cursor_down();
+                        } else {
+                            this.clear_selection();
+                            this.move_cursor_down();
+                        }
                         cx.notify();
                     }
                     "left" => {
-                        this.move_cursor_left();
+                        if event.keystroke.modifiers.shift {
+                            if this.selection_start.is_none() {
+                                this.selection_start = Some(this.cursor_position);
+                            }
+                            this.move_cursor_left();
+                        } else {
+                            this.clear_selection();
+                            this.move_cursor_left();
+                        }
                         cx.notify();
                     }
                     "right" => {
-                        this.move_cursor_right();
+                        if event.keystroke.modifiers.shift {
+                            if this.selection_start.is_none() {
+                                this.selection_start = Some(this.cursor_position);
+                            }
+                            this.move_cursor_right();
+                        } else {
+                            this.clear_selection();
+                            this.move_cursor_right();
+                        }
                         cx.notify();
                     }
                     "tab" => {
@@ -394,11 +461,17 @@ impl Render for HexEditor {
                         div()
                             .text_sm()
                             .text_color(rgb(0x808080))
-                            .child(format!("Edit Mode: {} | Tab: switch | Ctrl+S: save | Ctrl+Z: undo | Ctrl+Y: redo",
+                            .child(format!("Edit Mode: {} | Tab: switch | Shift+Arrow: select | Ctrl+A: select all",
                                 match self.edit_pane {
                                     EditPane::Hex => "HEX",
                                     EditPane::Ascii => "ASCII",
                                 }))
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(rgb(0x808080))
+                            .child("Ctrl+S: save | Ctrl+Z: undo | Ctrl+Y: redo")
                     )
                     .when(self.save_message.is_some(), |header| {
                         header.child(
@@ -448,6 +521,7 @@ impl Render for HexEditor {
                         let end = (start + self.bytes_per_row).min(self.document.len());
                         let cursor_pos = self.cursor_position;
                         let edit_pane = self.edit_pane;
+                        let selection_range = self.selection_range();
 
                         div()
                             .flex()
@@ -470,6 +544,9 @@ impl Render for HexEditor {
                                         let byte = self.document.get_byte(byte_idx).unwrap();
                                         let hex_str = format!("{:02X}", byte);
                                         let is_cursor = byte_idx == cursor_pos;
+                                        let is_selected = selection_range
+                                            .map(|(sel_start, sel_end)| byte_idx >= sel_start && byte_idx <= sel_end)
+                                            .unwrap_or(false);
 
                                         div()
                                             .when(is_cursor && edit_pane == EditPane::Hex, |div| {
@@ -480,7 +557,11 @@ impl Render for HexEditor {
                                                 div.bg(rgb(0x333333))
                                                     .text_color(rgb(0x00ff00))
                                             })
-                                            .when(!is_cursor, |div| {
+                                            .when(!is_cursor && is_selected, |div| {
+                                                div.bg(rgb(0x505050))
+                                                    .text_color(rgb(0xffffff))
+                                            })
+                                            .when(!is_cursor && !is_selected, |div| {
                                                 div.text_color(rgb(0x00ff00))
                                             })
                                             .child(hex_str)
@@ -499,6 +580,9 @@ impl Render for HexEditor {
                                             '.'
                                         };
                                         let is_cursor = byte_idx == cursor_pos;
+                                        let is_selected = selection_range
+                                            .map(|(sel_start, sel_end)| byte_idx >= sel_start && byte_idx <= sel_end)
+                                            .unwrap_or(false);
 
                                         div()
                                             .when(is_cursor && edit_pane == EditPane::Ascii, |div| {
@@ -509,7 +593,11 @@ impl Render for HexEditor {
                                                 div.bg(rgb(0x333333))
                                                     .text_color(rgb(0xffffff))
                                             })
-                                            .when(!is_cursor, |div| {
+                                            .when(!is_cursor && is_selected, |div| {
+                                                div.bg(rgb(0x505050))
+                                                    .text_color(rgb(0xffffff))
+                                            })
+                                            .when(!is_cursor && !is_selected, |div| {
                                                 div.text_color(rgb(0xffffff))
                                             })
                                             .child(ascii_char.to_string())
