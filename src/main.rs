@@ -32,6 +32,7 @@ struct HexEditor {
     save_message: Option<String>,
     scroll_offset: Pixels, // Current scroll position in pixels
     selection_start: Option<usize>, // Selection anchor point
+    is_dragging: bool, // Track if user is currently dragging
 }
 
 impl HexEditor {
@@ -48,6 +49,7 @@ impl HexEditor {
             save_message: None,
             scroll_offset: px(0.0),
             selection_start: None,
+            is_dragging: false,
         }
     }
 
@@ -308,6 +310,12 @@ impl Render for HexEditor {
             .on_mouse_down(gpui::MouseButton::Left, cx.listener(|_this, _event, window, cx| {
                 cx.focus_self(window);
             }))
+            .on_mouse_up(gpui::MouseButton::Left, cx.listener(|this, _event, _window, cx| {
+                if this.is_dragging {
+                    this.is_dragging = false;
+                    cx.notify();
+                }
+            }))
             .on_key_down(cx.listener(|this: &mut Self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>| {
                 // Check for Ctrl+A or Cmd+A (select all)
                 if event.keystroke.key == "a" && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform) && !event.keystroke.modifiers.shift {
@@ -549,6 +557,20 @@ impl Render for HexEditor {
                                             .unwrap_or(false);
 
                                         div()
+                                            .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event, _window, cx| {
+                                                this.cursor_position = byte_idx;
+                                                this.selection_start = Some(byte_idx);
+                                                this.is_dragging = true;
+                                                this.edit_pane = EditPane::Hex;
+                                                this.hex_nibble = HexNibble::High;
+                                                cx.notify();
+                                            }))
+                                            .on_mouse_move(cx.listener(move |this, _event, _window, cx| {
+                                                if this.is_dragging {
+                                                    this.cursor_position = byte_idx;
+                                                    cx.notify();
+                                                }
+                                            }))
                                             .when(is_cursor && edit_pane == EditPane::Hex, |div| {
                                                 div.bg(rgb(0x4a9eff))
                                                     .text_color(rgb(0x000000))
@@ -585,6 +607,20 @@ impl Render for HexEditor {
                                             .unwrap_or(false);
 
                                         div()
+                                            .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event, _window, cx| {
+                                                this.cursor_position = byte_idx;
+                                                this.selection_start = Some(byte_idx);
+                                                this.is_dragging = true;
+                                                this.edit_pane = EditPane::Ascii;
+                                                this.hex_nibble = HexNibble::High;
+                                                cx.notify();
+                                            }))
+                                            .on_mouse_move(cx.listener(move |this, _event, _window, cx| {
+                                                if this.is_dragging {
+                                                    this.cursor_position = byte_idx;
+                                                    cx.notify();
+                                                }
+                                            }))
                                             .when(is_cursor && edit_pane == EditPane::Ascii, |div| {
                                                 div.bg(rgb(0xff8c00))
                                                     .text_color(rgb(0x000000))
