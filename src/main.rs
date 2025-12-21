@@ -1030,7 +1030,7 @@ impl Render for HexEditor {
                             )
                     )
                     .child(
-                        // Scrollbar with visible background
+                        // Scrollbar with visible background and search markers
                         div()
                             .absolute()
                             .top_0()
@@ -1042,6 +1042,42 @@ impl Render for HexEditor {
                                 Scrollbar::vertical(&self.scrollbar_state, &self.scroll_handle)
                                     .scrollbar_show(ScrollbarShow::Always)
                             )
+                            // Add search result markers on scrollbar
+                            .children({
+                                let total_rows = self.row_count();
+                                let viewport_height = viewport_bounds.size.height;
+
+                                if total_rows == 0 || viewport_height <= px(0.0) {
+                                    Vec::new()
+                                } else {
+                                    self.search_results.iter().map(|&result_pos| {
+                                        let result_row = result_pos / self.bytes_per_row;
+                                        let position_ratio = result_row as f32 / total_rows as f32;
+
+                                        // Calculate position in pixels relative to viewport height
+                                        // Use viewport height as approximation for scrollbar height
+                                        let marker_position = viewport_height * position_ratio;
+
+                                        // Check if this is the current search result
+                                        let is_current = self.current_search_index
+                                            .map(|idx| self.search_results[idx] == result_pos)
+                                            .unwrap_or(false);
+
+                                        div()
+                                            .absolute()
+                                            .left(px(0.0))
+                                            .w(px(12.0))
+                                            .h(px(3.0))
+                                            .top(marker_position)
+                                            .bg(if is_current {
+                                                rgb(0xff8c00) // Orange for current result
+                                            } else {
+                                                rgb(0xffff00) // Yellow for other results
+                                            })
+                                            .opacity(0.8)
+                                    }).collect::<Vec<_>>()
+                                }
+                            })
                     )
             )
     }
