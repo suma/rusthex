@@ -6,9 +6,14 @@
 //! - Background search execution with cancellation
 //! - Efficient O(1) result lookup using HashSet
 
+use std::collections::HashMap;
+use std::fs::File;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
+use memmap2::Mmap;
+
+use crate::document::SearchDataSource;
 use crate::HexEditor;
 
 /// Search mode selection
@@ -103,43 +108,26 @@ impl HexEditor {
         let cancel_flag = Arc::clone(&self.search_cancel_flag);
         let progress = Arc::clone(&self.search_progress);
 
-        // Efficiently copy document data using optimized to_vec() method
-        // This is fast even for large files (bulk memory copy for mmap)
-        let data = self.document.to_vec();
+        // Prepare search data source (fast - no large copy on UI thread)
+        let data_source = self.document.prepare_search_data();
 
         // Spawn background search thread
         std::thread::spawn(move || {
-            let data_len = data.len();
-            let pattern_len = pattern.len();
-            let mut local_results = Vec::new();
-
-            for i in 0..=data_len.saturating_sub(pattern_len) {
-                // Check for cancellation and update progress every 1000 iterations
-                if i % 1000 == 0 {
-                    if cancel_flag.load(Ordering::Relaxed) {
-                        return; // Search cancelled
-                    }
-                    progress.store(i, Ordering::Relaxed);
+            // Execute search based on data source type
+            let local_results = match data_source {
+                SearchDataSource::InMemory(data) => {
+                    search_in_memory(&data, &pattern, &cancel_flag, &progress)
                 }
-
-                let mut matches = true;
-                for j in 0..pattern_len {
-                    if data[i + j] != pattern[j] {
-                        matches = false;
-                        break;
-                    }
+                SearchDataSource::FilePath { path, overlay, len } => {
+                    search_in_file(&path, &overlay, len, &pattern, &cancel_flag, &progress)
                 }
-                if matches {
-                    local_results.push(i);
+            };
+
+            // Store results if search wasn't cancelled
+            if let Some(results) = local_results {
+                if let Ok(mut shared) = shared_results.lock() {
+                    *shared = Some(results);
                 }
-            }
-
-            // Mark as complete
-            progress.store(data_len, Ordering::Relaxed);
-
-            // Store results
-            if let Ok(mut results) = shared_results.lock() {
-                *results = Some(local_results);
             }
         });
 
@@ -222,4 +210,96 @@ impl HexEditor {
         // Update cursor position to the search result
         self.cursor_position = result_position;
     }
+}
+
+/// Search in memory data (for small in-memory files)
+fn search_in_memory(
+    data: &[u8],
+    pattern: &[u8],
+    cancel_flag: &std::sync::atomic::AtomicBool,
+    progress: &std::sync::atomic::AtomicUsize,
+) -> Option<Vec<usize>> {
+    let data_len = data.len();
+    let pattern_len = pattern.len();
+    let mut results = Vec::new();
+
+    for i in 0..=data_len.saturating_sub(pattern_len) {
+        // Check for cancellation and update progress every 10000 iterations
+        if i % 10000 == 0 {
+            if cancel_flag.load(Ordering::Relaxed) {
+                return None; // Search cancelled
+            }
+            progress.store(i, Ordering::Relaxed);
+        }
+
+        // Check if pattern matches at this position
+        let mut matches = true;
+        for j in 0..pattern_len {
+            if data[i + j] != pattern[j] {
+                matches = false;
+                break;
+            }
+        }
+        if matches {
+            results.push(i);
+        }
+    }
+
+    // Mark as complete
+    progress.store(data_len, Ordering::Relaxed);
+    Some(results)
+}
+
+/// Search in file using memory mapping (for large files)
+/// This avoids copying the entire file into memory
+fn search_in_file(
+    path: &std::path::PathBuf,
+    overlay: &HashMap<usize, u8>,
+    data_len: usize,
+    pattern: &[u8],
+    cancel_flag: &std::sync::atomic::AtomicBool,
+    progress: &std::sync::atomic::AtomicUsize,
+) -> Option<Vec<usize>> {
+    // Open and memory-map the file
+    let file = match File::open(path) {
+        Ok(f) => f,
+        Err(_) => return Some(Vec::new()), // Return empty results on error
+    };
+
+    let mmap = match unsafe { Mmap::map(&file) } {
+        Ok(m) => m,
+        Err(_) => return Some(Vec::new()), // Return empty results on error
+    };
+
+    let pattern_len = pattern.len();
+    let mut results = Vec::new();
+
+    for i in 0..=data_len.saturating_sub(pattern_len) {
+        // Check for cancellation and update progress every 10000 iterations
+        if i % 10000 == 0 {
+            if cancel_flag.load(Ordering::Relaxed) {
+                return None; // Search cancelled
+            }
+            progress.store(i, Ordering::Relaxed);
+        }
+
+        // Check if pattern matches at this position
+        // Consider overlay modifications
+        let mut matches = true;
+        for j in 0..pattern_len {
+            let pos = i + j;
+            let byte = overlay.get(&pos).copied().unwrap_or_else(|| mmap[pos]);
+            if byte != pattern[j] {
+                matches = false;
+                break;
+            }
+        }
+        if matches {
+            results.push(i);
+        }
+    }
+
+    // Mark as complete
+    progress.store(data_len, Ordering::Relaxed);
+    Some(results)
 }

@@ -3,6 +3,20 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::path::PathBuf;
 
+/// Data source for background search operations
+/// This allows search to happen in a background thread without blocking UI
+/// and without copying large files into memory
+pub enum SearchDataSource {
+    /// File path with overlay - background thread will re-open and mmap the file
+    FilePath {
+        path: PathBuf,
+        overlay: HashMap<usize, u8>,
+        len: usize,
+    },
+    /// In-memory data - already copied with overlay applied (for small files)
+    InMemory(Vec<u8>),
+}
+
 /// Backend storage for document data
 pub enum DataBackend {
     /// In-memory storage (for small files or new documents)
@@ -335,6 +349,41 @@ impl Document {
         }
 
         result
+    }
+
+    /// Prepare data source for background search
+    ///
+    /// For memory-mapped files: returns file path and overlay (no copy, fast)
+    /// For in-memory files: returns copied data with overlay applied (small files)
+    ///
+    /// This method is fast and doesn't block the UI thread.
+    pub fn prepare_search_data(&self) -> SearchDataSource {
+        match &self.backend {
+            DataBackend::MemoryMapped { .. } => {
+                // For mmap files, just pass the path and overlay
+                // The background thread will re-open the file
+                if let Some(path) = &self.file_path {
+                    SearchDataSource::FilePath {
+                        path: path.clone(),
+                        overlay: self.overlay.clone(),
+                        len: self.len(),
+                    }
+                } else {
+                    // Fallback: shouldn't happen, but handle gracefully
+                    SearchDataSource::InMemory(self.to_vec())
+                }
+            }
+            DataBackend::InMemory(data) => {
+                // For small in-memory files, copy with overlay applied
+                let mut result = data.clone();
+                for (&offset, &byte) in &self.overlay {
+                    if offset < result.len() {
+                        result[offset] = byte;
+                    }
+                }
+                SearchDataSource::InMemory(result)
+            }
+        }
     }
 }
 
