@@ -33,6 +33,34 @@ pub fn row_count(doc_len: usize, bytes_per_row: usize) -> usize {
     (doc_len + bytes_per_row - 1) / bytes_per_row
 }
 
+/// Format byte value as hexadecimal
+pub fn format_byte_hex(byte: u8) -> String {
+    format!("0x{:02X}", byte)
+}
+
+/// Format byte value as decimal
+pub fn format_byte_dec(byte: u8) -> String {
+    format!("{}", byte)
+}
+
+/// Format byte value as binary
+pub fn format_byte_bin(byte: u8) -> String {
+    format!("{:08b}", byte)
+}
+
+/// Format file size with appropriate unit
+pub fn format_file_size(size: usize) -> String {
+    if size < 1024 {
+        format!("{} B", size)
+    } else if size < 1024 * 1024 {
+        format!("{:.1} KB", size as f64 / 1024.0)
+    } else if size < 1024 * 1024 * 1024 {
+        format!("{:.1} MB", size as f64 / (1024.0 * 1024.0))
+    } else {
+        format!("{:.1} GB", size as f64 / (1024.0 * 1024.0 * 1024.0))
+    }
+}
+
 /// Calculate visible row range for virtual scrolling
 ///
 /// Returns (render_start, render_end) tuple indicating which rows should be rendered

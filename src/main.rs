@@ -779,6 +779,82 @@ impl Render for HexEditor {
                             })
                     )
             )
+            .child(
+                // Status bar at bottom
+                div()
+                    .flex()
+                    .gap_4()
+                    .py_2()
+                    .px_4()
+                    .bg(rgb(0x252525))
+                    .border_t_1()
+                    .border_color(rgb(0x404040))
+                    .text_sm()
+                    .font_family("Monaco")
+                    .child(
+                        // Cursor position
+                        div()
+                            .flex()
+                            .gap_2()
+                            .text_color(rgb(0x808080))
+                            .child("Offset:")
+                            .child(
+                                div()
+                                    .text_color(rgb(0x00ff00))
+                                    .child(ui::format_address(self.cursor_position))
+                            )
+                    )
+                    .child(
+                        // Current byte value (if valid position)
+                        div()
+                            .flex()
+                            .gap_2()
+                            .text_color(rgb(0x808080))
+                            .when_some(self.document.get_byte(self.cursor_position), |el, byte| {
+                                el.child("Value:")
+                                    .child(
+                                        div()
+                                            .text_color(rgb(0x4a9eff))
+                                            .child(ui::format_byte_hex(byte))
+                                    )
+                                    .child(
+                                        div()
+                                            .text_color(rgb(0xffffff))
+                                            .child(format!("({})", ui::format_byte_dec(byte)))
+                                    )
+                                    .child(
+                                        div()
+                                            .text_color(rgb(0xff8c00))
+                                            .child(ui::format_byte_bin(byte))
+                                    )
+                            })
+                    )
+                    .when(self.selection_start.is_some(), |el| {
+                        // Selection info
+                        let (start, end) = self.selection_range().unwrap();
+                        let selection_size = end - start + 1;
+                        el.child(
+                            div()
+                                .flex()
+                                .gap_2()
+                                .text_color(rgb(0x808080))
+                                .child("Selection:")
+                                .child(
+                                    div()
+                                        .text_color(rgb(0xffff00))
+                                        .child(format!("{} bytes", selection_size))
+                                )
+                        )
+                    })
+                    .child(
+                        // File size (right aligned)
+                        div()
+                            .flex_1()
+                            .text_right()
+                            .text_color(rgb(0x808080))
+                            .child(format!("Size: {}", ui::format_file_size(self.document.len())))
+                    )
+            )
     }
 }
 
