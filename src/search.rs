@@ -40,6 +40,7 @@ impl HexEditor {
         self.search_results.clear();
         self.current_search_index = None;
         self.search_match_set.clear();
+        self.search_truncated = false;
 
         if self.search_query.is_empty() {
             self.is_searching = false;
@@ -108,17 +109,30 @@ impl HexEditor {
             };
 
             // Build match set and store results if search wasn't cancelled
-            if let Some(results) = local_results {
-                // Build HashSet in background thread to avoid UI freeze
-                let mut match_set = std::collections::HashSet::new();
-                for &match_start in &results {
-                    for offset in 0..pattern_len {
-                        match_set.insert(match_start + offset);
-                    }
+            if let Some(mut results) = local_results {
+                // Limit results to prevent UI freeze during HashSet construction
+                const MAX_RESULTS: usize = 10_000;
+                let truncated = results.len() > MAX_RESULTS;
+                if truncated {
+                    results.truncate(MAX_RESULTS);
                 }
 
+                // Build HashSet in background thread
+                // Only build if we have a reasonable number of results
+                let match_set = if results.len() <= MAX_RESULTS {
+                    let mut set = std::collections::HashSet::new();
+                    for &match_start in &results {
+                        for offset in 0..pattern_len {
+                            set.insert(match_start + offset);
+                        }
+                    }
+                    set
+                } else {
+                    std::collections::HashSet::new() // Empty set for too many results
+                };
+
                 if let Ok(mut shared) = shared_results.lock() {
-                    *shared = Some((results, match_set));
+                    *shared = Some((results, match_set, truncated));
                 }
             }
         });
@@ -142,10 +156,11 @@ impl HexEditor {
             None
         };
 
-        if let Some((results, match_set)) = results_opt {
-            // Search completed - receive both results and pre-built match set
+        if let Some((results, match_set, truncated)) = results_opt {
+            // Search completed - receive results, match set, and truncated flag
             self.search_results = results;
             self.search_match_set = match_set;
+            self.search_truncated = truncated;
             self.is_searching = false;
 
             // Set current index to first result and scroll to it

@@ -49,8 +49,9 @@ struct HexEditor {
     search_results: Vec<usize>, // List of byte positions where matches start
     current_search_index: Option<usize>, // Index into search_results
     is_searching: bool, // Flag indicating search is in progress
+    search_truncated: bool, // True if search results were truncated due to limit
     search_cancel_flag: Arc<AtomicBool>, // Flag to cancel ongoing search
-    shared_search_results: Arc<Mutex<Option<(Vec<usize>, HashSet<usize>)>>>, // Shared results and match set from background thread
+    shared_search_results: Arc<Mutex<Option<(Vec<usize>, HashSet<usize>, bool)>>>, // Shared results, match set, and truncated flag
     search_match_set: HashSet<usize>, // Set of all byte positions that are part of search matches (for O(1) lookup)
     search_progress: Arc<AtomicUsize>, // Current search position for progress display
     search_total: usize, // Total bytes to search (for progress display)
@@ -77,6 +78,7 @@ impl HexEditor {
             search_results: Vec::new(),
             current_search_index: None,
             is_searching: false,
+            search_truncated: false,
             search_cancel_flag: Arc::new(AtomicBool::new(false)),
             shared_search_results: Arc::new(Mutex::new(None)),
             search_match_set: HashSet::new(),
@@ -537,8 +539,12 @@ impl Render for HexEditor {
                                     d.child(
                                         div()
                                             .text_sm()
-                                            .text_color(rgb(0x00ff00))
-                                            .child(format!("{} / {} matches", current_pos, result_count))
+                                            .text_color(if self.search_truncated { rgb(0xffaa00) } else { rgb(0x00ff00) })
+                                            .child(if self.search_truncated {
+                                                format!("{} / {}+ matches (truncated)", current_pos, result_count)
+                                            } else {
+                                                format!("{} / {} matches", current_pos, result_count)
+                                            })
                                     )
                                 })
                                 .when(!self.is_searching && result_count == 0 && !self.search_query.is_empty(), |d| {
@@ -960,7 +966,11 @@ impl Render for HexEditor {
                                             div()
                                                 .text_color(if result_count > 0 { rgb(0x00ff00) } else { rgb(0xff6666) })
                                                 .child(if result_count > 0 {
-                                                    format!("{}/{} matches", current_pos, result_count)
+                                                    if self.search_truncated {
+                                                        format!("{}/{}+ matches (truncated)", current_pos, result_count)
+                                                    } else {
+                                                        format!("{}/{} matches", current_pos, result_count)
+                                                    }
                                                 } else {
                                                     "No matches".to_string()
                                                 })
