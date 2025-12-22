@@ -174,6 +174,9 @@ pub fn handle_key_event(
                     SearchMode::Hex => SearchMode::Ascii,
                 };
                 editor.perform_search();
+                if editor.is_searching {
+                    editor.start_search_refresh_loop(cx);
+                }
             } else {
                 editor.toggle_pane();
             }
@@ -183,6 +186,9 @@ pub fn handle_key_event(
             if editor.search_visible {
                 editor.search_query.pop();
                 editor.perform_search();
+                if editor.is_searching {
+                    editor.start_search_refresh_loop(cx);
+                }
                 cx.notify();
             }
         }
@@ -232,6 +238,9 @@ pub fn handle_key_event(
                     if (c >= ' ' && c <= '~') || c.is_whitespace() {
                         editor.search_query.push(c);
                         editor.perform_search();
+                        if editor.is_searching {
+                            editor.start_search_refresh_loop(cx);
+                        }
                         cx.notify();
                     }
                 } else {

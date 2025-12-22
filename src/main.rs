@@ -19,9 +19,10 @@ pub use search::SearchMode;
 pub use ui::{EditPane, HexNibble};
 use gpui::{
     App, Application, Bounds, Context, ExternalPaths, Focusable, FocusHandle, PathPromptOptions,
-    Pixels, PromptLevel, SharedString, Window, WindowBounds, WindowOptions,
+    Pixels, PromptLevel, SharedString, Timer, Window, WindowBounds, WindowOptions,
     div, prelude::*, px, rgb, size, ScrollHandle,
 };
+use std::time::Duration;
 use gpui_component::scroll::{Scrollbar, ScrollbarState, ScrollbarShow};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -349,6 +350,35 @@ impl HexEditor {
             }
             cx.notify();
         }
+    }
+
+    /// Start a background refresh loop to update UI during search
+    ///
+    /// This spawns an async task that periodically triggers UI updates
+    /// while a search is in progress, ensuring the progress display stays current.
+    pub fn start_search_refresh_loop(&mut self, cx: &mut Context<Self>) {
+        cx.spawn(async move |entity, cx| {
+            loop {
+                // Wait 500ms between updates
+                Timer::after(Duration::from_millis(500)).await;
+
+                // Check if we should stop (search cancelled or completed)
+                let should_continue = entity.update(cx, |editor, cx| {
+                    if editor.is_searching {
+                        cx.notify(); // Trigger UI refresh
+                        true
+                    } else {
+                        false
+                    }
+                });
+
+                match should_continue {
+                    Ok(true) => continue,
+                    _ => break,
+                }
+            }
+        })
+        .detach();
     }
 }
 
