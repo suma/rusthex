@@ -81,19 +81,18 @@ pub fn calculate_visible_range(
         0
     };
 
-    // Calculate number of visible rows
+    // Calculate number of visible rows (minimum 50 to handle edge cases)
     let visible_row_count = (viewport_height / row_height).ceil() as usize;
+    let visible_row_count = visible_row_count.max(50); // Ensure minimum rows
 
     // Add buffer rows to prevent flickering during scroll
-    let buffer_rows = 5;
-    let mut render_start = first_visible_row.saturating_sub(buffer_rows);
-    let render_end = (first_visible_row + visible_row_count + buffer_rows).min(total_rows);
+    let buffer_rows = 10;
+    let render_start = first_visible_row.saturating_sub(buffer_rows);
+    let mut render_end = (first_visible_row + visible_row_count + buffer_rows).min(total_rows);
 
-    // Ensure we render at least visible_row_count rows when near the end
-    if render_end == total_rows {
-        // At the end of the file, adjust render_start to show full viewport
-        let desired_render_count = visible_row_count + buffer_rows * 2;
-        render_start = total_rows.saturating_sub(desired_render_count);
+    // Ensure we render at least visible_row_count rows
+    if render_end < render_start + visible_row_count {
+        render_end = (render_start + visible_row_count).min(total_rows);
     }
 
     (render_start, render_end)
