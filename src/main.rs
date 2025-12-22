@@ -414,9 +414,12 @@ impl Render for HexEditor {
         );
 
         // Phase 3: Calculate spacer heights for virtual scrolling
-        let row_height = px(20.0);
-        let top_spacer_height = row_height * render_start as f32;
-        let bottom_spacer_height = row_height * (row_count - render_end) as f32;
+        // Uses capped virtual height to avoid f32 precision issues with large files
+        let (top_spacer_height, bottom_spacer_height) = ui::calculate_spacer_heights(
+            render_start,
+            render_end,
+            row_count,
+        );
 
         // Get display title
         let title = self.document.file_name()
