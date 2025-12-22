@@ -26,23 +26,6 @@ pub enum SearchMode {
 }
 
 impl HexEditor {
-    /// Build HashSet of all byte positions that are part of search matches
-    /// This enables O(1) lookup during rendering instead of O(n) iteration
-    pub fn build_search_match_set(&mut self) {
-        self.search_match_set.clear();
-
-        let pattern_len = match self.search_mode {
-            SearchMode::Ascii => self.search_query.len(),
-            SearchMode::Hex => self.search_query.split_whitespace().count(),
-        };
-
-        for &match_start in &self.search_results {
-            for offset in 0..pattern_len {
-                self.search_match_set.insert(match_start + offset);
-            }
-        }
-    }
-
     /// Perform search in background thread
     ///
     /// Cancels any ongoing search and starts a new one.
@@ -110,6 +93,7 @@ impl HexEditor {
 
         // Prepare search data source (fast - no large copy on UI thread)
         let data_source = self.document.prepare_search_data();
+        let pattern_len = pattern.len();
 
         // Spawn background search thread
         std::thread::spawn(move || {
@@ -123,10 +107,18 @@ impl HexEditor {
                 }
             };
 
-            // Store results if search wasn't cancelled
+            // Build match set and store results if search wasn't cancelled
             if let Some(results) = local_results {
+                // Build HashSet in background thread to avoid UI freeze
+                let mut match_set = std::collections::HashSet::new();
+                for &match_start in &results {
+                    for offset in 0..pattern_len {
+                        match_set.insert(match_start + offset);
+                    }
+                }
+
                 if let Ok(mut shared) = shared_results.lock() {
-                    *shared = Some(results);
+                    *shared = Some((results, match_set));
                 }
             }
         });
@@ -150,13 +142,11 @@ impl HexEditor {
             None
         };
 
-        if let Some(results) = results_opt {
-            // Search completed
+        if let Some((results, match_set)) = results_opt {
+            // Search completed - receive both results and pre-built match set
             self.search_results = results;
+            self.search_match_set = match_set;
             self.is_searching = false;
-
-            // Build HashSet for efficient O(1) lookup during rendering
-            self.build_search_match_set();
 
             // Set current index to first result and scroll to it
             if !self.search_results.is_empty() {

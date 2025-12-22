@@ -50,7 +50,7 @@ struct HexEditor {
     current_search_index: Option<usize>, // Index into search_results
     is_searching: bool, // Flag indicating search is in progress
     search_cancel_flag: Arc<AtomicBool>, // Flag to cancel ongoing search
-    shared_search_results: Arc<Mutex<Option<Vec<usize>>>>, // Shared results from background thread
+    shared_search_results: Arc<Mutex<Option<(Vec<usize>, HashSet<usize>)>>>, // Shared results and match set from background thread
     search_match_set: HashSet<usize>, // Set of all byte positions that are part of search matches (for O(1) lookup)
     search_progress: Arc<AtomicUsize>, // Current search position for progress display
     search_total: usize, // Total bytes to search (for progress display)
