@@ -780,79 +780,159 @@ impl Render for HexEditor {
                     )
             )
             .child(
-                // Status bar at bottom
+                // Status bar at bottom (two lines)
                 div()
                     .flex()
-                    .gap_4()
-                    .py_2()
+                    .flex_col()
+                    .py_1()
                     .px_4()
                     .bg(rgb(0x252525))
                     .border_t_1()
                     .border_color(rgb(0x404040))
                     .text_sm()
                     .font_family("Monaco")
+                    // First line: cursor position, byte value, selection
                     .child(
-                        // Cursor position
                         div()
                             .flex()
-                            .gap_2()
-                            .text_color(rgb(0x808080))
-                            .child("Offset:")
+                            .gap_4()
+                            .py_1()
                             .child(
+                                // Cursor position
                                 div()
-                                    .text_color(rgb(0x00ff00))
-                                    .child(ui::format_address(self.cursor_position))
+                                    .flex()
+                                    .gap_2()
+                                    .text_color(rgb(0x808080))
+                                    .child("Offset:")
+                                    .child(
+                                        div()
+                                            .text_color(rgb(0x00ff00))
+                                            .child(ui::format_address(self.cursor_position))
+                                    )
+                            )
+                            .child(
+                                // Current byte value (if valid position)
+                                div()
+                                    .flex()
+                                    .gap_2()
+                                    .text_color(rgb(0x808080))
+                                    .when_some(self.document.get_byte(self.cursor_position), |el, byte| {
+                                        el.child("Value:")
+                                            .child(
+                                                div()
+                                                    .text_color(rgb(0x4a9eff))
+                                                    .child(ui::format_byte_hex(byte))
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_color(rgb(0xffffff))
+                                                    .child(format!("({})", ui::format_byte_dec(byte)))
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_color(rgb(0xff8c00))
+                                                    .child(ui::format_byte_bin(byte))
+                                            )
+                                    })
+                            )
+                            .when(self.selection_start.is_some(), |el| {
+                                // Selection info
+                                let (start, end) = self.selection_range().unwrap();
+                                let selection_size = end - start + 1;
+                                el.child(
+                                    div()
+                                        .flex()
+                                        .gap_2()
+                                        .text_color(rgb(0x808080))
+                                        .child("Selection:")
+                                        .child(
+                                            div()
+                                                .text_color(rgb(0xffff00))
+                                                .child(format!("{} bytes", selection_size))
+                                        )
+                                )
+                            })
+                            .child(
+                                // File size (right aligned)
+                                div()
+                                    .flex_1()
+                                    .text_right()
+                                    .text_color(rgb(0x808080))
+                                    .child(format!("Size: {}", ui::format_file_size(self.document.len())))
                             )
                     )
+                    // Second line: search status, messages
                     .child(
-                        // Current byte value (if valid position)
                         div()
                             .flex()
-                            .gap_2()
-                            .text_color(rgb(0x808080))
-                            .when_some(self.document.get_byte(self.cursor_position), |el, byte| {
-                                el.child("Value:")
-                                    .child(
-                                        div()
-                                            .text_color(rgb(0x4a9eff))
-                                            .child(ui::format_byte_hex(byte))
-                                    )
-                                    .child(
-                                        div()
-                                            .text_color(rgb(0xffffff))
-                                            .child(format!("({})", ui::format_byte_dec(byte)))
-                                    )
-                                    .child(
-                                        div()
-                                            .text_color(rgb(0xff8c00))
-                                            .child(ui::format_byte_bin(byte))
-                                    )
-                            })
-                    )
-                    .when(self.selection_start.is_some(), |el| {
-                        // Selection info
-                        let (start, end) = self.selection_range().unwrap();
-                        let selection_size = end - start + 1;
-                        el.child(
-                            div()
-                                .flex()
-                                .gap_2()
-                                .text_color(rgb(0x808080))
-                                .child("Selection:")
-                                .child(
+                            .gap_4()
+                            .py_1()
+                            .border_t_1()
+                            .border_color(rgb(0x333333))
+                            // Search status
+                            .when(self.is_searching, |el| {
+                                el.child(
                                     div()
+                                        .flex()
+                                        .gap_2()
                                         .text_color(rgb(0xffff00))
-                                        .child(format!("{} bytes", selection_size))
+                                        .child("Searching...")
+                                        .child(
+                                            div()
+                                                .text_color(rgb(0x808080))
+                                                .child(format!("\"{}\"", self.search_query))
+                                        )
                                 )
-                        )
-                    })
-                    .child(
-                        // File size (right aligned)
-                        div()
-                            .flex_1()
-                            .text_right()
-                            .text_color(rgb(0x808080))
-                            .child(format!("Size: {}", ui::format_file_size(self.document.len())))
+                            })
+                            // Search results info (when not searching)
+                            .when(!self.is_searching && self.search_visible && !self.search_query.is_empty(), |el| {
+                                let result_count = self.search_results.len();
+                                let current_pos = self.current_search_index.map(|i| i + 1).unwrap_or(0);
+                                let mode_str = match self.search_mode {
+                                    SearchMode::Ascii => "ASCII",
+                                    SearchMode::Hex => "Hex",
+                                };
+                                el.child(
+                                    div()
+                                        .flex()
+                                        .gap_2()
+                                        .child(
+                                            div()
+                                                .text_color(rgb(0x808080))
+                                                .child(format!("Search ({}):", mode_str))
+                                        )
+                                        .child(
+                                            div()
+                                                .text_color(rgb(0x4a9eff))
+                                                .child(format!("\"{}\"", self.search_query))
+                                        )
+                                        .child(
+                                            div()
+                                                .text_color(if result_count > 0 { rgb(0x00ff00) } else { rgb(0xff6666) })
+                                                .child(if result_count > 0 {
+                                                    format!("{}/{} matches", current_pos, result_count)
+                                                } else {
+                                                    "No matches".to_string()
+                                                })
+                                        )
+                                )
+                            })
+                            // Save/status messages
+                            .when_some(self.save_message.clone(), |el, msg| {
+                                el.child(
+                                    div()
+                                        .text_color(rgb(0x00ff00))
+                                        .child(msg)
+                                )
+                            })
+                            // Default message when nothing else to show
+                            .when(!self.is_searching && !self.search_visible && self.save_message.is_none(), |el| {
+                                el.child(
+                                    div()
+                                        .text_color(rgb(0x606060))
+                                        .child("Ready")
+                                )
+                            })
                     )
             )
     }
