@@ -25,7 +25,7 @@ use gpui::{
 use gpui_component::scroll::{Scrollbar, ScrollbarState, ScrollbarShow};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::collections::HashSet;
 
 struct HexEditor {
@@ -51,6 +51,8 @@ struct HexEditor {
     search_cancel_flag: Arc<AtomicBool>, // Flag to cancel ongoing search
     shared_search_results: Arc<Mutex<Option<Vec<usize>>>>, // Shared results from background thread
     search_match_set: HashSet<usize>, // Set of all byte positions that are part of search matches (for O(1) lookup)
+    search_progress: Arc<AtomicUsize>, // Current search position for progress display
+    search_total: usize, // Total bytes to search (for progress display)
 }
 
 impl HexEditor {
@@ -77,6 +79,8 @@ impl HexEditor {
             search_cancel_flag: Arc::new(AtomicBool::new(false)),
             shared_search_results: Arc::new(Mutex::new(None)),
             search_match_set: HashSet::new(),
+            search_progress: Arc::new(AtomicUsize::new(0)),
+            search_total: 0,
         }
     }
 
@@ -869,8 +873,15 @@ impl Render for HexEditor {
                             .py_1()
                             .border_t_1()
                             .border_color(rgb(0x333333))
-                            // Search status
+                            // Search status with progress
                             .when(self.is_searching, |el| {
+                                let current = self.search_progress.load(Ordering::Relaxed);
+                                let total = self.search_total;
+                                let percent = if total > 0 {
+                                    (current as f64 / total as f64 * 100.0) as usize
+                                } else {
+                                    0
+                                };
                                 el.child(
                                     div()
                                         .flex()
@@ -881,6 +892,15 @@ impl Render for HexEditor {
                                             div()
                                                 .text_color(rgb(0x808080))
                                                 .child(format!("\"{}\"", self.search_query))
+                                        )
+                                        .child(
+                                            div()
+                                                .text_color(rgb(0x4a9eff))
+                                                .child(format!("{}/{} ({}%)",
+                                                    ui::format_file_size(current),
+                                                    ui::format_file_size(total),
+                                                    percent
+                                                ))
                                         )
                                 )
                             })

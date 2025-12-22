@@ -94,9 +94,14 @@ impl HexEditor {
             *results = None;
         }
 
+        // Set up progress tracking
+        self.search_progress.store(0, Ordering::Relaxed);
+        self.search_total = self.document.len();
+
         // Clone Arc references for the thread
         let shared_results = Arc::clone(&self.shared_search_results);
         let cancel_flag = Arc::clone(&self.search_cancel_flag);
+        let progress = Arc::clone(&self.search_progress);
 
         // Efficiently copy document data using optimized to_vec() method
         // This is fast even for large files (bulk memory copy for mmap)
@@ -109,9 +114,12 @@ impl HexEditor {
             let mut local_results = Vec::new();
 
             for i in 0..=data_len.saturating_sub(pattern_len) {
-                // Check for cancellation every 1000 iterations
-                if i % 1000 == 0 && cancel_flag.load(Ordering::Relaxed) {
-                    return; // Search cancelled
+                // Check for cancellation and update progress every 1000 iterations
+                if i % 1000 == 0 {
+                    if cancel_flag.load(Ordering::Relaxed) {
+                        return; // Search cancelled
+                    }
+                    progress.store(i, Ordering::Relaxed);
                 }
 
                 let mut matches = true;
@@ -125,6 +133,9 @@ impl HexEditor {
                     local_results.push(i);
                 }
             }
+
+            // Mark as complete
+            progress.store(data_len, Ordering::Relaxed);
 
             // Store results
             if let Ok(mut results) = shared_results.lock() {
