@@ -18,6 +18,14 @@ pub fn handle_key_event(
     _window: &mut Window,
     cx: &mut Context<HexEditor>,
 ) {
+    // Check for Ctrl+O or Cmd+O (open file)
+    if event.keystroke.key == "o"
+        && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
+    {
+        editor.open_file_dialog(cx);
+        return;
+    }
+
     // Check for Ctrl+F or Cmd+F (toggle search)
     if event.keystroke.key == "f"
         && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)

@@ -18,7 +18,8 @@ use document::Document;
 pub use search::SearchMode;
 pub use ui::{EditPane, HexNibble};
 use gpui::{
-    App, Application, Bounds, Context, Focusable, FocusHandle, Pixels, Window, WindowBounds, WindowOptions,
+    App, Application, Bounds, Context, ExternalPaths, Focusable, FocusHandle, PathPromptOptions,
+    Pixels, SharedString, Window, WindowBounds, WindowOptions,
     div, prelude::*, px, rgb, size, ScrollHandle,
 };
 use gpui_component::scroll::{Scrollbar, ScrollbarState, ScrollbarShow};
@@ -255,6 +256,52 @@ impl HexEditor {
         self.save_message = Some(format!("Saved to {}", path.display()));
         Ok(())
     }
+
+    /// Open file dialog and load selected file
+    pub fn open_file_dialog(&mut self, cx: &mut Context<Self>) {
+        let options = PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some(SharedString::from("Open File")),
+        };
+
+        let receiver = cx.prompt_for_paths(options);
+
+        cx.spawn(async move |entity, cx| {
+            if let Ok(Ok(Some(paths))) = receiver.await {
+                if let Some(path) = paths.into_iter().next() {
+                    let _ = entity.update(cx, |editor, cx| {
+                        match editor.load_file(path.clone()) {
+                            Ok(_) => {
+                                editor.save_message = Some(format!("Opened: {}", path.display()));
+                            }
+                            Err(e) => {
+                                editor.save_message = Some(format!("Error: {}", e));
+                            }
+                        }
+                        cx.notify();
+                    });
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// Handle file drop event
+    pub fn handle_file_drop(&mut self, paths: &ExternalPaths, cx: &mut Context<Self>) {
+        if let Some(path) = paths.paths().first() {
+            match self.load_file(path.clone()) {
+                Ok(_) => {
+                    self.save_message = Some(format!("Opened: {}", path.display()));
+                }
+                Err(e) => {
+                    self.save_message = Some(format!("Error: {}", e));
+                }
+            }
+            cx.notify();
+        }
+    }
 }
 
 impl Focusable for HexEditor {
@@ -313,6 +360,9 @@ impl Render for HexEditor {
                 }
             }))
             .on_key_down(cx.listener(keyboard::handle_key_event))
+            .on_drop(cx.listener(|editor, paths: &ExternalPaths, _window, cx| {
+                editor.handle_file_drop(paths, cx);
+            }))
             .child(
                 // Header
                 div()
@@ -353,7 +403,7 @@ impl Render for HexEditor {
                         div()
                             .text_sm()
                             .text_color(rgb(0x808080))
-                            .child("Ctrl+S: save | Ctrl+Z: undo | Ctrl+Y: redo")
+                            .child("Ctrl+O: open | Ctrl+S: save | Ctrl+Z: undo | Ctrl+Y: redo")
                     )
                     .when(self.save_message.is_some(), |header| {
                         header.child(
