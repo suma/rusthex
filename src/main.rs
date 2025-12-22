@@ -19,7 +19,7 @@ pub use search::SearchMode;
 pub use ui::{EditPane, HexNibble};
 use gpui::{
     App, Application, Bounds, Context, ExternalPaths, Focusable, FocusHandle, PathPromptOptions,
-    Pixels, SharedString, Window, WindowBounds, WindowOptions,
+    Pixels, PromptLevel, SharedString, Window, WindowBounds, WindowOptions,
     div, prelude::*, px, rgb, size, ScrollHandle,
 };
 use gpui_component::scroll::{Scrollbar, ScrollbarState, ScrollbarShow};
@@ -241,7 +241,7 @@ impl HexEditor {
         }
     }
 
-    // Save file to current path
+    // Save file to current path (internal, no confirmation)
     fn save_file(&mut self) -> std::io::Result<()> {
         self.document.save()?;
         if let Some(path) = self.document.file_path() {
@@ -255,6 +255,50 @@ impl HexEditor {
         self.document.save_as(path.clone())?;
         self.save_message = Some(format!("Saved to {}", path.display()));
         Ok(())
+    }
+
+    /// Save file with confirmation dialog
+    pub fn save_with_confirmation(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Check if there are unsaved changes
+        if !self.document.has_unsaved_changes() {
+            self.save_message = Some("No changes to save".to_string());
+            cx.notify();
+            return;
+        }
+
+        // Get file path for the dialog message
+        let file_name = self.document.file_name()
+            .unwrap_or("file")
+            .to_string();
+
+        let receiver = window.prompt(
+            PromptLevel::Warning,
+            "Save File",
+            Some(&format!("Do you want to save changes to '{}'?", file_name)),
+            &["Save", "Cancel"],
+            cx,
+        );
+
+        cx.spawn_in(window, async move |entity, cx| {
+            if let Ok(answer) = receiver.await {
+                if answer == 0 {
+                    // User clicked "Save"
+                    let _ = entity.update(cx, |editor, cx| {
+                        match editor.save_file() {
+                            Ok(_) => {
+                                eprintln!("File saved successfully");
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to save file: {}", e);
+                                editor.save_message = Some(format!("Error: {}", e));
+                            }
+                        }
+                        cx.notify();
+                    });
+                }
+            }
+        })
+        .detach();
     }
 
     /// Open file dialog and load selected file

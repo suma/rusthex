@@ -15,7 +15,7 @@ use crate::{HexEditor, SearchMode, EditPane};
 pub fn handle_key_event(
     editor: &mut HexEditor,
     event: &KeyDownEvent,
-    _window: &mut Window,
+    window: &mut Window,
     cx: &mut Context<HexEditor>,
 ) {
     // Check for Ctrl+O or Cmd+O (open file)
@@ -81,21 +81,11 @@ pub fn handle_key_event(
         return;
     }
 
-    // Check for Ctrl+S or Cmd+S (save)
+    // Check for Ctrl+S or Cmd+S (save with confirmation)
     if event.keystroke.key == "s"
         && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
     {
-        match editor.save_file() {
-            Ok(_) => {
-                eprintln!("File saved successfully");
-                cx.notify();
-            }
-            Err(e) => {
-                eprintln!("Failed to save file: {}", e);
-                editor.save_message = Some(format!("Error: {}", e));
-                cx.notify();
-            }
-        }
+        editor.save_with_confirmation(window, cx);
         return;
     }
 
