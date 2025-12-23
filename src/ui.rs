@@ -61,8 +61,8 @@ pub fn format_file_size(size: usize) -> String {
     }
 }
 
-/// Row height constant in pixels
-pub const ROW_HEIGHT: f64 = 20.0;
+/// Row height constant in pixels (content: 20px + margin-bottom mb_1: 4px)
+pub const ROW_HEIGHT: f64 = 24.0;
 
 /// Maximum virtual height to avoid f32 precision issues
 /// f32 loses precision above ~16 million, so we cap at 10 million pixels

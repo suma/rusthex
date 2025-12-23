@@ -692,7 +692,7 @@ impl Render for HexEditor {
                         div()
                             .flex()
                             .gap_4()
-                            // .mb_1() // Removed: causes row height mismatch with ROW_HEIGHT constant
+                            .mb_1()
                             .child(
                                 // Address column
                                 div()
