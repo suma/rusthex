@@ -115,8 +115,87 @@ pub fn handle_key_event(
         return;
     }
 
+    // Default visible rows for page navigation (approximately one screen)
+    const PAGE_ROWS: usize = 20;
+
+    // Handle Ctrl+Home (go to file start)
+    if event.keystroke.key == "home"
+        && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
+    {
+        if event.keystroke.modifiers.shift {
+            if editor.selection_start.is_none() {
+                editor.selection_start = Some(editor.cursor_position);
+            }
+        } else {
+            editor.clear_selection();
+        }
+        editor.move_cursor_file_start();
+        cx.notify();
+        return;
+    }
+
+    // Handle Ctrl+End (go to file end)
+    if event.keystroke.key == "end"
+        && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
+    {
+        if event.keystroke.modifiers.shift {
+            if editor.selection_start.is_none() {
+                editor.selection_start = Some(editor.cursor_position);
+            }
+        } else {
+            editor.clear_selection();
+        }
+        editor.move_cursor_file_end();
+        cx.notify();
+        return;
+    }
+
     // Handle navigation and other keys
     match event.keystroke.key.as_str() {
+        "pageup" => {
+            if event.keystroke.modifiers.shift {
+                if editor.selection_start.is_none() {
+                    editor.selection_start = Some(editor.cursor_position);
+                }
+            } else {
+                editor.clear_selection();
+            }
+            editor.move_cursor_page_up(PAGE_ROWS);
+            cx.notify();
+        }
+        "pagedown" => {
+            if event.keystroke.modifiers.shift {
+                if editor.selection_start.is_none() {
+                    editor.selection_start = Some(editor.cursor_position);
+                }
+            } else {
+                editor.clear_selection();
+            }
+            editor.move_cursor_page_down(PAGE_ROWS);
+            cx.notify();
+        }
+        "home" => {
+            if event.keystroke.modifiers.shift {
+                if editor.selection_start.is_none() {
+                    editor.selection_start = Some(editor.cursor_position);
+                }
+            } else {
+                editor.clear_selection();
+            }
+            editor.move_cursor_home();
+            cx.notify();
+        }
+        "end" => {
+            if event.keystroke.modifiers.shift {
+                if editor.selection_start.is_none() {
+                    editor.selection_start = Some(editor.cursor_position);
+                }
+            } else {
+                editor.clear_selection();
+            }
+            editor.move_cursor_end();
+            cx.notify();
+        }
         "up" => {
             if event.keystroke.modifiers.shift {
                 // Start selection if not already selecting

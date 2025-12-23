@@ -183,6 +183,62 @@ impl HexEditor {
         }
     }
 
+    // Page Up: Move cursor up by one page
+    fn move_cursor_page_up(&mut self, visible_rows: usize) {
+        let rows_to_move = visible_rows.saturating_sub(1).max(1);
+        let bytes_to_move = rows_to_move * self.bytes_per_row;
+        self.cursor_position = self.cursor_position.saturating_sub(bytes_to_move);
+        self.hex_nibble = HexNibble::High;
+        self.ensure_cursor_visible_by_row();
+    }
+
+    // Page Down: Move cursor down by one page
+    fn move_cursor_page_down(&mut self, visible_rows: usize) {
+        let rows_to_move = visible_rows.saturating_sub(1).max(1);
+        let bytes_to_move = rows_to_move * self.bytes_per_row;
+        let new_pos = self.cursor_position + bytes_to_move;
+        if new_pos < self.document.len() {
+            self.cursor_position = new_pos;
+        } else {
+            self.cursor_position = self.document.len().saturating_sub(1);
+        }
+        self.hex_nibble = HexNibble::High;
+        self.ensure_cursor_visible_by_row();
+    }
+
+    // Home: Move cursor to the beginning of the current row
+    fn move_cursor_home(&mut self) {
+        let current_row = self.cursor_position / self.bytes_per_row;
+        self.cursor_position = current_row * self.bytes_per_row;
+        self.hex_nibble = HexNibble::High;
+        self.ensure_cursor_visible_by_row();
+    }
+
+    // End: Move cursor to the end of the current row
+    fn move_cursor_end(&mut self) {
+        let current_row = self.cursor_position / self.bytes_per_row;
+        let row_end = ((current_row + 1) * self.bytes_per_row).min(self.document.len()) - 1;
+        self.cursor_position = row_end;
+        self.hex_nibble = HexNibble::High;
+        self.ensure_cursor_visible_by_row();
+    }
+
+    // Ctrl+Home: Move cursor to the beginning of the file
+    fn move_cursor_file_start(&mut self) {
+        self.cursor_position = 0;
+        self.hex_nibble = HexNibble::High;
+        self.ensure_cursor_visible_by_row();
+    }
+
+    // Ctrl+End: Move cursor to the end of the file
+    fn move_cursor_file_end(&mut self) {
+        if self.document.len() > 0 {
+            self.cursor_position = self.document.len() - 1;
+        }
+        self.hex_nibble = HexNibble::High;
+        self.ensure_cursor_visible_by_row();
+    }
+
     // Toggle between Hex and ASCII pane
     fn toggle_pane(&mut self) {
         self.edit_pane = match self.edit_pane {
