@@ -124,6 +124,73 @@ pub fn calculate_visible_range(
     (render_start, render_end)
 }
 
+/// Calculate the scroll offset needed to make a row visible
+/// Returns Some(new_offset) if scrolling is needed, None if the row is already visible
+///
+/// Arguments:
+/// - cursor_row: The row to make visible
+/// - current_offset: Current Y scroll offset (negative when scrolled down)
+/// - visible_rows: Number of rows visible in the content area
+/// - total_rows: Total number of rows in the document
+pub fn calculate_scroll_to_row(
+    cursor_row: usize,
+    current_offset: Pixels,
+    visible_rows: usize,
+    total_rows: usize,
+) -> Option<Pixels> {
+    if total_rows == 0 || visible_rows == 0 {
+        return None;
+    }
+
+    let current_offset_f64: f64 = current_offset.into();
+    let actual_total_height = total_rows as f64 * ROW_HEIGHT;
+
+    // Calculate first visible row from scroll offset
+    let first_visible_row = if actual_total_height > MAX_VIRTUAL_HEIGHT {
+        let scroll_ratio = (-current_offset_f64) / MAX_VIRTUAL_HEIGHT;
+        let scroll_ratio = scroll_ratio.clamp(0.0, 1.0);
+        (scroll_ratio * total_rows as f64).floor() as usize
+    } else {
+        let scroll_offset_abs = -current_offset_f64;
+        if scroll_offset_abs > 0.0 {
+            (scroll_offset_abs / ROW_HEIGHT).floor() as usize
+        } else {
+            0
+        }
+    };
+
+    // Last visible row
+    let last_visible_row = first_visible_row + visible_rows.saturating_sub(1);
+
+    // Check if cursor is already visible
+    if cursor_row >= first_visible_row && cursor_row <= last_visible_row {
+        return None;
+    }
+
+    // Calculate new scroll offset
+    let target_row = if cursor_row < first_visible_row {
+        // Scrolling up: put cursor at top
+        cursor_row
+    } else {
+        // Scrolling down: scroll just enough to show cursor at bottom
+        cursor_row.saturating_sub(visible_rows.saturating_sub(1))
+    };
+
+    // Don't clamp target_row too aggressively - allow scrolling to show last row
+    let max_target_row = total_rows.saturating_sub(1);
+
+    let new_offset = if actual_total_height > MAX_VIRTUAL_HEIGHT {
+        let target_row = target_row.min(max_target_row);
+        let ratio = target_row as f64 / total_rows as f64;
+        px(-(ratio * MAX_VIRTUAL_HEIGHT) as f32)
+    } else {
+        let target_row = target_row.min(max_target_row);
+        px(-(target_row as f64 * ROW_HEIGHT) as f32)
+    };
+
+    Some(new_offset)
+}
+
 /// Calculate spacer heights for virtual scrolling
 /// Uses capped virtual height to avoid f32 precision issues
 pub fn calculate_spacer_heights(

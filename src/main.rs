@@ -19,7 +19,7 @@ pub use search::SearchMode;
 pub use ui::{EditPane, HexNibble};
 use gpui::{
     App, Application, Bounds, Context, ExternalPaths, Focusable, FocusHandle, PathPromptOptions,
-    Pixels, PromptLevel, SharedString, Timer, Window, WindowBounds, WindowOptions,
+    Pixels, Point, PromptLevel, SharedString, Timer, Window, WindowBounds, WindowOptions,
     div, prelude::*, px, rgb, size, ScrollHandle,
 };
 use std::time::Duration;
@@ -40,6 +40,7 @@ struct HexEditor {
     hex_nibble: HexNibble,
     save_message: Option<String>,
     scroll_offset: Pixels, // Current scroll position in pixels
+    content_view_rows: usize, // Number of rows visible in content area
     selection_start: Option<usize>, // Selection anchor point
     is_dragging: bool, // Track if user is currently dragging
     // Search state
@@ -70,6 +71,7 @@ impl HexEditor {
             hex_nibble: HexNibble::High,
             save_message: None,
             scroll_offset: px(0.0),
+            content_view_rows: 20, // Default, updated on render
             selection_start: None,
             is_dragging: false,
             search_visible: false,
@@ -143,10 +145,21 @@ impl HexEditor {
         editor
     }
 
-    // Phase 5: Ensure cursor is visible by scrolling to its row
+    // Ensure cursor is visible by scrolling to its row
     fn ensure_cursor_visible_by_row(&mut self) {
         let cursor_row = self.cursor_position / self.bytes_per_row;
-        self.scroll_handle.scroll_to_item(cursor_row);
+        let total_rows = ui::row_count(self.document.len(), self.bytes_per_row);
+        let current_offset = self.scroll_handle.offset();
+
+        if let Some(new_y_offset) = ui::calculate_scroll_to_row(
+            cursor_row,
+            current_offset.y,
+            self.content_view_rows,
+            total_rows,
+        ) {
+            let new_offset = Point::new(current_offset.x, new_y_offset);
+            self.scroll_handle.set_offset(new_offset);
+        }
     }
 
     // Cursor movement methods
@@ -462,6 +475,14 @@ impl Render for HexEditor {
         // Phase 2: Calculate visible range based on viewport
         let viewport_bounds = self.scroll_handle.bounds();
         let viewport_height = viewport_bounds.size.height;
+
+        // Update content_view_rows for cursor navigation
+        let viewport_height_f64: f64 = viewport_height.into();
+        if viewport_height_f64 > 0.0 {
+            self.content_view_rows = (viewport_height_f64 / ui::ROW_HEIGHT).floor() as usize;
+            self.content_view_rows = self.content_view_rows.max(1);
+        }
+
         let (render_start, render_end) = ui::calculate_visible_range(
             self.scroll_offset,
             viewport_height,
@@ -711,11 +732,13 @@ impl Render for HexEditor {
                                                 this.is_dragging = true;
                                                 this.edit_pane = EditPane::Hex;
                                                 this.hex_nibble = HexNibble::High;
+                                                this.ensure_cursor_visible_by_row();
                                                 cx.notify();
                                             }))
                                             .on_mouse_move(cx.listener(move |this, _event, _window, cx| {
                                                 if this.is_dragging {
                                                     this.cursor_position = byte_idx;
+                                                    this.ensure_cursor_visible_by_row();
                                                     cx.notify();
                                                 }
                                             }))
@@ -784,11 +807,13 @@ impl Render for HexEditor {
                                                 this.is_dragging = true;
                                                 this.edit_pane = EditPane::Ascii;
                                                 this.hex_nibble = HexNibble::High;
+                                                this.ensure_cursor_visible_by_row();
                                                 cx.notify();
                                             }))
                                             .on_mouse_move(cx.listener(move |this, _event, _window, cx| {
                                                 if this.is_dragging {
                                                     this.cursor_position = byte_idx;
+                                                    this.ensure_cursor_visible_by_row();
                                                     cx.notify();
                                                 }
                                             }))
