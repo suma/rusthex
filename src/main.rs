@@ -159,6 +159,7 @@ impl HexEditor {
         ) {
             let new_offset = Point::new(current_offset.x, new_y_offset);
             self.scroll_handle.set_offset(new_offset);
+
         }
     }
 
@@ -476,19 +477,22 @@ impl Render for HexEditor {
         let viewport_bounds = self.scroll_handle.bounds();
         let viewport_height = viewport_bounds.size.height;
 
-        // Update content_view_rows for cursor navigation
-        let viewport_height_f64: f64 = viewport_height.into();
-        if viewport_height_f64 > 0.0 {
-            self.content_view_rows = (viewport_height_f64 / ui::ROW_HEIGHT).floor() as usize;
-            self.content_view_rows = self.content_view_rows.max(1);
-        }
+        // Calculate actual content area height by subtracting header and status bar
+        // Header (~40px) + Status bar (~40px) = 80px total
+        let header_status_height = px(80.0);
+        let content_height = px((f32::from(viewport_height) - f32::from(header_status_height)).max(20.0));
 
-        let (render_start, render_end) = ui::calculate_visible_range(
+        let visible_range = ui::calculate_visible_range(
             self.scroll_offset,
-            viewport_height,
+            content_height,
             row_count,
             self.bytes_per_row,
         );
+        let render_start = visible_range.render_start;
+        let render_end = visible_range.render_end;
+
+        // Update content_view_rows from calculated visible rows
+        self.content_view_rows = visible_range.visible_rows;
 
         // Phase 3: Calculate spacer heights for virtual scrolling
         // Uses capped virtual height to avoid f32 precision issues with large files
@@ -688,7 +692,7 @@ impl Render for HexEditor {
                         div()
                             .flex()
                             .gap_4()
-                            .mb_1()
+                            // .mb_1() // Removed: causes row height mismatch with ROW_HEIGHT constant
                             .child(
                                 // Address column
                                 div()
