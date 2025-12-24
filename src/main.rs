@@ -43,6 +43,7 @@ struct HexEditor {
     content_view_rows: usize, // Number of rows visible in content area
     selection_start: Option<usize>, // Selection anchor point
     is_dragging: bool, // Track if user is currently dragging
+    drag_pane: Option<EditPane>, // Which pane the drag started in
     // Search state
     search_visible: bool,
     search_query: String,
@@ -74,6 +75,7 @@ impl HexEditor {
             content_view_rows: 20, // Default, updated on render
             selection_start: None,
             is_dragging: false,
+            drag_pane: None,
             search_visible: false,
             search_query: String::new(),
             search_mode: SearchMode::Ascii,
@@ -114,57 +116,6 @@ impl HexEditor {
 
     fn clear_selection(&mut self) {
         self.selection_start = None;
-    }
-
-    // Check if a byte is printable ASCII
-    fn is_printable(byte: u8) -> bool {
-        byte >= 0x20 && byte <= 0x7E
-    }
-
-    // Select word at the given position (consecutive bytes of same type: printable or non-printable)
-    fn select_word_at(&mut self, position: usize) {
-        if position >= self.document.len() {
-            return;
-        }
-
-        let current_byte = match self.document.get_byte(position) {
-            Some(b) => b,
-            None => return,
-        };
-        let is_current_printable = Self::is_printable(current_byte);
-
-        // Find start of word (search backwards)
-        let mut start = position;
-        while start > 0 {
-            if let Some(b) = self.document.get_byte(start - 1) {
-                if Self::is_printable(b) == is_current_printable {
-                    start -= 1;
-                } else {
-                    break;
-                }
-            } else {
-                break;
-            }
-        }
-
-        // Find end of word (search forwards)
-        let mut end = position;
-        let doc_len = self.document.len();
-        while end < doc_len - 1 {
-            if let Some(b) = self.document.get_byte(end + 1) {
-                if Self::is_printable(b) == is_current_printable {
-                    end += 1;
-                } else {
-                    break;
-                }
-            } else {
-                break;
-            }
-        }
-
-        // Set selection
-        self.selection_start = Some(start);
-        self.cursor_position = end;
     }
 
     fn with_sample_data(cx: &mut Context<Self>) -> Self {
@@ -571,6 +522,15 @@ impl Render for HexEditor {
             .on_mouse_up(gpui::MouseButton::Left, cx.listener(|this, _event, _window, cx| {
                 if this.is_dragging {
                     this.is_dragging = false;
+                    this.drag_pane = None;
+                    cx.notify();
+                }
+            }))
+            .on_mouse_move(cx.listener(|this, event: &gpui::MouseMoveEvent, _window, cx| {
+                // Cancel drag if mouse button was released outside the window
+                if this.is_dragging && !event.dragging() {
+                    this.is_dragging = false;
+                    this.drag_pane = None;
                     cx.notify();
                 }
             }))
@@ -719,6 +679,82 @@ impl Render for HexEditor {
                             .overflow_y_scroll()
                             .track_scroll(&self.scroll_handle)
                             .pr(px(24.0))
+                            .on_mouse_move(cx.listener(|this, event: &gpui::MouseMoveEvent, _window, cx| {
+                                // Cancel drag if mouse button was released outside the window
+                                if this.is_dragging && !event.dragging() {
+                                    this.is_dragging = false;
+                                    this.drag_pane = None;
+                                    cx.notify();
+                                    return;
+                                }
+
+                                if !this.is_dragging || this.drag_pane.is_none() {
+                                    return;
+                                }
+
+                                // Get current values from this (not captured snapshots)
+                                let bytes_per_row = this.bytes_per_row;
+                                let doc_len = this.document.len();
+                                let scroll_offset_f32: f32 = (-f32::from(this.scroll_offset)).max(0.0);
+
+                                // Calculate row from Y position
+                                let mouse_y: f32 = event.position.y.into();
+
+                                // Content area offset calculated dynamically
+                                // Base: ~152px (header + padding)
+                                // Search bar adds ~50px when visible
+                                let content_top = if this.search_visible {
+                                    202.0
+                                } else {
+                                    152.0
+                                };
+                                let relative_y = mouse_y - content_top + scroll_offset_f32;
+
+                                let row = if relative_y < 0.0 {
+                                    0
+                                } else {
+                                    (relative_y / ui::ROW_HEIGHT as f32) as usize
+                                };
+
+                                let row_start = row * bytes_per_row;
+
+                                // Calculate byte in row from X position
+                                let mouse_x: f32 = event.position.x.into();
+                                let byte_in_row = match this.drag_pane {
+                                    Some(EditPane::Hex) => {
+                                        // Hex column starts at ~112px (16 padding + 80 addr + 16 gap)
+                                        // Each hex byte is ~24px (2 chars + gap)
+                                        let hex_start = 112.0;
+                                        let byte_width = 24.0;
+                                        if mouse_x < hex_start {
+                                            0
+                                        } else {
+                                            ((mouse_x - hex_start) / byte_width) as usize
+                                        }
+                                    }
+                                    Some(EditPane::Ascii) => {
+                                        // ASCII column is ~10px per char
+                                        // Approximate starting position
+                                        let char_width = 10.0;
+                                        let ascii_start = 112.0 + (bytes_per_row as f32 * 24.0) + 16.0;
+                                        if mouse_x < ascii_start {
+                                            0
+                                        } else {
+                                            ((mouse_x - ascii_start) / char_width) as usize
+                                        }
+                                    }
+                                    None => 0,
+                                };
+
+                                let byte_in_row = byte_in_row.min(bytes_per_row - 1);
+                                let new_cursor = (row_start + byte_in_row).min(doc_len.saturating_sub(1));
+
+                                if this.cursor_position != new_cursor {
+                                    this.cursor_position = new_cursor;
+                                    this.ensure_cursor_visible_by_row();
+                                    cx.notify();
+                                }
+                            }))
                             .child(
                                 div()
                                     .flex()
@@ -781,28 +817,15 @@ impl Render for HexEditor {
                                         };
 
                                         div()
-                                            .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, event: &gpui::MouseDownEvent, _window, cx| {
-                                                if event.click_count == 2 {
-                                                    // Double-click: select word
-                                                    this.select_word_at(byte_idx);
-                                                    this.is_dragging = false;
-                                                } else {
-                                                    // Single click: set cursor and start drag
-                                                    this.cursor_position = byte_idx;
-                                                    this.selection_start = Some(byte_idx);
-                                                    this.is_dragging = true;
-                                                }
+                                            .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event: &gpui::MouseDownEvent, _window, cx| {
+                                                this.cursor_position = byte_idx;
+                                                this.selection_start = Some(byte_idx);
+                                                this.is_dragging = true;
+                                                this.drag_pane = Some(EditPane::Hex);
                                                 this.edit_pane = EditPane::Hex;
                                                 this.hex_nibble = HexNibble::High;
                                                 this.ensure_cursor_visible_by_row();
                                                 cx.notify();
-                                            }))
-                                            .on_mouse_move(cx.listener(move |this, _event, _window, cx| {
-                                                if this.is_dragging {
-                                                    this.cursor_position = byte_idx;
-                                                    this.ensure_cursor_visible_by_row();
-                                                    cx.notify();
-                                                }
                                             }))
                                             .when(is_cursor && edit_pane == EditPane::Hex, |div| {
                                                 div.bg(rgb(0x4a9eff))
@@ -863,28 +886,15 @@ impl Render for HexEditor {
                                         };
 
                                         div()
-                                            .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, event: &gpui::MouseDownEvent, _window, cx| {
-                                                if event.click_count == 2 {
-                                                    // Double-click: select word
-                                                    this.select_word_at(byte_idx);
-                                                    this.is_dragging = false;
-                                                } else {
-                                                    // Single click: set cursor and start drag
-                                                    this.cursor_position = byte_idx;
-                                                    this.selection_start = Some(byte_idx);
-                                                    this.is_dragging = true;
-                                                }
+                                            .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event: &gpui::MouseDownEvent, _window, cx| {
+                                                this.cursor_position = byte_idx;
+                                                this.selection_start = Some(byte_idx);
+                                                this.is_dragging = true;
+                                                this.drag_pane = Some(EditPane::Ascii);
                                                 this.edit_pane = EditPane::Ascii;
                                                 this.hex_nibble = HexNibble::High;
                                                 this.ensure_cursor_visible_by_row();
                                                 cx.notify();
-                                            }))
-                                            .on_mouse_move(cx.listener(move |this, _event, _window, cx| {
-                                                if this.is_dragging {
-                                                    this.cursor_position = byte_idx;
-                                                    this.ensure_cursor_visible_by_row();
-                                                    cx.notify();
-                                                }
                                             }))
                                             .when(is_cursor && edit_pane == EditPane::Ascii, |div| {
                                                 div.bg(rgb(0xff8c00))
