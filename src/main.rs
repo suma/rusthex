@@ -116,6 +116,57 @@ impl HexEditor {
         self.selection_start = None;
     }
 
+    // Check if a byte is printable ASCII
+    fn is_printable(byte: u8) -> bool {
+        byte >= 0x20 && byte <= 0x7E
+    }
+
+    // Select word at the given position (consecutive bytes of same type: printable or non-printable)
+    fn select_word_at(&mut self, position: usize) {
+        if position >= self.document.len() {
+            return;
+        }
+
+        let current_byte = match self.document.get_byte(position) {
+            Some(b) => b,
+            None => return,
+        };
+        let is_current_printable = Self::is_printable(current_byte);
+
+        // Find start of word (search backwards)
+        let mut start = position;
+        while start > 0 {
+            if let Some(b) = self.document.get_byte(start - 1) {
+                if Self::is_printable(b) == is_current_printable {
+                    start -= 1;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        // Find end of word (search forwards)
+        let mut end = position;
+        let doc_len = self.document.len();
+        while end < doc_len - 1 {
+            if let Some(b) = self.document.get_byte(end + 1) {
+                if Self::is_printable(b) == is_current_printable {
+                    end += 1;
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        // Set selection
+        self.selection_start = Some(start);
+        self.cursor_position = end;
+    }
+
     fn with_sample_data(cx: &mut Context<Self>) -> Self {
         let mut editor = Self::new(cx);
         // Sample data: Generate more data to test scrolling
@@ -730,10 +781,17 @@ impl Render for HexEditor {
                                         };
 
                                         div()
-                                            .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event, _window, cx| {
-                                                this.cursor_position = byte_idx;
-                                                this.selection_start = Some(byte_idx);
-                                                this.is_dragging = true;
+                                            .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, event: &gpui::MouseDownEvent, _window, cx| {
+                                                if event.click_count == 2 {
+                                                    // Double-click: select word
+                                                    this.select_word_at(byte_idx);
+                                                    this.is_dragging = false;
+                                                } else {
+                                                    // Single click: set cursor and start drag
+                                                    this.cursor_position = byte_idx;
+                                                    this.selection_start = Some(byte_idx);
+                                                    this.is_dragging = true;
+                                                }
                                                 this.edit_pane = EditPane::Hex;
                                                 this.hex_nibble = HexNibble::High;
                                                 this.ensure_cursor_visible_by_row();
@@ -805,10 +863,17 @@ impl Render for HexEditor {
                                         };
 
                                         div()
-                                            .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event, _window, cx| {
-                                                this.cursor_position = byte_idx;
-                                                this.selection_start = Some(byte_idx);
-                                                this.is_dragging = true;
+                                            .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, event: &gpui::MouseDownEvent, _window, cx| {
+                                                if event.click_count == 2 {
+                                                    // Double-click: select word
+                                                    this.select_word_at(byte_idx);
+                                                    this.is_dragging = false;
+                                                } else {
+                                                    // Single click: set cursor and start drag
+                                                    this.cursor_position = byte_idx;
+                                                    this.selection_start = Some(byte_idx);
+                                                    this.is_dragging = true;
+                                                }
                                                 this.edit_pane = EditPane::Ascii;
                                                 this.hex_nibble = HexNibble::High;
                                                 this.ensure_cursor_visible_by_row();
