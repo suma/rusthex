@@ -206,14 +206,11 @@ impl HexEditor {
 
     /// Scroll to make search result visible and update cursor
     pub fn scroll_to_search_result(&mut self, result_position: usize) {
-        let result_row = result_position / self.bytes_per_row;
-
-        // Try to center the result in the viewport
-        // This provides better visibility than just making it visible
-        self.scroll_handle.scroll_to_item(result_row);
-
         // Update cursor position to the search result
         self.cursor_position = result_position;
+
+        // Use ensure_cursor_visible_by_row() for proper virtual scroll handling
+        self.ensure_cursor_visible_by_row();
     }
 }
 
