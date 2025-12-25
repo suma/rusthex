@@ -412,6 +412,37 @@ impl HexEditor {
         .detach();
     }
 
+    /// Save As dialog - save file to a new location
+    pub fn save_as_dialog(&mut self, cx: &mut Context<Self>) {
+        // Get directory and suggested filename from current document
+        let (directory, suggested_name) = if let Some(path) = self.document.file_path() {
+            let dir = path.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from("."));
+            let name = path.file_name().map(|n| n.to_string_lossy().to_string());
+            (dir, name)
+        } else {
+            (PathBuf::from("."), Some("untitled.bin".to_string()))
+        };
+
+        let receiver = cx.prompt_for_new_path(&directory, suggested_name.as_deref());
+
+        cx.spawn(async move |entity, cx| {
+            if let Ok(Ok(Some(path))) = receiver.await {
+                let _ = entity.update(cx, |editor, cx| {
+                    match editor.save_file_as(path.clone()) {
+                        Ok(_) => {
+                            editor.save_message = Some(format!("Saved as: {}", path.display()));
+                        }
+                        Err(e) => {
+                            editor.save_message = Some(format!("Error: {}", e));
+                        }
+                    }
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
+
     /// Handle file drop event
     pub fn handle_file_drop(&mut self, paths: &ExternalPaths, cx: &mut Context<Self>) {
         if let Some(path) = paths.paths().first() {
@@ -579,7 +610,7 @@ impl Render for HexEditor {
                         div()
                             .text_sm()
                             .text_color(rgb(0x808080))
-                            .child("Ctrl+O: open | Ctrl+S: save | Ctrl+Z: undo | Ctrl+Y: redo")
+                            .child("Ctrl+O: open | Ctrl+S: save | Ctrl+Shift+S: save as | Ctrl+Z/Y: undo/redo")
                     )
                     .when(self.save_message.is_some(), |header| {
                         header.child(

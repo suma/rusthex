@@ -12,9 +12,10 @@ A modern hex editor built with Rust and [gpui](https://www.gpui.rs/), featuring 
 - **Undo/Redo**: Full edit history with 1,000 operation limit
 
 ### Navigation & Selection
-- **Keyboard Navigation**: Arrow keys for cursor movement
+- **Keyboard Navigation**: Arrow keys, Page Up/Down, Home/End, Ctrl+Home/End
 - **Mouse Support**: Click to position cursor, drag to select ranges
 - **Selection**: Shift+Arrow keys or mouse drag to select byte ranges
+- **Select All**: Ctrl+A / Cmd+A
 - **Auto-scroll**: Cursor automatically stays visible during navigation
 
 ### Search Functionality
@@ -29,27 +30,33 @@ A modern hex editor built with Rust and [gpui](https://www.gpui.rs/), featuring 
 - **Navigation**: F3/Enter (next), Shift+F3 (previous)
 
 ### File Operations
-- **Open Files**: Command-line argument or sample data
-- **Save**: Ctrl+S / Cmd+S to save changes
+- **Open Files**: Command-line, file dialog (Ctrl+O), or drag & drop
+- **Save**: Ctrl+S / Cmd+S with confirmation dialog
+- **Save As**: Ctrl+Shift+S / Cmd+Shift+S to save to new location
 - **Unsaved Changes Indicator**: Visual feedback in title and status
 
 ## Keyboard Shortcuts
 
 | Shortcut | Action |
 |----------|--------|
-| **Navigation** |
+| **Navigation** ||
 | Arrow Keys | Move cursor |
-| Shift+Arrow | Extend selection |
+| Page Up / Page Down | Move by page |
+| Home / End | Go to start/end of row |
+| Ctrl+Home / Ctrl+End | Go to start/end of file |
+| Shift+Arrow / Shift+Page | Extend selection |
 | Ctrl+A / Cmd+A | Select all |
-| **Editing** |
+| **Editing** ||
 | Tab | Switch between Hex/ASCII mode |
 | 0-9, A-F | Edit hex value (in Hex mode) |
 | Printable chars | Edit ASCII value (in ASCII mode) |
 | Ctrl+Z / Cmd+Z | Undo |
 | Ctrl+Y / Cmd+Y | Redo |
-| **File** |
+| **File** ||
+| Ctrl+O / Cmd+O | Open file |
 | Ctrl+S / Cmd+S | Save file |
-| **Search** |
+| Ctrl+Shift+S / Cmd+Shift+S | Save as |
+| **Search** ||
 | Ctrl+F / Cmd+F | Toggle search |
 | Tab (in search) | Switch ASCII/Hex mode |
 | Enter / F3 | Next match |
@@ -107,7 +114,10 @@ cargo run -- path/to/file.bin
 rusthex/
 ├── src/
 │   ├── main.rs       # Main application and UI
-│   └── document.rs   # Document model and file I/O
+│   ├── document.rs   # Document model and file I/O
+│   ├── keyboard.rs   # Keyboard event handling
+│   ├── search.rs     # Search functionality
+│   └── ui.rs         # UI types and utilities
 ├── Cargo.toml
 ├── LICENSE-MIT
 ├── LICENSE-APACHE
@@ -147,10 +157,11 @@ See [todo.md](todo.md) for detailed implementation status and planned features.
 
 ### Planned Features
 - [ ] Copy/paste support
-- [ ] Page Up/Down navigation
-- [ ] File dialog (open/save as)
+- [ ] Exit confirmation dialog for unsaved changes
 - [ ] Data inspector (view bytes as various types)
+- [ ] Search & replace
 - [ ] Bookmarks
+- [ ] Multiple file tabs
 - [ ] Comparison mode
 - [ ] Customizable themes
 

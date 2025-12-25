@@ -81,9 +81,19 @@ pub fn handle_key_event(
         return;
     }
 
+    // Check for Ctrl+Shift+S or Cmd+Shift+S (save as)
+    if event.keystroke.key == "s"
+        && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
+        && event.keystroke.modifiers.shift
+    {
+        editor.save_as_dialog(cx);
+        return;
+    }
+
     // Check for Ctrl+S or Cmd+S (save with confirmation)
     if event.keystroke.key == "s"
         && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
+        && !event.keystroke.modifiers.shift
     {
         editor.save_with_confirmation(window, cx);
         return;
