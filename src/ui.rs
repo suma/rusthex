@@ -174,6 +174,10 @@ pub fn calculate_scroll_to_row(
         }
     };
 
+    // Clamp first_visible_row to match calculate_visible_range behavior
+    let max_first_row = total_rows.saturating_sub(visible_rows);
+    let first_visible_row = first_visible_row.min(max_first_row);
+
     // Last visible row
     let last_visible_row = first_visible_row + visible_rows.saturating_sub(1);
 

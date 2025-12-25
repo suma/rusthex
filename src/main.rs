@@ -161,7 +161,8 @@ impl HexEditor {
         ) {
             let new_offset = Point::new(current_offset.x, new_y_offset);
             self.scroll_handle.set_offset(new_offset);
-
+            // Keep scroll_offset in sync for mouse drag calculations
+            self.scroll_offset = new_y_offset;
         }
     }
 
