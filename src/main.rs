@@ -16,7 +16,7 @@ mod ui;
 
 use document::Document;
 pub use search::SearchMode;
-pub use ui::{EditPane, HexNibble};
+pub use ui::{EditPane, HexNibble, Endian};
 use gpui::{
     App, Application, Bounds, Context, ExternalPaths, Focusable, FocusHandle, PathPromptOptions,
     Pixels, Point, PromptLevel, SharedString, Timer, Window, WindowBounds, WindowOptions,
@@ -57,6 +57,9 @@ struct HexEditor {
     search_match_set: HashSet<usize>, // Set of all byte positions that are part of search matches (for O(1) lookup)
     search_progress: Arc<AtomicUsize>, // Current search position for progress display
     search_total: usize, // Total bytes to search (for progress display)
+    // Data inspector state
+    inspector_visible: bool,
+    inspector_endian: Endian,
 }
 
 impl HexEditor {
@@ -88,7 +91,22 @@ impl HexEditor {
             search_match_set: HashSet::new(),
             search_progress: Arc::new(AtomicUsize::new(0)),
             search_total: 0,
+            inspector_visible: false,
+            inspector_endian: Endian::Little,
         }
+    }
+
+    /// Toggle data inspector visibility
+    fn toggle_inspector(&mut self) {
+        self.inspector_visible = !self.inspector_visible;
+    }
+
+    /// Toggle inspector endianness
+    fn toggle_inspector_endian(&mut self) {
+        self.inspector_endian = match self.inspector_endian {
+            Endian::Little => Endian::Big,
+            Endian::Big => Endian::Little,
+        };
     }
 
     fn load_file(&mut self, path: PathBuf) -> std::io::Result<()> {
@@ -610,7 +628,7 @@ impl Render for HexEditor {
                         div()
                             .text_sm()
                             .text_color(rgb(0x808080))
-                            .child("Ctrl+O: open | Ctrl+S: save | Ctrl+Shift+S: save as | Ctrl+Z/Y: undo/redo")
+                            .child("Ctrl+O: open | Ctrl+S: save | Ctrl+I: inspector | Ctrl+Z/Y: undo/redo")
                     )
                     .when(self.save_message.is_some(), |header| {
                         header.child(
@@ -1190,6 +1208,251 @@ impl Render for HexEditor {
                             })
                     )
             )
+            // Data Inspector Panel
+            .when(self.inspector_visible, |parent| {
+                let endian_label = match self.inspector_endian {
+                    Endian::Little => "LE",
+                    Endian::Big => "BE",
+                };
+
+                // Get inspector values
+                let values = ui::DataInspectorValues::from_bytes(
+                    |pos| self.document.get_byte(pos),
+                    self.cursor_position,
+                    self.document.len(),
+                    self.inspector_endian,
+                );
+
+                parent.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .py_2()
+                        .px_4()
+                        .bg(rgb(0x1a1a1a))
+                        .border_t_1()
+                        .border_color(rgb(0x404040))
+                        .text_sm()
+                        .font_family("Monaco")
+                        // Header row
+                        .child(
+                            div()
+                                .flex()
+                                .justify_between()
+                                .pb_1()
+                                .mb_1()
+                                .border_b_1()
+                                .border_color(rgb(0x333333))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .gap_2()
+                                        .child(
+                                            div()
+                                                .text_color(rgb(0x4a9eff))
+                                                .child("Data Inspector")
+                                        )
+                                        .child(
+                                            div()
+                                                .text_color(rgb(0x808080))
+                                                .child(format!("@ 0x{:08X}", self.cursor_position))
+                                        )
+                                )
+                                .child(
+                                    div()
+                                        .flex()
+                                        .gap_2()
+                                        .child(
+                                            div()
+                                                .text_color(rgb(0x808080))
+                                                .child("Endian:")
+                                        )
+                                        .child(
+                                            div()
+                                                .text_color(rgb(0xff8c00))
+                                                .child(endian_label)
+                                        )
+                                        .child(
+                                            div()
+                                                .text_color(rgb(0x606060))
+                                                .child("(Ctrl+E)")
+                                        )
+                                )
+                        )
+                        // Values grid
+                        .when_some(values, |el, vals| {
+                            el.child(
+                                div()
+                                    .flex()
+                                    .gap_8()
+                                    // Integer column
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .flex_col()
+                                            .gap_1()
+                                            // 8-bit values
+                                            .child(
+                                                div()
+                                                    .flex()
+                                                    .gap_2()
+                                                    .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("Int8:"))
+                                                    .child(div().w(px(100.0)).text_right().text_color(rgb(0x00ff00)).child(format!("{}", vals.int8)))
+                                            )
+                                            .child(
+                                                div()
+                                                    .flex()
+                                                    .gap_2()
+                                                    .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("UInt8:"))
+                                                    .child(div().w(px(100.0)).text_right().text_color(rgb(0x00ff00)).child(format!("{}", vals.uint8)))
+                                            )
+                                            // 16-bit values
+                                            .when_some(vals.int16, |el, v| {
+                                                el.child(
+                                                    div()
+                                                        .flex()
+                                                        .gap_2()
+                                                        .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("Int16:"))
+                                                        .child(div().w(px(100.0)).text_right().text_color(rgb(0x00ff00)).child(format!("{}", v)))
+                                                )
+                                            })
+                                            .when_some(vals.uint16, |el, v| {
+                                                el.child(
+                                                    div()
+                                                        .flex()
+                                                        .gap_2()
+                                                        .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("UInt16:"))
+                                                        .child(div().w(px(100.0)).text_right().text_color(rgb(0x00ff00)).child(format!("{}", v)))
+                                                )
+                                            })
+                                            // 32-bit values
+                                            .when_some(vals.int32, |el, v| {
+                                                el.child(
+                                                    div()
+                                                        .flex()
+                                                        .gap_2()
+                                                        .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("Int32:"))
+                                                        .child(div().w(px(100.0)).text_right().text_color(rgb(0x00ff00)).child(format!("{}", v)))
+                                                )
+                                            })
+                                            .when_some(vals.uint32, |el, v| {
+                                                el.child(
+                                                    div()
+                                                        .flex()
+                                                        .gap_2()
+                                                        .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("UInt32:"))
+                                                        .child(div().w(px(100.0)).text_right().text_color(rgb(0x00ff00)).child(format!("{}", v)))
+                                                )
+                                            })
+                                    )
+                                    // 64-bit and float column
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .flex_col()
+                                            .gap_1()
+                                            // 64-bit values
+                                            .when_some(vals.int64, |el, v| {
+                                                el.child(
+                                                    div()
+                                                        .flex()
+                                                        .gap_2()
+                                                        .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("Int64:"))
+                                                        .child(div().w(px(180.0)).text_right().text_color(rgb(0x00ff00)).child(format!("{}", v)))
+                                                )
+                                            })
+                                            .when_some(vals.uint64, |el, v| {
+                                                el.child(
+                                                    div()
+                                                        .flex()
+                                                        .gap_2()
+                                                        .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("UInt64:"))
+                                                        .child(div().w(px(180.0)).text_right().text_color(rgb(0x00ff00)).child(format!("{}", v)))
+                                                )
+                                            })
+                                            // Float values
+                                            .when_some(vals.float32, |el, v| {
+                                                let display = if v.is_nan() || v.is_infinite() {
+                                                    format!("{}", v)
+                                                } else {
+                                                    format!("{:.6}", v)
+                                                };
+                                                el.child(
+                                                    div()
+                                                        .flex()
+                                                        .gap_2()
+                                                        .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("Float32:"))
+                                                        .child(div().w(px(180.0)).text_right().text_color(rgb(0xffff00)).child(display))
+                                                )
+                                            })
+                                            .when_some(vals.float64, |el, v| {
+                                                let display = if v.is_nan() || v.is_infinite() {
+                                                    format!("{}", v)
+                                                } else {
+                                                    format!("{:.10}", v)
+                                                };
+                                                el.child(
+                                                    div()
+                                                        .flex()
+                                                        .gap_2()
+                                                        .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("Float64:"))
+                                                        .child(div().w(px(180.0)).text_right().text_color(rgb(0xffff00)).child(display))
+                                                )
+                                            })
+                                    )
+                                    // Hex column
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .flex_col()
+                                            .gap_1()
+                                            .child(
+                                                div()
+                                                    .flex()
+                                                    .gap_2()
+                                                    .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("Hex8:"))
+                                                    .child(div().text_color(rgb(0x4a9eff)).child(format!("0x{:02X}", vals.uint8)))
+                                            )
+                                            .when_some(vals.uint16, |el, v| {
+                                                el.child(
+                                                    div()
+                                                        .flex()
+                                                        .gap_2()
+                                                        .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("Hex16:"))
+                                                        .child(div().text_color(rgb(0x4a9eff)).child(format!("0x{:04X}", v)))
+                                                )
+                                            })
+                                            .when_some(vals.uint32, |el, v| {
+                                                el.child(
+                                                    div()
+                                                        .flex()
+                                                        .gap_2()
+                                                        .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("Hex32:"))
+                                                        .child(div().text_color(rgb(0x4a9eff)).child(format!("0x{:08X}", v)))
+                                                )
+                                            })
+                                            .when_some(vals.uint64, |el, v| {
+                                                el.child(
+                                                    div()
+                                                        .flex()
+                                                        .gap_2()
+                                                        .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("Hex64:"))
+                                                        .child(div().text_color(rgb(0x4a9eff)).child(format!("0x{:016X}", v)))
+                                                )
+                                            })
+                                    )
+                            )
+                        })
+                        // No data message
+                        .when(self.document.len() == 0, |el| {
+                            el.child(
+                                div()
+                                    .text_color(rgb(0x808080))
+                                    .child("No data available")
+                            )
+                        })
+                )
+            })
     }
 }
 

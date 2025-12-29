@@ -39,6 +39,25 @@ pub fn handle_key_event(
         return;
     }
 
+    // Check for Ctrl+I or Cmd+I (toggle data inspector)
+    if event.keystroke.key == "i"
+        && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
+    {
+        editor.toggle_inspector();
+        cx.notify();
+        return;
+    }
+
+    // Check for Ctrl+E or Cmd+E (toggle endianness when inspector is visible)
+    if event.keystroke.key == "e"
+        && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
+        && editor.inspector_visible
+    {
+        editor.toggle_inspector_endian();
+        cx.notify();
+        return;
+    }
+
     // Check for Escape (close search or cancel ongoing search)
     if event.keystroke.key == "escape" && editor.search_visible {
         if editor.is_searching {

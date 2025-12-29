@@ -14,6 +14,16 @@ pub enum EditPane {
     Ascii,
 }
 
+/// Byte order for multi-byte value interpretation
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum Endian {
+    /// Little-endian (least significant byte first)
+    #[default]
+    Little,
+    /// Big-endian (most significant byte first)
+    Big,
+}
+
 /// Hex nibble position tracker
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HexNibble {
@@ -58,6 +68,125 @@ pub fn format_file_size(size: usize) -> String {
         format!("{:.1} MB", size as f64 / (1024.0 * 1024.0))
     } else {
         format!("{:.1} GB", size as f64 / (1024.0 * 1024.0 * 1024.0))
+    }
+}
+
+/// Data inspector interpretation results
+pub struct DataInspectorValues {
+    pub int8: i8,
+    pub uint8: u8,
+    pub int16: Option<i16>,
+    pub uint16: Option<u16>,
+    pub int32: Option<i32>,
+    pub uint32: Option<u32>,
+    pub int64: Option<i64>,
+    pub uint64: Option<u64>,
+    pub float32: Option<f32>,
+    pub float64: Option<f64>,
+}
+
+impl DataInspectorValues {
+    /// Create data inspector values from bytes at cursor position
+    ///
+    /// # Arguments
+    /// * `get_byte` - Function to get byte at position
+    /// * `cursor_pos` - Current cursor position
+    /// * `doc_len` - Total document length
+    /// * `endian` - Byte order for multi-byte values
+    pub fn from_bytes<F>(get_byte: F, cursor_pos: usize, doc_len: usize, endian: Endian) -> Option<Self>
+    where
+        F: Fn(usize) -> Option<u8>,
+    {
+        let b0 = get_byte(cursor_pos)?;
+
+        // Get bytes for multi-byte values
+        let bytes_available = doc_len.saturating_sub(cursor_pos);
+
+        let b1 = if bytes_available >= 2 { get_byte(cursor_pos + 1) } else { None };
+        let b2 = if bytes_available >= 3 { get_byte(cursor_pos + 2) } else { None };
+        let b3 = if bytes_available >= 4 { get_byte(cursor_pos + 3) } else { None };
+        let b4 = if bytes_available >= 5 { get_byte(cursor_pos + 4) } else { None };
+        let b5 = if bytes_available >= 6 { get_byte(cursor_pos + 5) } else { None };
+        let b6 = if bytes_available >= 7 { get_byte(cursor_pos + 6) } else { None };
+        let b7 = if bytes_available >= 8 { get_byte(cursor_pos + 7) } else { None };
+
+        // 16-bit values
+        let (int16, uint16) = if let Some(b1) = b1 {
+            let bytes = match endian {
+                Endian::Little => [b0, b1],
+                Endian::Big => [b1, b0],
+            };
+            let val = match endian {
+                Endian::Little => i16::from_le_bytes(bytes),
+                Endian::Big => i16::from_be_bytes([b0, b1]),
+            };
+            let uval = match endian {
+                Endian::Little => u16::from_le_bytes(bytes),
+                Endian::Big => u16::from_be_bytes([b0, b1]),
+            };
+            (Some(val), Some(uval))
+        } else {
+            (None, None)
+        };
+
+        // 32-bit values
+        let (int32, uint32, float32) = if let (Some(b1), Some(b2), Some(b3)) = (b1, b2, b3) {
+            let bytes = match endian {
+                Endian::Little => [b0, b1, b2, b3],
+                Endian::Big => [b3, b2, b1, b0],
+            };
+            let val = match endian {
+                Endian::Little => i32::from_le_bytes(bytes),
+                Endian::Big => i32::from_be_bytes([b0, b1, b2, b3]),
+            };
+            let uval = match endian {
+                Endian::Little => u32::from_le_bytes(bytes),
+                Endian::Big => u32::from_be_bytes([b0, b1, b2, b3]),
+            };
+            let fval = match endian {
+                Endian::Little => f32::from_le_bytes(bytes),
+                Endian::Big => f32::from_be_bytes([b0, b1, b2, b3]),
+            };
+            (Some(val), Some(uval), Some(fval))
+        } else {
+            (None, None, None)
+        };
+
+        // 64-bit values
+        let (int64, uint64, float64) = if let (Some(b1), Some(b2), Some(b3), Some(b4), Some(b5), Some(b6), Some(b7)) = (b1, b2, b3, b4, b5, b6, b7) {
+            let bytes = match endian {
+                Endian::Little => [b0, b1, b2, b3, b4, b5, b6, b7],
+                Endian::Big => [b7, b6, b5, b4, b3, b2, b1, b0],
+            };
+            let val = match endian {
+                Endian::Little => i64::from_le_bytes(bytes),
+                Endian::Big => i64::from_be_bytes([b0, b1, b2, b3, b4, b5, b6, b7]),
+            };
+            let uval = match endian {
+                Endian::Little => u64::from_le_bytes(bytes),
+                Endian::Big => u64::from_be_bytes([b0, b1, b2, b3, b4, b5, b6, b7]),
+            };
+            let fval = match endian {
+                Endian::Little => f64::from_le_bytes(bytes),
+                Endian::Big => f64::from_be_bytes([b0, b1, b2, b3, b4, b5, b6, b7]),
+            };
+            (Some(val), Some(uval), Some(fval))
+        } else {
+            (None, None, None)
+        };
+
+        Some(Self {
+            int8: b0 as i8,
+            uint8: b0,
+            int16,
+            uint16,
+            int32,
+            uint32,
+            int64,
+            uint64,
+            float32,
+            float64,
+        })
     }
 }
 
