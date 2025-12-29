@@ -825,16 +825,18 @@ impl Render for HexEditor {
                         let cursor_pos = self.cursor_position;
                         let edit_pane = self.edit_pane;
                         let selection_range = self.selection_range();
+                        let cursor_row = cursor_pos / self.bytes_per_row;
+                        let is_cursor_row = row == cursor_row;
 
                         div()
                             .flex()
                             .gap_4()
                             .mb_1()
                             .child(
-                                // Address column
+                                // Address column - highlight cursor row
                                 div()
                                     .w(px(80.0))
-                                    .text_color(rgb(0x808080))
+                                    .text_color(if is_cursor_row { rgb(0x4a9eff) } else { rgb(0x808080) })
                                     .child(address)
                             )
                             .child(
