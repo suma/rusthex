@@ -9,95 +9,27 @@
 //! - `keyboard` - Keyboard event handling and shortcuts
 //! - `ui` - UI types and utility functions
 
+mod compare;
 mod document;
 mod keyboard;
 mod search;
+mod tab;
+mod tabs;
 mod ui;
 
 use document::Document;
 pub use search::SearchMode;
+use tab::EditorTab;
 pub use ui::{EditPane, HexNibble, Endian};
 use gpui::{
     App, Application, Bounds, Context, ExternalPaths, Focusable, FocusHandle, PathPromptOptions,
-    Pixels, Point, PromptLevel, SharedString, Timer, Window, WindowBounds, WindowOptions,
-    div, prelude::*, px, rgb, rgba, size, ScrollHandle,
+    Point, PromptLevel, SharedString, Timer, Window, WindowBounds, WindowOptions,
+    div, prelude::*, px, rgb, rgba, size,
 };
 use std::time::Duration;
-use gpui_component::scroll::{Scrollbar, ScrollbarState, ScrollbarShow};
+use std::sync::atomic::Ordering;
+use gpui_component::scroll::{Scrollbar, ScrollbarShow};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::collections::HashSet;
-
-/// Represents a single editor tab with its own document and state
-struct EditorTab {
-    document: Document,
-    cursor_position: usize,
-    scroll_handle: ScrollHandle,
-    scrollbar_state: ScrollbarState,
-    scroll_offset: Pixels,
-    selection_start: Option<usize>,
-    edit_pane: EditPane,
-    hex_nibble: HexNibble,
-    // Search state per tab
-    search_visible: bool,
-    search_query: String,
-    search_mode: SearchMode,
-    search_results: Vec<usize>,
-    current_search_index: Option<usize>,
-    is_searching: bool,
-    search_truncated: bool,
-    search_cancel_flag: Arc<AtomicBool>,
-    shared_search_results: Arc<Mutex<Option<(Vec<usize>, HashSet<usize>, bool)>>>,
-    search_match_set: HashSet<usize>,
-    search_progress: Arc<AtomicUsize>,
-    search_total: usize,
-}
-
-impl EditorTab {
-    fn new() -> Self {
-        Self {
-            document: Document::new(),
-            cursor_position: 0,
-            scroll_handle: ScrollHandle::new(),
-            scrollbar_state: ScrollbarState::default(),
-            scroll_offset: px(0.0),
-            selection_start: None,
-            edit_pane: EditPane::Hex,
-            hex_nibble: HexNibble::High,
-            search_visible: false,
-            search_query: String::new(),
-            search_mode: SearchMode::Ascii,
-            search_results: Vec::new(),
-            current_search_index: None,
-            is_searching: false,
-            search_truncated: false,
-            search_cancel_flag: Arc::new(AtomicBool::new(false)),
-            shared_search_results: Arc::new(Mutex::new(None)),
-            search_match_set: HashSet::new(),
-            search_progress: Arc::new(AtomicUsize::new(0)),
-            search_total: 0,
-        }
-    }
-
-    fn with_document(document: Document) -> Self {
-        Self {
-            document,
-            ..Self::new()
-        }
-    }
-
-    /// Get display name for the tab
-    fn display_name(&self) -> String {
-        if let Some(name) = self.document.file_name() {
-            let modified = if self.document.has_unsaved_changes() { "*" } else { "" };
-            format!("{}{}", name, modified)
-        } else {
-            let modified = if self.document.has_unsaved_changes() { "*" } else { "" };
-            format!("Untitled{}", modified)
-        }
-    }
-}
 
 struct HexEditor {
     tabs: Vec<EditorTab>,
@@ -151,68 +83,6 @@ impl HexEditor {
         &mut self.tabs[self.active_tab]
     }
 
-    /// Create a new empty tab
-    fn new_tab(&mut self) {
-        self.tabs.push(EditorTab::new());
-        self.active_tab = self.tabs.len() - 1;
-    }
-
-    /// Close current tab
-    fn close_tab(&mut self) -> bool {
-        if self.tabs.len() <= 1 {
-            return false; // Don't close the last tab
-        }
-        self.tabs.remove(self.active_tab);
-        if self.active_tab >= self.tabs.len() {
-            self.active_tab = self.tabs.len() - 1;
-        }
-        true
-    }
-
-    /// Switch to next tab
-    fn next_tab(&mut self) {
-        if self.tabs.len() > 1 {
-            self.active_tab = (self.active_tab + 1) % self.tabs.len();
-        }
-    }
-
-    /// Switch to previous tab
-    fn prev_tab(&mut self) {
-        if self.tabs.len() > 1 {
-            self.active_tab = if self.active_tab == 0 {
-                self.tabs.len() - 1
-            } else {
-                self.active_tab - 1
-            };
-        }
-    }
-
-    /// Switch to specific tab by index
-    fn switch_to_tab(&mut self, index: usize) {
-        if index < self.tabs.len() {
-            self.active_tab = index;
-        }
-    }
-
-    /// Reorder tabs by moving a tab from one index to another
-    fn reorder_tab(&mut self, from: usize, to: usize) {
-        if from >= self.tabs.len() || to >= self.tabs.len() || from == to {
-            return;
-        }
-
-        let tab = self.tabs.remove(from);
-        self.tabs.insert(to, tab);
-
-        // Update active_tab to follow the moved tab if it was active
-        if self.active_tab == from {
-            self.active_tab = to;
-        } else if from < self.active_tab && to >= self.active_tab {
-            self.active_tab -= 1;
-        } else if from > self.active_tab && to <= self.active_tab {
-            self.active_tab += 1;
-        }
-    }
-
     /// Toggle data inspector visibility
     fn toggle_inspector(&mut self) {
         self.inspector_visible = !self.inspector_visible;
@@ -226,58 +96,10 @@ impl HexEditor {
         };
     }
 
-    /// Start compare mode - show tab selection dialog
-    fn start_compare_mode(&mut self) {
-        if self.tabs.len() < 2 {
-            self.save_message = Some("Compare mode requires 2 or more tabs".to_string());
-            return;
-        }
-        self.compare_selection_visible = true;
-    }
-
-    /// Exit compare mode
-    fn exit_compare_mode(&mut self) {
-        self.compare_mode = false;
-        self.compare_tab_index = None;
-        self.compare_selection_visible = false;
-        // Reset scroll position to ensure cursor is visible after exiting compare mode
-        // This prevents scroll position mismatch when compare_row_count != row_count
-        self.ensure_cursor_visible_by_row();
-    }
-
-    /// Select a tab for comparison
-    fn select_compare_tab(&mut self, index: usize) {
-        if index == self.active_tab {
-            self.save_message = Some("Please select a different tab".to_string());
-            return;
-        }
-        if index >= self.tabs.len() {
-            return;
-        }
-        self.compare_tab_index = Some(index);
-        self.compare_mode = true;
-        self.compare_selection_visible = false;
-        self.save_message = Some("Compare mode: Press Esc to exit".to_string());
-    }
-
-    /// Get compare tab reference
-    fn compare_tab(&self) -> Option<&EditorTab> {
-        self.compare_tab_index.map(|idx| &self.tabs[idx])
-    }
-
     fn load_file(&mut self, path: PathBuf) -> std::io::Result<()> {
         self.tab_mut().document.load(path)?;
         self.tab_mut().cursor_position = 0;
         self.tab_mut().selection_start = None;
-        Ok(())
-    }
-
-    /// Open file in a new tab
-    fn open_file_in_new_tab(&mut self, path: PathBuf) -> std::io::Result<()> {
-        let mut doc = Document::new();
-        doc.load(path)?;
-        self.tabs.push(EditorTab::with_document(doc));
-        self.active_tab = self.tabs.len() - 1;
         Ok(())
     }
 
