@@ -10,6 +10,7 @@
 //! - `ui` - UI types and utility functions
 
 mod compare;
+mod config;
 mod document;
 mod keyboard;
 mod search;
@@ -17,6 +18,7 @@ mod tab;
 mod tabs;
 mod ui;
 
+use config::Settings;
 use document::Document;
 pub use search::SearchMode;
 use tab::EditorTab;
@@ -34,7 +36,7 @@ use std::path::PathBuf;
 struct HexEditor {
     tabs: Vec<EditorTab>,
     active_tab: usize,
-    bytes_per_row: usize,
+    settings: Settings,
     focus_handle: FocusHandle,
     save_message: Option<String>,
     content_view_rows: usize,
@@ -54,23 +56,33 @@ struct HexEditor {
 
 impl HexEditor {
     fn new(cx: &mut Context<Self>) -> Self {
+        let settings = Settings::load();
+        let inspector_endian = match settings.editor.default_endian {
+            config::DefaultEndian::Little => Endian::Little,
+            config::DefaultEndian::Big => Endian::Big,
+        };
         Self {
             tabs: vec![EditorTab::new()],
             active_tab: 0,
-            bytes_per_row: 16,
+            settings,
             focus_handle: cx.focus_handle(),
             save_message: None,
             content_view_rows: 20,
             is_dragging: false,
             drag_pane: None,
             inspector_visible: false,
-            inspector_endian: Endian::Little,
+            inspector_endian,
             dragging_tab_index: None,
             tab_drop_target: None,
             compare_mode: false,
             compare_tab_index: None,
             compare_selection_visible: false,
         }
+    }
+
+    /// Get bytes per row from settings
+    fn bytes_per_row(&self) -> usize {
+        self.settings.display.bytes_per_row
     }
 
     /// Get current active tab
@@ -154,8 +166,8 @@ impl HexEditor {
 
     // Ensure cursor is visible by scrolling to its row
     fn ensure_cursor_visible_by_row(&mut self) {
-        let cursor_row = self.tab().cursor_position / self.bytes_per_row;
-        let total_rows = ui::row_count(self.tab().document.len(), self.bytes_per_row);
+        let cursor_row = self.tab().cursor_position / self.bytes_per_row();
+        let total_rows = ui::row_count(self.tab().document.len(), self.bytes_per_row());
         let current_offset = self.tab().scroll_handle.offset();
 
         if let Some(new_y_offset) = ui::calculate_scroll_to_row(
@@ -189,15 +201,15 @@ impl HexEditor {
     }
 
     fn move_cursor_up(&mut self) {
-        if self.tab().cursor_position >= self.bytes_per_row {
-            self.tab_mut().cursor_position -= self.bytes_per_row;
+        if self.tab().cursor_position >= self.bytes_per_row() {
+            self.tab_mut().cursor_position -= self.bytes_per_row();
             self.tab_mut().hex_nibble = HexNibble::High;
             self.ensure_cursor_visible_by_row();
         }
     }
 
     fn move_cursor_down(&mut self) {
-        let new_pos = self.tab().cursor_position + self.bytes_per_row;
+        let new_pos = self.tab().cursor_position + self.bytes_per_row();
         if new_pos < self.tab().document.len() {
             self.tab_mut().cursor_position = new_pos;
             self.tab_mut().hex_nibble = HexNibble::High;
@@ -208,7 +220,7 @@ impl HexEditor {
     // Page Up: Move cursor up by one page
     fn move_cursor_page_up(&mut self, visible_rows: usize) {
         let rows_to_move = visible_rows.saturating_sub(1).max(1);
-        let bytes_to_move = rows_to_move * self.bytes_per_row;
+        let bytes_to_move = rows_to_move * self.bytes_per_row();
         let new_pos = self.tab().cursor_position.saturating_sub(bytes_to_move);
         self.tab_mut().cursor_position = new_pos;
         self.tab_mut().hex_nibble = HexNibble::High;
@@ -218,7 +230,7 @@ impl HexEditor {
     // Page Down: Move cursor down by one page
     fn move_cursor_page_down(&mut self, visible_rows: usize) {
         let rows_to_move = visible_rows.saturating_sub(1).max(1);
-        let bytes_to_move = rows_to_move * self.bytes_per_row;
+        let bytes_to_move = rows_to_move * self.bytes_per_row();
         let new_pos = self.tab().cursor_position + bytes_to_move;
         if new_pos < self.tab().document.len() {
             self.tab_mut().cursor_position = new_pos;
@@ -231,16 +243,16 @@ impl HexEditor {
 
     // Home: Move cursor to the beginning of the current row
     fn move_cursor_home(&mut self) {
-        let current_row = self.tab().cursor_position / self.bytes_per_row;
-        self.tab_mut().cursor_position = current_row * self.bytes_per_row;
+        let current_row = self.tab().cursor_position / self.bytes_per_row();
+        self.tab_mut().cursor_position = current_row * self.bytes_per_row();
         self.tab_mut().hex_nibble = HexNibble::High;
         self.ensure_cursor_visible_by_row();
     }
 
     // End: Move cursor to the end of the current row
     fn move_cursor_end(&mut self) {
-        let current_row = self.tab().cursor_position / self.bytes_per_row;
-        let row_end = ((current_row + 1) * self.bytes_per_row).min(self.tab().document.len()) - 1;
+        let current_row = self.tab().cursor_position / self.bytes_per_row();
+        let row_end = ((current_row + 1) * self.bytes_per_row()).min(self.tab().document.len()) - 1;
         self.tab_mut().cursor_position = row_end;
         self.tab_mut().hex_nibble = HexNibble::High;
         self.ensure_cursor_visible_by_row();
@@ -511,7 +523,7 @@ impl Render for HexEditor {
             cx.notify(); // Trigger re-render
         }
 
-        let row_count = ui::row_count(self.tab().document.len(), self.bytes_per_row);
+        let row_count = ui::row_count(self.tab().document.len(), self.bytes_per_row());
 
         // Phase 1: Get current scroll position
         let scroll_position = self.tab().scroll_handle.offset();
@@ -530,7 +542,7 @@ impl Render for HexEditor {
             self.tab().scroll_offset,
             content_height,
             row_count,
-            self.bytes_per_row,
+            self.bytes_per_row(),
         );
         let render_start = visible_range.render_start;
         let render_end = visible_range.render_end;
@@ -858,7 +870,7 @@ impl Render for HexEditor {
                                 }
 
                                 // Get current values from this (not captured snapshots)
-                                let bytes_per_row = this.bytes_per_row;
+                                let bytes_per_row = this.bytes_per_row();
                                 let doc_len = this.tab().document.len();
                                 let scroll_offset_f32: f32 = (-f32::from(this.tab().scroll_offset)).max(0.0);
 
@@ -928,7 +940,7 @@ impl Render for HexEditor {
                                     .flex()
                                     .flex_col()
                                     .font_family("Monaco")
-                                    .text_sm()
+                                    .text_size(px(self.settings.display.font_size))
                                     // Phase 3: Top spacer for virtual scrolling
                                     .when(render_start > 0, |parent| {
                                         parent.child(
@@ -937,13 +949,13 @@ impl Render for HexEditor {
                                     })
                                     // Render only visible rows
                                     .children((render_start..render_end).map(|row| {
-                        let address = ui::format_address(row * self.bytes_per_row);
-                        let start = row * self.bytes_per_row;
-                        let end = (start + self.bytes_per_row).min(self.tab().document.len());
+                        let address = ui::format_address(row * self.bytes_per_row());
+                        let start = row * self.bytes_per_row();
+                        let end = (start + self.bytes_per_row()).min(self.tab().document.len());
                         let cursor_pos = self.tab().cursor_position;
                         let edit_pane = self.tab().edit_pane;
                         let selection_range = self.selection_range();
-                        let cursor_row = cursor_pos / self.bytes_per_row;
+                        let cursor_row = cursor_pos / self.bytes_per_row();
                         let is_cursor_row = row == cursor_row;
 
                         div()
@@ -1116,14 +1128,14 @@ impl Render for HexEditor {
                             )
                             // Add search result markers on scrollbar
                             .children({
-                                let total_rows = ui::row_count(self.tab().document.len(), self.bytes_per_row);
+                                let total_rows = ui::row_count(self.tab().document.len(), self.bytes_per_row());
                                 let viewport_height = viewport_bounds.size.height;
 
                                 if total_rows == 0 || viewport_height <= px(0.0) {
                                     Vec::new()
                                 } else {
                                     self.tab().search_results.iter().map(|&result_pos| {
-                                        let result_row = result_pos / self.bytes_per_row;
+                                        let result_row = result_pos / self.bytes_per_row();
                                         let position_ratio = result_row as f32 / total_rows as f32;
 
                                         // Calculate position in pixels relative to viewport height
@@ -1160,14 +1172,14 @@ impl Render for HexEditor {
                 let active_name = self.tabs[self.active_tab].display_name();
                 let compare_name = self.tabs[compare_tab_idx].display_name();
                 let max_len = active_doc.len().max(compare_doc.len());
-                let compare_row_count = ui::row_count(max_len, self.bytes_per_row);
+                let compare_row_count = ui::row_count(max_len, self.bytes_per_row());
 
                 // Calculate visible range specifically for compare mode using compare_row_count
                 let compare_visible_range = ui::calculate_visible_range(
                     self.tab().scroll_offset,
                     content_height,
                     compare_row_count,
-                    self.bytes_per_row,
+                    self.bytes_per_row(),
                 );
                 let compare_render_start = compare_visible_range.render_start;
                 let compare_render_end = compare_visible_range.render_end;
@@ -1177,6 +1189,8 @@ impl Render for HexEditor {
                     compare_render_end,
                     compare_row_count,
                 );
+
+                let font_size = self.settings.display.font_size;
 
                 parent.child(
                     div()
@@ -1230,9 +1244,9 @@ impl Render for HexEditor {
                                                 .flex()
                                                 .flex_col()
                                                 .children((compare_render_start..compare_render_end).map(|row| {
-                                                    let start = row * self.bytes_per_row;
+                                                    let start = row * self.bytes_per_row();
                                                     let address = ui::format_address(start);
-                                                    let cursor_row = cursor_pos / self.bytes_per_row;
+                                                    let cursor_row = cursor_pos / self.bytes_per_row();
                                                     let is_cursor_row = row == cursor_row;
 
                                                     div()
@@ -1245,7 +1259,7 @@ impl Render for HexEditor {
                                                                 .w(px(70.0))
                                                                 .text_color(if is_cursor_row { rgb(0x4a9eff) } else { rgb(0x808080) })
                                                                 .font_family("Monaco")
-                                                                .text_sm()
+                                                                .text_size(px(font_size))
                                                                 .child(address.clone())
                                                         )
                                                         // Left pane hex bytes
@@ -1255,8 +1269,8 @@ impl Render for HexEditor {
                                                                 .gap_1()
                                                                 .flex_1()
                                                                 .font_family("Monaco")
-                                                                .text_sm()
-                                                                .children((start..(start + self.bytes_per_row).min(active_doc.len())).map(|byte_idx| {
+                                                                .text_size(px(font_size))
+                                                                .children((start..(start + self.bytes_per_row()).min(active_doc.len())).map(|byte_idx| {
                                                                     let byte = active_doc.get_byte(byte_idx).unwrap_or(0);
                                                                     let compare_byte = compare_doc.get_byte(byte_idx);
                                                                     let is_diff = compare_byte.map(|b| b != byte).unwrap_or(true);
@@ -1280,8 +1294,8 @@ impl Render for HexEditor {
                                                                 .gap_1()
                                                                 .flex_1()
                                                                 .font_family("Monaco")
-                                                                .text_sm()
-                                                                .children((start..(start + self.bytes_per_row).min(compare_doc.len())).map(|byte_idx| {
+                                                                .text_size(px(font_size))
+                                                                .children((start..(start + self.bytes_per_row()).min(compare_doc.len())).map(|byte_idx| {
                                                                     let byte = compare_doc.get_byte(byte_idx).unwrap_or(0);
                                                                     let active_byte = active_doc.get_byte(byte_idx);
                                                                     let is_diff = active_byte.map(|b| b != byte).unwrap_or(true);
@@ -1806,7 +1820,11 @@ fn main() {
         // Initialize gpui-component theme for Scrollbar support
         gpui_component::theme::init(cx);
 
-        let bounds = Bounds::centered(None, size(px(800.0), px(600.0)), cx);
+        // Load settings for window size
+        let settings = Settings::load();
+        let window_width = settings.window.width as f32;
+        let window_height = settings.window.height as f32;
+        let bounds = Bounds::centered(None, size(px(window_width), px(window_height)), cx);
         cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),

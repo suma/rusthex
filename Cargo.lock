@@ -4725,9 +4725,12 @@ dependencies = [
 name = "rusthex"
 version = "0.1.0"
 dependencies = [
+ "dirs 5.0.1",
  "gpui",
  "gpui-component",
  "memmap2",
+ "serde",
+ "toml 0.8.23",
 ]
 
 [[package]]
