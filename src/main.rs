@@ -867,12 +867,15 @@ impl Render for HexEditor {
 
                                 // Content area offset calculated dynamically
                                 // Base: ~152px (header + padding)
+                                // Tab bar adds ~30px when multiple tabs exist
                                 // Search bar adds ~50px when visible
-                                let content_top = if this.tab().search_visible {
-                                    202.0
-                                } else {
-                                    152.0
-                                };
+                                let mut content_top = 152.0;
+                                if this.tabs.len() > 1 {
+                                    content_top += 30.0; // Tab bar height
+                                }
+                                if this.tab().search_visible {
+                                    content_top += 50.0; // Search bar height
+                                }
                                 let relative_y = mouse_y - content_top + scroll_offset_f32;
 
                                 let row = if relative_y < 0.0 {
