@@ -912,10 +912,10 @@ impl Render for HexEditor {
                                 let mouse_y: f32 = event.position.y.into();
 
                                 // Content area offset calculated dynamically
-                                // Base: ~152px (header + padding)
+                                // Base: ~152px (header + padding) + row_height (header row within content)
                                 // Tab bar adds ~40px when multiple tabs exist (py_1*2 + text + border)
                                 // Search bar adds ~50px when visible
-                                let mut content_top = 152.0;
+                                let mut content_top = 152.0 + row_height;
                                 if this.tabs.len() > 1 {
                                     content_top += 40.0; // Tab bar height
                                 }
