@@ -190,7 +190,10 @@ impl DataInspectorValues {
     }
 }
 
-/// Row height constant in pixels (content: 20px + margin-bottom mb_1: 4px)
+/// Default row height constant in pixels (content: 20px + margin-bottom mb_1: 4px)
+/// This is kept for documentation and potential fallback use.
+/// Actual row height is calculated from font metrics (ascent + descent + margin).
+#[allow(dead_code)]
 pub const ROW_HEIGHT: f64 = 24.0;
 
 /// Maximum virtual height to avoid f32 precision issues
@@ -213,12 +216,12 @@ pub struct VisibleRange {
 /// * `scroll_offset` - Current scroll offset (negative when scrolled down)
 /// * `content_height` - Height of content area in pixels (excluding header/status bar)
 /// * `total_rows` - Total number of rows in the document
-/// * `_bytes_per_row` - Bytes per row (unused, kept for API compatibility)
+/// * `row_height` - Height of each row in pixels (font_size + margin)
 pub fn calculate_visible_range(
     scroll_offset: Pixels,
     content_height: Pixels,
     total_rows: usize,
-    _bytes_per_row: usize,
+    row_height: f64,
 ) -> VisibleRange {
     if total_rows == 0 {
         return VisibleRange { render_start: 0, render_end: 0, visible_rows: 20 };
@@ -226,10 +229,10 @@ pub fn calculate_visible_range(
 
     // Use f64 for calculations to avoid precision loss
     let scroll_offset_f64: f64 = scroll_offset.into();
-    let content_height_f64: f64 = f64::from(content_height).max(ROW_HEIGHT);
+    let content_height_f64: f64 = f64::from(content_height).max(row_height);
 
     // Calculate the actual total content height
-    let actual_total_height = total_rows as f64 * ROW_HEIGHT;
+    let actual_total_height = total_rows as f64 * row_height;
 
     // Calculate first visible row using ratio if content is very large
     let first_visible_row = if actual_total_height > MAX_VIRTUAL_HEIGHT {
@@ -239,7 +242,7 @@ pub fn calculate_visible_range(
     } else {
         let scroll_offset_abs = -scroll_offset_f64;
         if scroll_offset_abs > 0.0 {
-            (scroll_offset_abs / ROW_HEIGHT).floor() as usize
+            (scroll_offset_abs / row_height).floor() as usize
         } else {
             0
         }
@@ -247,7 +250,7 @@ pub fn calculate_visible_range(
 
     // Calculate number of fully visible rows (use floor to exclude partial rows)
     // This is used for cursor visibility - we only count rows that are completely visible
-    let visible_row_count = (content_height_f64 / ROW_HEIGHT).floor() as usize;
+    let visible_row_count = (content_height_f64 / row_height).floor() as usize;
     let visible_row_count = visible_row_count.max(5); // Minimum rows for rendering
 
     // Add buffer rows to prevent flickering during scroll
@@ -275,18 +278,20 @@ pub fn calculate_visible_range(
 /// - current_offset: Current Y scroll offset (negative when scrolled down)
 /// - visible_rows: Number of rows visible in the content area
 /// - total_rows: Total number of rows in the document
+/// - row_height: Height of each row in pixels (font_size + margin)
 pub fn calculate_scroll_to_row(
     cursor_row: usize,
     current_offset: Pixels,
     visible_rows: usize,
     total_rows: usize,
+    row_height: f64,
 ) -> Option<Pixels> {
     if total_rows == 0 || visible_rows == 0 {
         return None;
     }
 
     let current_offset_f64: f64 = current_offset.into();
-    let actual_total_height = total_rows as f64 * ROW_HEIGHT;
+    let actual_total_height = total_rows as f64 * row_height;
 
     // Calculate first visible row from scroll offset
     // Use floor() to match calculate_visible_range
@@ -297,7 +302,7 @@ pub fn calculate_scroll_to_row(
     } else {
         let scroll_offset_abs = -current_offset_f64;
         if scroll_offset_abs > 0.0 {
-            (scroll_offset_abs / ROW_HEIGHT).floor() as usize
+            (scroll_offset_abs / row_height).floor() as usize
         } else {
             0
         }
@@ -336,7 +341,7 @@ pub fn calculate_scroll_to_row(
         px(-offset as f32)
     } else {
         // Use exact integer multiplication to avoid float errors
-        let offset = (target_row as f64 * ROW_HEIGHT).round();
+        let offset = (target_row as f64 * row_height).round();
         px(-offset as f32)
     };
 
@@ -345,16 +350,23 @@ pub fn calculate_scroll_to_row(
 
 /// Calculate spacer heights for virtual scrolling
 /// Uses capped virtual height to avoid f32 precision issues
+///
+/// Arguments:
+/// - render_start: First row index to render
+/// - render_end: Last row index to render (exclusive)
+/// - total_rows: Total number of rows in the document
+/// - row_height: Height of each row in pixels (font_size + margin)
 pub fn calculate_spacer_heights(
     render_start: usize,
     render_end: usize,
     total_rows: usize,
+    row_height: f64,
 ) -> (Pixels, Pixels) {
     if total_rows == 0 {
         return (px(0.0), px(0.0));
     }
 
-    let actual_total_height = total_rows as f64 * ROW_HEIGHT;
+    let actual_total_height = total_rows as f64 * row_height;
 
     if actual_total_height > MAX_VIRTUAL_HEIGHT {
         // Use ratio-based spacer heights for large files
@@ -367,8 +379,8 @@ pub fn calculate_spacer_heights(
         (px(top_height), px(bottom_height))
     } else {
         // Direct calculation for smaller files
-        let top_height = (render_start as f64 * ROW_HEIGHT) as f32;
-        let bottom_height = ((total_rows - render_end) as f64 * ROW_HEIGHT) as f32;
+        let top_height = (render_start as f64 * row_height) as f32;
+        let bottom_height = ((total_rows - render_end) as f64 * row_height) as f32;
 
         (px(top_height), px(bottom_height))
     }

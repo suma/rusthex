@@ -24,9 +24,9 @@ pub use search::SearchMode;
 use tab::EditorTab;
 pub use ui::{EditPane, HexNibble, Endian};
 use gpui::{
-    App, Application, Bounds, Context, ExternalPaths, Focusable, FocusHandle, PathPromptOptions,
-    Point, PromptLevel, SharedString, Timer, Window, WindowBounds, WindowOptions,
-    div, prelude::*, px, rgb, rgba, size,
+    App, Application, Bounds, Context, ExternalPaths, Focusable, FocusHandle, Font, FontFeatures,
+    FontStyle, FontWeight, PathPromptOptions, Point, PromptLevel, SharedString, Timer, Window,
+    WindowBounds, WindowOptions, div, prelude::*, px, rgb, rgba, size,
 };
 use std::time::Duration;
 use std::sync::atomic::Ordering;
@@ -52,6 +52,8 @@ struct HexEditor {
     compare_mode: bool,
     compare_tab_index: Option<usize>,
     compare_selection_visible: bool,
+    // Cached row height (calculated from font metrics in render)
+    cached_row_height: f32,
 }
 
 impl HexEditor {
@@ -77,12 +79,18 @@ impl HexEditor {
             compare_mode: false,
             compare_tab_index: None,
             compare_selection_visible: false,
+            cached_row_height: 24.0, // Default, will be updated in render()
         }
     }
 
     /// Get bytes per row from settings
     fn bytes_per_row(&self) -> usize {
         self.settings.display.bytes_per_row
+    }
+
+    /// Get row height (cached from font metrics calculation in render())
+    fn row_height(&self) -> f64 {
+        self.cached_row_height as f64
     }
 
     /// Get current active tab
@@ -175,6 +183,7 @@ impl HexEditor {
             current_offset.y,
             self.content_view_rows,
             total_rows,
+            self.row_height(),
         ) {
             let new_offset = Point::new(current_offset.x, new_y_offset);
             self.tab_mut().scroll_handle.set_offset(new_offset);
@@ -517,7 +526,23 @@ impl Focusable for HexEditor {
 }
 
 impl Render for HexEditor {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Calculate row height from font metrics
+        let font = Font {
+            family: "Monaco".into(),
+            features: FontFeatures::default(),
+            fallbacks: None,
+            weight: FontWeight::default(),
+            style: FontStyle::Normal,
+        };
+        let font_id = window.text_system().resolve_font(&font);
+        let font_size = px(self.settings.display.font_size);
+        let ascent = window.text_system().ascent(font_id, font_size);
+        let descent = window.text_system().descent(font_id, font_size);
+        // Line height = ascent + |descent| (descent is negative)
+        // Row height = line height + mb_1 margin (4px)
+        self.cached_row_height = f32::from(ascent) + f32::from(descent).abs() + 4.0;
+
         // Update search results if search completed
         if self.update_search_results() {
             cx.notify(); // Trigger re-render
@@ -542,7 +567,7 @@ impl Render for HexEditor {
             self.tab().scroll_offset,
             content_height,
             row_count,
-            self.bytes_per_row(),
+            self.row_height(),
         );
         let render_start = visible_range.render_start;
         let render_end = visible_range.render_end;
@@ -556,6 +581,7 @@ impl Render for HexEditor {
             render_start,
             render_end,
             row_count,
+            self.row_height(),
         );
 
         // Get display title
@@ -873,6 +899,14 @@ impl Render for HexEditor {
                                 let bytes_per_row = this.bytes_per_row();
                                 let doc_len = this.tab().document.len();
                                 let scroll_offset_f32: f32 = (-f32::from(this.tab().scroll_offset)).max(0.0);
+                                let font_size = this.settings.display.font_size;
+
+                                // Use cached row height calculated from font metrics in render()
+                                let row_height = this.cached_row_height;
+                                // Monospace char width ≈ font_size * 0.6
+                                let char_width = font_size * 0.6;
+                                // Hex byte: 2 chars + gap_1 (4px)
+                                let hex_byte_width = char_width * 2.0 + 4.0;
 
                                 // Calculate row from Y position
                                 let mouse_y: f32 = event.position.y.into();
@@ -893,7 +927,7 @@ impl Render for HexEditor {
                                 let row = if relative_y < 0.0 {
                                     0
                                 } else {
-                                    (relative_y / ui::ROW_HEIGHT as f32) as usize
+                                    (relative_y / row_height) as usize
                                 };
 
                                 let row_start = row * bytes_per_row;
@@ -903,20 +937,17 @@ impl Render for HexEditor {
                                 let byte_in_row = match this.drag_pane {
                                     Some(EditPane::Hex) => {
                                         // Hex column starts at ~112px (16 padding + 80 addr + 16 gap)
-                                        // Each hex byte is ~24px (2 chars + gap)
                                         let hex_start = 112.0;
-                                        let byte_width = 24.0;
                                         if mouse_x < hex_start {
                                             0
                                         } else {
-                                            ((mouse_x - hex_start) / byte_width) as usize
+                                            ((mouse_x - hex_start) / hex_byte_width) as usize
                                         }
                                     }
                                     Some(EditPane::Ascii) => {
-                                        // ASCII column is ~10px per char
-                                        // Approximate starting position
-                                        let char_width = 10.0;
-                                        let ascii_start = 112.0 + (bytes_per_row as f32 * 24.0) + 16.0;
+                                        // ASCII column position depends on hex column width
+                                        let hex_column_width = bytes_per_row as f32 * hex_byte_width;
+                                        let ascii_start = 112.0 + hex_column_width + 16.0;
                                         if mouse_x < ascii_start {
                                             0
                                         } else {
@@ -1179,7 +1210,7 @@ impl Render for HexEditor {
                     self.tab().scroll_offset,
                     content_height,
                     compare_row_count,
-                    self.bytes_per_row(),
+                    self.row_height(),
                 );
                 let compare_render_start = compare_visible_range.render_start;
                 let compare_render_end = compare_visible_range.render_end;
@@ -1188,6 +1219,7 @@ impl Render for HexEditor {
                     compare_render_start,
                     compare_render_end,
                     compare_row_count,
+                    self.row_height(),
                 );
 
                 let font_size = self.settings.display.font_size;
