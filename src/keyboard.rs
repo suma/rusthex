@@ -97,18 +97,56 @@ pub fn handle_key_event(
         return;
     }
 
-    // Check for Escape (close search or cancel ongoing search)
-    if event.keystroke.key == "escape" && editor.tab().search_visible {
-        if editor.tab().is_searching {
-            // Cancel ongoing search
-            editor.tab().search_cancel_flag.store(true, Ordering::Relaxed);
-            editor.tab_mut().is_searching = false;
+    // Check for Ctrl+K or Cmd+K (compare mode)
+    if event.keystroke.key == "k"
+        && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
+    {
+        if editor.compare_mode {
+            editor.exit_compare_mode();
+        } else {
+            editor.start_compare_mode();
         }
-        editor.tab_mut().search_visible = false;
-        editor.tab_mut().search_results.clear();
-        editor.tab_mut().current_search_index = None;
         cx.notify();
         return;
+    }
+
+    // Handle number keys for compare tab selection (1-9)
+    if editor.compare_selection_visible {
+        if let Some(num) = event.keystroke.key.chars().next().and_then(|c| c.to_digit(10)) {
+            if num >= 1 && num <= 9 {
+                let index = (num as usize) - 1;
+                editor.select_compare_tab(index);
+                cx.notify();
+                return;
+            }
+        }
+    }
+
+    // Check for Escape (close compare mode, tab selection, search, etc.)
+    if event.keystroke.key == "escape" {
+        // Priority: compare selection dialog > compare mode > search
+        if editor.compare_selection_visible {
+            editor.compare_selection_visible = false;
+            cx.notify();
+            return;
+        }
+        if editor.compare_mode {
+            editor.exit_compare_mode();
+            cx.notify();
+            return;
+        }
+        if editor.tab().search_visible {
+            if editor.tab().is_searching {
+                // Cancel ongoing search
+                editor.tab().search_cancel_flag.store(true, Ordering::Relaxed);
+                editor.tab_mut().is_searching = false;
+            }
+            editor.tab_mut().search_visible = false;
+            editor.tab_mut().search_results.clear();
+            editor.tab_mut().current_search_index = None;
+            cx.notify();
+            return;
+        }
     }
 
     // Check for F3 (next search result)

@@ -20,7 +20,7 @@ pub use ui::{EditPane, HexNibble, Endian};
 use gpui::{
     App, Application, Bounds, Context, ExternalPaths, Focusable, FocusHandle, PathPromptOptions,
     Pixels, Point, PromptLevel, SharedString, Timer, Window, WindowBounds, WindowOptions,
-    div, prelude::*, px, rgb, size, ScrollHandle,
+    div, prelude::*, px, rgb, rgba, size, ScrollHandle,
 };
 use std::time::Duration;
 use gpui_component::scroll::{Scrollbar, ScrollbarState, ScrollbarShow};
@@ -114,6 +114,10 @@ struct HexEditor {
     // Tab drag state
     dragging_tab_index: Option<usize>,
     tab_drop_target: Option<usize>,
+    // Compare mode state
+    compare_mode: bool,
+    compare_tab_index: Option<usize>,
+    compare_selection_visible: bool,
 }
 
 impl HexEditor {
@@ -131,6 +135,9 @@ impl HexEditor {
             inspector_endian: Endian::Little,
             dragging_tab_index: None,
             tab_drop_target: None,
+            compare_mode: false,
+            compare_tab_index: None,
+            compare_selection_visible: false,
         }
     }
 
@@ -217,6 +224,45 @@ impl HexEditor {
             Endian::Little => Endian::Big,
             Endian::Big => Endian::Little,
         };
+    }
+
+    /// Start compare mode - show tab selection dialog
+    fn start_compare_mode(&mut self) {
+        if self.tabs.len() < 2 {
+            self.save_message = Some("Compare mode requires 2 or more tabs".to_string());
+            return;
+        }
+        self.compare_selection_visible = true;
+    }
+
+    /// Exit compare mode
+    fn exit_compare_mode(&mut self) {
+        self.compare_mode = false;
+        self.compare_tab_index = None;
+        self.compare_selection_visible = false;
+        // Reset scroll position to ensure cursor is visible after exiting compare mode
+        // This prevents scroll position mismatch when compare_row_count != row_count
+        self.ensure_cursor_visible_by_row();
+    }
+
+    /// Select a tab for comparison
+    fn select_compare_tab(&mut self, index: usize) {
+        if index == self.active_tab {
+            self.save_message = Some("Please select a different tab".to_string());
+            return;
+        }
+        if index >= self.tabs.len() {
+            return;
+        }
+        self.compare_tab_index = Some(index);
+        self.compare_mode = true;
+        self.compare_selection_visible = false;
+        self.save_message = Some("Compare mode: Press Esc to exit".to_string());
+    }
+
+    /// Get compare tab reference
+    fn compare_tab(&self) -> Option<&EditorTab> {
+        self.compare_tab_index.map(|idx| &self.tabs[idx])
     }
 
     fn load_file(&mut self, path: PathBuf) -> std::io::Result<()> {
@@ -752,7 +798,7 @@ impl Render for HexEditor {
                         div()
                             .text_sm()
                             .text_color(rgb(0x808080))
-                            .child("Ctrl+O: open | Ctrl+S: save | Ctrl+T: new tab | Ctrl+W: close tab | Ctrl+Z/Y: undo/redo")
+                            .child("Ctrl+O: open | Ctrl+S: save | Ctrl+T: new tab | Ctrl+W: close | Ctrl+K: compare | Ctrl+Z/Y: undo/redo")
                     )
                     .when(self.save_message.is_some(), |header| {
                         header.child(
@@ -955,7 +1001,8 @@ impl Render for HexEditor {
                         )
                 )
             })
-            .child(
+            // Normal mode: single pane view
+            .when(!self.compare_mode, |parent| parent.child(
                 // Content area with scrollbar
                 div()
                     .flex()
@@ -1279,7 +1326,155 @@ impl Render for HexEditor {
                                 }
                             })
                     )
-            )
+            ))
+            // Compare mode: dual pane view with virtual scrolling
+            .when(self.compare_mode, |parent| {
+                let compare_tab_idx = self.compare_tab_index.unwrap_or(0);
+                let active_doc = &self.tabs[self.active_tab].document;
+                let compare_doc = &self.tabs[compare_tab_idx].document;
+                let active_name = self.tabs[self.active_tab].display_name();
+                let compare_name = self.tabs[compare_tab_idx].display_name();
+                let max_len = active_doc.len().max(compare_doc.len());
+                let compare_row_count = ui::row_count(max_len, self.bytes_per_row);
+
+                // Calculate visible range specifically for compare mode using compare_row_count
+                let compare_visible_range = ui::calculate_visible_range(
+                    self.tab().scroll_offset,
+                    content_height,
+                    compare_row_count,
+                    self.bytes_per_row,
+                );
+                let compare_render_start = compare_visible_range.render_start;
+                let compare_render_end = compare_visible_range.render_end;
+
+                let (compare_top_spacer, compare_bottom_spacer) = ui::calculate_spacer_heights(
+                    compare_render_start,
+                    compare_render_end,
+                    compare_row_count,
+                );
+
+                parent.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .flex_1()
+                        .pt_4()
+                        .overflow_hidden()
+                        // Header row with pane labels
+                        .child(
+                            div()
+                                .flex()
+                                .gap_2()
+                                .pb_2()
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .text_sm()
+                                        .text_color(rgb(0x4a9eff))
+                                        .child(format!("Left: {}", active_name))
+                                )
+                                .child(
+                                    div()
+                                        .w(px(2.0))
+                                )
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .text_sm()
+                                        .text_color(rgb(0xff8c00))
+                                        .child(format!("Right: {}", compare_name))
+                                )
+                        )
+                        // Synchronized scrolling container with virtual scrolling
+                        .child({
+                            let cursor_pos = self.tab().cursor_position;
+                            div()
+                                .id("compare-scroll")
+                                .flex_1()
+                                .overflow_y_scroll()
+                                .track_scroll(&self.tab().scroll_handle)
+                                .child(
+                                    div()
+                                        .flex()
+                                        .flex_col()
+                                        // Top spacer for virtual scrolling
+                                        .when(compare_render_start > 0, |d| d.child(div().h(compare_top_spacer)))
+                                        // Row container
+                                        .child(
+                                            div()
+                                                .flex()
+                                                .flex_col()
+                                                .children((compare_render_start..compare_render_end).map(|row| {
+                                                    let start = row * self.bytes_per_row;
+                                                    let address = ui::format_address(start);
+                                                    let cursor_row = cursor_pos / self.bytes_per_row;
+                                                    let is_cursor_row = row == cursor_row;
+
+                                                    div()
+                                                        .flex()
+                                                        .gap_2()
+                                                        .mb_1()
+                                                        // Address column
+                                                        .child(
+                                                            div()
+                                                                .w(px(70.0))
+                                                                .text_color(if is_cursor_row { rgb(0x4a9eff) } else { rgb(0x808080) })
+                                                                .font_family("Monaco")
+                                                                .text_sm()
+                                                                .child(address.clone())
+                                                        )
+                                                        // Left pane hex bytes
+                                                        .child(
+                                                            div()
+                                                                .flex()
+                                                                .gap_1()
+                                                                .flex_1()
+                                                                .font_family("Monaco")
+                                                                .text_sm()
+                                                                .children((start..(start + self.bytes_per_row).min(active_doc.len())).map(|byte_idx| {
+                                                                    let byte = active_doc.get_byte(byte_idx).unwrap_or(0);
+                                                                    let compare_byte = compare_doc.get_byte(byte_idx);
+                                                                    let is_diff = compare_byte.map(|b| b != byte).unwrap_or(true);
+                                                                    let is_cursor = byte_idx == cursor_pos;
+                                                                    div()
+                                                                        .when(is_cursor, |d| d.bg(rgb(0x4a9eff)).text_color(rgb(0x000000)))
+                                                                        .when(!is_cursor, |d| d.text_color(if is_diff { rgb(0xff6666) } else { rgb(0x00ff00) }))
+                                                                        .child(format!("{:02X}", byte))
+                                                                }).collect::<Vec<_>>())
+                                                        )
+                                                        // Separator
+                                                        .child(
+                                                            div()
+                                                                .w(px(2.0))
+                                                                .bg(rgb(0x4a9eff))
+                                                        )
+                                                        // Right pane hex bytes
+                                                        .child(
+                                                            div()
+                                                                .flex()
+                                                                .gap_1()
+                                                                .flex_1()
+                                                                .font_family("Monaco")
+                                                                .text_sm()
+                                                                .children((start..(start + self.bytes_per_row).min(compare_doc.len())).map(|byte_idx| {
+                                                                    let byte = compare_doc.get_byte(byte_idx).unwrap_or(0);
+                                                                    let active_byte = active_doc.get_byte(byte_idx);
+                                                                    let is_diff = active_byte.map(|b| b != byte).unwrap_or(true);
+                                                                    let is_cursor = byte_idx == cursor_pos;
+                                                                    div()
+                                                                        .when(is_cursor, |d| d.bg(rgb(0xff8c00)).text_color(rgb(0x000000)))
+                                                                        .when(!is_cursor, |d| d.text_color(if is_diff { rgb(0xff6666) } else { rgb(0x00ff00) }))
+                                                                        .child(format!("{:02X}", byte))
+                                                                }).collect::<Vec<_>>())
+                                                        )
+                                                }).collect::<Vec<_>>())
+                                        )
+                                        // Bottom spacer for virtual scrolling
+                                        .when(compare_render_end < compare_row_count, |d| d.child(div().h(compare_bottom_spacer)))
+                                )
+                        })
+                )
+            })
             .child(
                 // Status bar at bottom (two lines)
                 div()
@@ -1699,6 +1894,80 @@ impl Render for HexEditor {
                                     .child("No data available")
                             )
                         })
+                )
+            })
+            // Compare tab selection dialog (modal overlay)
+            .when(self.compare_selection_visible, |parent| {
+                let tabs_info: Vec<(usize, String)> = self.tabs.iter().enumerate()
+                    .filter(|(idx, _)| *idx != self.active_tab)
+                    .map(|(idx, tab)| (idx, tab.display_name()))
+                    .collect();
+
+                parent.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .right_0()
+                        .bottom_0()
+                        .bg(rgba(0x00000080))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(
+                            div()
+                                .bg(rgb(0x2a2a2a))
+                                .border_1()
+                                .border_color(rgb(0x4a9eff))
+                                .rounded_md()
+                                .p_4()
+                                .min_w(px(300.0))
+                                .flex()
+                                .flex_col()
+                                .gap_3()
+                                .child(
+                                    div()
+                                        .text_lg()
+                                        .text_color(rgb(0x4a9eff))
+                                        .child("Select tab to compare")
+                                )
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .text_color(rgb(0x808080))
+                                        .child("Press 1-9 or click to select | Esc: cancel")
+                                )
+                                .children(
+                                    tabs_info.into_iter().map(|(idx, name)| {
+                                        let display_num = if idx < self.active_tab { idx + 1 } else { idx };
+                                        div()
+                                            .id(("compare-tab", idx))
+                                            .flex()
+                                            .gap_2()
+                                            .px_3()
+                                            .py_2()
+                                            .rounded_md()
+                                            .cursor_pointer()
+                                            .bg(rgb(0x333333))
+                                            .hover(|h| h.bg(rgb(0x4a9eff)))
+                                            .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event, _window, cx| {
+                                                this.select_compare_tab(idx);
+                                                cx.notify();
+                                            }))
+                                            .child(
+                                                div()
+                                                    .text_color(rgb(0xff8c00))
+                                                    .w(px(20.0))
+                                                    .child(format!("{}", display_num))
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_color(rgb(0xffffff))
+                                                    .child(name)
+                                            )
+                                    }).collect::<Vec<_>>()
+                                )
+                        )
                 )
             })
     }
