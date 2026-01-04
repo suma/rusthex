@@ -111,6 +111,9 @@ struct HexEditor {
     // Data inspector state (global)
     inspector_visible: bool,
     inspector_endian: Endian,
+    // Tab drag state
+    dragging_tab_index: Option<usize>,
+    tab_drop_target: Option<usize>,
 }
 
 impl HexEditor {
@@ -126,6 +129,8 @@ impl HexEditor {
             drag_pane: None,
             inspector_visible: false,
             inspector_endian: Endian::Little,
+            dragging_tab_index: None,
+            tab_drop_target: None,
         }
     }
 
@@ -179,6 +184,25 @@ impl HexEditor {
     fn switch_to_tab(&mut self, index: usize) {
         if index < self.tabs.len() {
             self.active_tab = index;
+        }
+    }
+
+    /// Reorder tabs by moving a tab from one index to another
+    fn reorder_tab(&mut self, from: usize, to: usize) {
+        if from >= self.tabs.len() || to >= self.tabs.len() || from == to {
+            return;
+        }
+
+        let tab = self.tabs.remove(from);
+        self.tabs.insert(to, tab);
+
+        // Update active_tab to follow the moved tab if it was active
+        if self.active_tab == from {
+            self.active_tab = to;
+        } else if from < self.active_tab && to >= self.active_tab {
+            self.active_tab -= 1;
+        } else if from > self.active_tab && to <= self.active_tab {
+            self.active_tab += 1;
         }
     }
 
@@ -741,6 +765,8 @@ impl Render for HexEditor {
             )
             // Tab bar
             .when(self.tabs.len() > 1, |parent| {
+                let dragging_tab = self.dragging_tab_index;
+                let drop_target = self.tab_drop_target;
                 parent.child(
                     div()
                         .flex()
@@ -750,10 +776,23 @@ impl Render for HexEditor {
                         .bg(rgb(0x252525))
                         .border_b_1()
                         .border_color(rgb(0x404040))
+                        .on_mouse_up(gpui::MouseButton::Left, cx.listener(|this, _event, _window, cx| {
+                            // Complete the drag operation
+                            if let (Some(from), Some(to)) = (this.dragging_tab_index, this.tab_drop_target) {
+                                if from != to {
+                                    this.reorder_tab(from, to);
+                                }
+                            }
+                            this.dragging_tab_index = None;
+                            this.tab_drop_target = None;
+                            cx.notify();
+                        }))
                         .children(
                             self.tabs.iter().enumerate().map(|(idx, tab)| {
                                 let is_active = idx == self.active_tab;
                                 let tab_name = tab.display_name();
+                                let is_being_dragged = dragging_tab == Some(idx);
+                                let is_drop_target = drop_target == Some(idx) && dragging_tab != Some(idx);
                                 div()
                                     .id(("tab", idx))
                                     .flex()
@@ -764,7 +803,16 @@ impl Render for HexEditor {
                                     .text_sm()
                                     .cursor_pointer()
                                     .rounded_t_md()
-                                    .when(is_active, |d| {
+                                    // Drop target indicator (left border)
+                                    .when(is_drop_target, |d| {
+                                        d.border_l_2()
+                                            .border_color(rgb(0x4a9eff))
+                                    })
+                                    // Dragging state (semi-transparent)
+                                    .when(is_being_dragged, |d| {
+                                        d.opacity(0.5)
+                                    })
+                                    .when(is_active && !is_being_dragged, |d| {
                                         d.bg(rgb(0x1e1e1e))
                                             .text_color(rgb(0xffffff))
                                             .border_t_1()
@@ -772,14 +820,24 @@ impl Render for HexEditor {
                                             .border_r_1()
                                             .border_color(rgb(0x404040))
                                     })
-                                    .when(!is_active, |d| {
+                                    .when(!is_active && !is_being_dragged, |d| {
                                         d.bg(rgb(0x2a2a2a))
                                             .text_color(rgb(0x808080))
                                             .hover(|h| h.bg(rgb(0x333333)))
                                     })
                                     .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event, _window, cx| {
+                                        this.dragging_tab_index = Some(idx);
                                         this.switch_to_tab(idx);
                                         cx.notify();
+                                    }))
+                                    .on_mouse_move(cx.listener(move |this, event: &gpui::MouseMoveEvent, _window, cx| {
+                                        // Update drop target when dragging over tabs
+                                        if this.dragging_tab_index.is_some() && event.dragging() {
+                                            if this.tab_drop_target != Some(idx) {
+                                                this.tab_drop_target = Some(idx);
+                                                cx.notify();
+                                            }
+                                        }
                                     }))
                                     .child(tab_name)
                                     .child(
@@ -800,6 +858,9 @@ impl Render for HexEditor {
                                                         this.active_tab -= 1;
                                                     }
                                                 }
+                                                // Clear drag state
+                                                this.dragging_tab_index = None;
+                                                this.tab_drop_target = None;
                                                 cx.notify();
                                             }))
                                             .child("×")
