@@ -18,6 +18,44 @@ pub fn handle_key_event(
     window: &mut Window,
     cx: &mut Context<HexEditor>,
 ) {
+    // Check for Ctrl+T or Cmd+T (new tab)
+    if event.keystroke.key == "t"
+        && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
+    {
+        editor.new_tab();
+        cx.notify();
+        return;
+    }
+
+    // Check for Ctrl+W or Cmd+W (close tab)
+    if event.keystroke.key == "w"
+        && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
+    {
+        editor.close_tab();
+        cx.notify();
+        return;
+    }
+
+    // Check for Ctrl+Tab (next tab)
+    if event.keystroke.key == "tab"
+        && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
+        && !event.keystroke.modifiers.shift
+    {
+        editor.next_tab();
+        cx.notify();
+        return;
+    }
+
+    // Check for Ctrl+Shift+Tab (previous tab)
+    if event.keystroke.key == "tab"
+        && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
+        && event.keystroke.modifiers.shift
+    {
+        editor.prev_tab();
+        cx.notify();
+        return;
+    }
+
     // Check for Ctrl+O or Cmd+O (open file)
     if event.keystroke.key == "o"
         && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
@@ -30,10 +68,11 @@ pub fn handle_key_event(
     if event.keystroke.key == "f"
         && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
     {
-        editor.search_visible = !editor.search_visible;
-        if !editor.search_visible {
-            editor.search_results.clear();
-            editor.current_search_index = None;
+        let visible = !editor.tab().search_visible;
+        editor.tab_mut().search_visible = visible;
+        if !visible {
+            editor.tab_mut().search_results.clear();
+            editor.tab_mut().current_search_index = None;
         }
         cx.notify();
         return;
@@ -59,15 +98,15 @@ pub fn handle_key_event(
     }
 
     // Check for Escape (close search or cancel ongoing search)
-    if event.keystroke.key == "escape" && editor.search_visible {
-        if editor.is_searching {
+    if event.keystroke.key == "escape" && editor.tab().search_visible {
+        if editor.tab().is_searching {
             // Cancel ongoing search
-            editor.search_cancel_flag.store(true, Ordering::Relaxed);
-            editor.is_searching = false;
+            editor.tab().search_cancel_flag.store(true, Ordering::Relaxed);
+            editor.tab_mut().is_searching = false;
         }
-        editor.search_visible = false;
-        editor.search_results.clear();
-        editor.current_search_index = None;
+        editor.tab_mut().search_visible = false;
+        editor.tab_mut().search_results.clear();
+        editor.tab_mut().current_search_index = None;
         cx.notify();
         return;
     }
@@ -91,9 +130,10 @@ pub fn handle_key_event(
         && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
         && !event.keystroke.modifiers.shift
     {
-        if editor.document.len() > 0 {
-            editor.selection_start = Some(0);
-            editor.cursor_position = editor.document.len().saturating_sub(1);
+        if editor.tab().document.len() > 0 {
+            editor.tab_mut().selection_start = Some(0);
+            let end_pos = editor.tab().document.len().saturating_sub(1);
+            editor.tab_mut().cursor_position = end_pos;
             editor.save_message = Some("Selected all".to_string());
             cx.notify();
         }
@@ -123,7 +163,7 @@ pub fn handle_key_event(
         && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
         && !event.keystroke.modifiers.shift
     {
-        if editor.document.undo() {
+        if editor.tab_mut().document.undo() {
             editor.save_message = Some("Undo".to_string());
             cx.notify();
         }
@@ -137,7 +177,7 @@ pub fn handle_key_event(
             && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
             && event.keystroke.modifiers.shift)
     {
-        if editor.document.redo() {
+        if editor.tab_mut().document.redo() {
             editor.save_message = Some("Redo".to_string());
             cx.notify();
         }
@@ -152,8 +192,9 @@ pub fn handle_key_event(
         && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
     {
         if event.keystroke.modifiers.shift {
-            if editor.selection_start.is_none() {
-                editor.selection_start = Some(editor.cursor_position);
+            if editor.tab().selection_start.is_none() {
+                let pos = editor.tab().cursor_position;
+                editor.tab_mut().selection_start = Some(pos);
             }
         } else {
             editor.clear_selection();
@@ -168,8 +209,9 @@ pub fn handle_key_event(
         && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
     {
         if event.keystroke.modifiers.shift {
-            if editor.selection_start.is_none() {
-                editor.selection_start = Some(editor.cursor_position);
+            if editor.tab().selection_start.is_none() {
+                let pos = editor.tab().cursor_position;
+                editor.tab_mut().selection_start = Some(pos);
             }
         } else {
             editor.clear_selection();
@@ -183,8 +225,9 @@ pub fn handle_key_event(
     match event.keystroke.key.as_str() {
         "pageup" => {
             if event.keystroke.modifiers.shift {
-                if editor.selection_start.is_none() {
-                    editor.selection_start = Some(editor.cursor_position);
+                if editor.tab().selection_start.is_none() {
+                    let pos = editor.tab().cursor_position;
+                    editor.tab_mut().selection_start = Some(pos);
                 }
             } else {
                 editor.clear_selection();
@@ -194,8 +237,9 @@ pub fn handle_key_event(
         }
         "pagedown" => {
             if event.keystroke.modifiers.shift {
-                if editor.selection_start.is_none() {
-                    editor.selection_start = Some(editor.cursor_position);
+                if editor.tab().selection_start.is_none() {
+                    let pos = editor.tab().cursor_position;
+                    editor.tab_mut().selection_start = Some(pos);
                 }
             } else {
                 editor.clear_selection();
@@ -205,8 +249,9 @@ pub fn handle_key_event(
         }
         "home" => {
             if event.keystroke.modifiers.shift {
-                if editor.selection_start.is_none() {
-                    editor.selection_start = Some(editor.cursor_position);
+                if editor.tab().selection_start.is_none() {
+                    let pos = editor.tab().cursor_position;
+                    editor.tab_mut().selection_start = Some(pos);
                 }
             } else {
                 editor.clear_selection();
@@ -216,8 +261,9 @@ pub fn handle_key_event(
         }
         "end" => {
             if event.keystroke.modifiers.shift {
-                if editor.selection_start.is_none() {
-                    editor.selection_start = Some(editor.cursor_position);
+                if editor.tab().selection_start.is_none() {
+                    let pos = editor.tab().cursor_position;
+                    editor.tab_mut().selection_start = Some(pos);
                 }
             } else {
                 editor.clear_selection();
@@ -228,8 +274,9 @@ pub fn handle_key_event(
         "up" => {
             if event.keystroke.modifiers.shift {
                 // Start selection if not already selecting
-                if editor.selection_start.is_none() {
-                    editor.selection_start = Some(editor.cursor_position);
+                if editor.tab().selection_start.is_none() {
+                    let pos = editor.tab().cursor_position;
+                    editor.tab_mut().selection_start = Some(pos);
                 }
                 editor.move_cursor_up();
             } else {
@@ -240,8 +287,9 @@ pub fn handle_key_event(
         }
         "down" => {
             if event.keystroke.modifiers.shift {
-                if editor.selection_start.is_none() {
-                    editor.selection_start = Some(editor.cursor_position);
+                if editor.tab().selection_start.is_none() {
+                    let pos = editor.tab().cursor_position;
+                    editor.tab_mut().selection_start = Some(pos);
                 }
                 editor.move_cursor_down();
             } else {
@@ -252,8 +300,9 @@ pub fn handle_key_event(
         }
         "left" => {
             if event.keystroke.modifiers.shift {
-                if editor.selection_start.is_none() {
-                    editor.selection_start = Some(editor.cursor_position);
+                if editor.tab().selection_start.is_none() {
+                    let pos = editor.tab().cursor_position;
+                    editor.tab_mut().selection_start = Some(pos);
                 }
                 editor.move_cursor_left();
             } else {
@@ -264,8 +313,9 @@ pub fn handle_key_event(
         }
         "right" => {
             if event.keystroke.modifiers.shift {
-                if editor.selection_start.is_none() {
-                    editor.selection_start = Some(editor.cursor_position);
+                if editor.tab().selection_start.is_none() {
+                    let pos = editor.tab().cursor_position;
+                    editor.tab_mut().selection_start = Some(pos);
                 }
                 editor.move_cursor_right();
             } else {
@@ -275,14 +325,15 @@ pub fn handle_key_event(
             cx.notify();
         }
         "tab" => {
-            if editor.search_visible {
+            if editor.tab().search_visible {
                 // Toggle search mode
-                editor.search_mode = match editor.search_mode {
+                let new_mode = match editor.tab().search_mode {
                     SearchMode::Ascii => SearchMode::Hex,
                     SearchMode::Hex => SearchMode::Ascii,
                 };
+                editor.tab_mut().search_mode = new_mode;
                 editor.perform_search();
-                if editor.is_searching {
+                if editor.tab().is_searching {
                     editor.start_search_refresh_loop(cx);
                 }
             } else {
@@ -291,17 +342,17 @@ pub fn handle_key_event(
             cx.notify();
         }
         "backspace" => {
-            if editor.search_visible {
-                editor.search_query.pop();
+            if editor.tab().search_visible {
+                editor.tab_mut().search_query.pop();
                 editor.perform_search();
-                if editor.is_searching {
+                if editor.tab().is_searching {
                     editor.start_search_refresh_loop(cx);
                 }
                 cx.notify();
             }
         }
         "enter" => {
-            if editor.search_visible {
+            if editor.tab().search_visible {
                 editor.next_search_result();
                 cx.notify();
             }
@@ -341,19 +392,19 @@ pub fn handle_key_event(
                     };
                 }
 
-                if editor.search_visible {
+                if editor.tab().search_visible {
                     // Add character to search query
                     if (c >= ' ' && c <= '~') || c.is_whitespace() {
-                        editor.search_query.push(c);
+                        editor.tab_mut().search_query.push(c);
                         editor.perform_search();
-                        if editor.is_searching {
+                        if editor.tab().is_searching {
                             editor.start_search_refresh_loop(cx);
                         }
                         cx.notify();
                     }
                 } else {
                     // Normal editing
-                    match editor.edit_pane {
+                    match editor.tab().edit_pane {
                         EditPane::Hex => {
                             if c.is_ascii_hexdigit() {
                                 editor.input_hex(c);

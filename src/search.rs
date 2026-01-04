@@ -32,36 +32,36 @@ impl HexEditor {
     /// Results are asynchronously stored and can be polled via update_search_results()
     pub fn perform_search(&mut self) {
         // Cancel any ongoing search
-        self.search_cancel_flag.store(true, Ordering::Relaxed);
+        self.tab().search_cancel_flag.store(true, Ordering::Relaxed);
 
         // Note: We don't wait for cancellation to complete here to avoid blocking UI thread.
         // The background thread will check the cancel flag periodically and stop on its own.
 
-        self.search_results.clear();
-        self.current_search_index = None;
-        self.search_match_set.clear();
-        self.search_truncated = false;
+        self.tab_mut().search_results.clear();
+        self.tab_mut().current_search_index = None;
+        self.tab_mut().search_match_set.clear();
+        self.tab_mut().search_truncated = false;
 
-        if self.search_query.is_empty() {
-            self.is_searching = false;
+        if self.tab().search_query.is_empty() {
+            self.tab_mut().is_searching = false;
             return;
         }
 
-        let pattern = match self.search_mode {
+        let pattern = match self.tab().search_mode {
             SearchMode::Ascii => {
                 // ASCII search: convert query string to bytes
-                self.search_query.as_bytes().to_vec()
+                self.tab().search_query.as_bytes().to_vec()
             }
             SearchMode::Hex => {
                 // Hex search: parse space-separated hex values
-                let hex_parts: Vec<&str> = self.search_query.split_whitespace().collect();
+                let hex_parts: Vec<&str> = self.tab().search_query.split_whitespace().collect();
                 let mut pattern = Vec::new();
                 for part in hex_parts {
                     if let Ok(byte) = u8::from_str_radix(part, 16) {
                         pattern.push(byte);
                     } else {
                         // Invalid hex, abort search
-                        self.is_searching = false;
+                        self.tab_mut().is_searching = false;
                         return;
                     }
                 }
@@ -70,30 +70,30 @@ impl HexEditor {
         };
 
         if pattern.is_empty() {
-            self.is_searching = false;
+            self.tab_mut().is_searching = false;
             return;
         }
 
         // Reset cancel flag and set searching flag
-        self.search_cancel_flag.store(false, Ordering::Relaxed);
-        self.is_searching = true;
+        self.tab().search_cancel_flag.store(false, Ordering::Relaxed);
+        self.tab_mut().is_searching = true;
 
         // Clear shared results
-        if let Ok(mut results) = self.shared_search_results.lock() {
+        if let Ok(mut results) = self.tab().shared_search_results.lock() {
             *results = None;
         }
 
         // Set up progress tracking
-        self.search_progress.store(0, Ordering::Relaxed);
-        self.search_total = self.document.len();
+        self.tab().search_progress.store(0, Ordering::Relaxed);
+        self.tab_mut().search_total = self.tab().document.len();
 
         // Clone Arc references for the thread
-        let shared_results = Arc::clone(&self.shared_search_results);
-        let cancel_flag = Arc::clone(&self.search_cancel_flag);
-        let progress = Arc::clone(&self.search_progress);
+        let shared_results = Arc::clone(&self.tab().shared_search_results);
+        let cancel_flag = Arc::clone(&self.tab().search_cancel_flag);
+        let progress = Arc::clone(&self.tab().search_progress);
 
         // Prepare search data source (fast - no large copy on UI thread)
-        let data_source = self.document.prepare_search_data();
+        let data_source = self.tab().document.prepare_search_data();
         let pattern_len = pattern.len();
 
         // Spawn background search thread
@@ -145,12 +145,12 @@ impl HexEditor {
     ///
     /// Returns true if search completed this frame
     pub fn update_search_results(&mut self) -> bool {
-        if !self.is_searching {
+        if !self.tab().is_searching {
             return false;
         }
 
         // Check if search completed
-        let results_opt = if let Ok(mut shared_results) = self.shared_search_results.lock() {
+        let results_opt = if let Ok(mut shared_results) = self.tab().shared_search_results.lock() {
             shared_results.take()
         } else {
             None
@@ -158,15 +158,16 @@ impl HexEditor {
 
         if let Some((results, match_set, truncated)) = results_opt {
             // Search completed - receive results, match set, and truncated flag
-            self.search_results = results;
-            self.search_match_set = match_set;
-            self.search_truncated = truncated;
-            self.is_searching = false;
+            self.tab_mut().search_results = results;
+            self.tab_mut().search_match_set = match_set;
+            self.tab_mut().search_truncated = truncated;
+            self.tab_mut().is_searching = false;
 
             // Set current index to first result and scroll to it
-            if !self.search_results.is_empty() {
-                self.current_search_index = Some(0);
-                self.scroll_to_search_result(self.search_results[0]);
+            if !self.tab().search_results.is_empty() {
+                self.tab_mut().current_search_index = Some(0);
+                let first_result = self.tab().search_results[0];
+                self.scroll_to_search_result(first_result);
             }
             return true;
         }
@@ -176,38 +177,40 @@ impl HexEditor {
 
     /// Navigate to next search result
     pub fn next_search_result(&mut self) {
-        if self.search_results.is_empty() {
+        if self.tab().search_results.is_empty() {
             return;
         }
 
-        if let Some(current_idx) = self.current_search_index {
-            let next_idx = (current_idx + 1) % self.search_results.len();
-            self.current_search_index = Some(next_idx);
-            self.scroll_to_search_result(self.search_results[next_idx]);
+        if let Some(current_idx) = self.tab().current_search_index {
+            let next_idx = (current_idx + 1) % self.tab().search_results.len();
+            self.tab_mut().current_search_index = Some(next_idx);
+            let result_pos = self.tab().search_results[next_idx];
+            self.scroll_to_search_result(result_pos);
         }
     }
 
     /// Navigate to previous search result
     pub fn prev_search_result(&mut self) {
-        if self.search_results.is_empty() {
+        if self.tab().search_results.is_empty() {
             return;
         }
 
-        if let Some(current_idx) = self.current_search_index {
+        if let Some(current_idx) = self.tab().current_search_index {
             let prev_idx = if current_idx == 0 {
-                self.search_results.len() - 1
+                self.tab().search_results.len() - 1
             } else {
                 current_idx - 1
             };
-            self.current_search_index = Some(prev_idx);
-            self.scroll_to_search_result(self.search_results[prev_idx]);
+            self.tab_mut().current_search_index = Some(prev_idx);
+            let result_pos = self.tab().search_results[prev_idx];
+            self.scroll_to_search_result(result_pos);
         }
     }
 
     /// Scroll to make search result visible and update cursor
     pub fn scroll_to_search_result(&mut self, result_position: usize) {
         // Update cursor position to the search result
-        self.cursor_position = result_position;
+        self.tab_mut().cursor_position = result_position;
 
         // Use ensure_cursor_visible_by_row() for proper virtual scroll handling
         self.ensure_cursor_visible_by_row();

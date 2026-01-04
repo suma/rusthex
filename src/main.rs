@@ -29,56 +29,42 @@ use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::collections::HashSet;
 
-struct HexEditor {
+/// Represents a single editor tab with its own document and state
+struct EditorTab {
     document: Document,
-    bytes_per_row: usize,
+    cursor_position: usize,
     scroll_handle: ScrollHandle,
     scrollbar_state: ScrollbarState,
-    cursor_position: usize,
-    focus_handle: FocusHandle,
+    scroll_offset: Pixels,
+    selection_start: Option<usize>,
     edit_pane: EditPane,
     hex_nibble: HexNibble,
-    save_message: Option<String>,
-    scroll_offset: Pixels, // Current scroll position in pixels
-    content_view_rows: usize, // Number of rows visible in content area
-    selection_start: Option<usize>, // Selection anchor point
-    is_dragging: bool, // Track if user is currently dragging
-    drag_pane: Option<EditPane>, // Which pane the drag started in
-    // Search state
+    // Search state per tab
     search_visible: bool,
     search_query: String,
     search_mode: SearchMode,
-    search_results: Vec<usize>, // List of byte positions where matches start
-    current_search_index: Option<usize>, // Index into search_results
-    is_searching: bool, // Flag indicating search is in progress
-    search_truncated: bool, // True if search results were truncated due to limit
-    search_cancel_flag: Arc<AtomicBool>, // Flag to cancel ongoing search
-    shared_search_results: Arc<Mutex<Option<(Vec<usize>, HashSet<usize>, bool)>>>, // Shared results, match set, and truncated flag
-    search_match_set: HashSet<usize>, // Set of all byte positions that are part of search matches (for O(1) lookup)
-    search_progress: Arc<AtomicUsize>, // Current search position for progress display
-    search_total: usize, // Total bytes to search (for progress display)
-    // Data inspector state
-    inspector_visible: bool,
-    inspector_endian: Endian,
+    search_results: Vec<usize>,
+    current_search_index: Option<usize>,
+    is_searching: bool,
+    search_truncated: bool,
+    search_cancel_flag: Arc<AtomicBool>,
+    shared_search_results: Arc<Mutex<Option<(Vec<usize>, HashSet<usize>, bool)>>>,
+    search_match_set: HashSet<usize>,
+    search_progress: Arc<AtomicUsize>,
+    search_total: usize,
 }
 
-impl HexEditor {
-    fn new(cx: &mut Context<Self>) -> Self {
+impl EditorTab {
+    fn new() -> Self {
         Self {
             document: Document::new(),
-            bytes_per_row: 16,
+            cursor_position: 0,
             scroll_handle: ScrollHandle::new(),
             scrollbar_state: ScrollbarState::default(),
-            cursor_position: 0,
-            focus_handle: cx.focus_handle(),
+            scroll_offset: px(0.0),
+            selection_start: None,
             edit_pane: EditPane::Hex,
             hex_nibble: HexNibble::High,
-            save_message: None,
-            scroll_offset: px(0.0),
-            content_view_rows: 20, // Default, updated on render
-            selection_start: None,
-            is_dragging: false,
-            drag_pane: None,
             search_visible: false,
             search_query: String::new(),
             search_mode: SearchMode::Ascii,
@@ -91,8 +77,108 @@ impl HexEditor {
             search_match_set: HashSet::new(),
             search_progress: Arc::new(AtomicUsize::new(0)),
             search_total: 0,
+        }
+    }
+
+    fn with_document(document: Document) -> Self {
+        Self {
+            document,
+            ..Self::new()
+        }
+    }
+
+    /// Get display name for the tab
+    fn display_name(&self) -> String {
+        if let Some(name) = self.document.file_name() {
+            let modified = if self.document.has_unsaved_changes() { "*" } else { "" };
+            format!("{}{}", name, modified)
+        } else {
+            let modified = if self.document.has_unsaved_changes() { "*" } else { "" };
+            format!("Untitled{}", modified)
+        }
+    }
+}
+
+struct HexEditor {
+    tabs: Vec<EditorTab>,
+    active_tab: usize,
+    bytes_per_row: usize,
+    focus_handle: FocusHandle,
+    save_message: Option<String>,
+    content_view_rows: usize,
+    is_dragging: bool,
+    drag_pane: Option<EditPane>,
+    // Data inspector state (global)
+    inspector_visible: bool,
+    inspector_endian: Endian,
+}
+
+impl HexEditor {
+    fn new(cx: &mut Context<Self>) -> Self {
+        Self {
+            tabs: vec![EditorTab::new()],
+            active_tab: 0,
+            bytes_per_row: 16,
+            focus_handle: cx.focus_handle(),
+            save_message: None,
+            content_view_rows: 20,
+            is_dragging: false,
+            drag_pane: None,
             inspector_visible: false,
             inspector_endian: Endian::Little,
+        }
+    }
+
+    /// Get current active tab
+    fn tab(&self) -> &EditorTab {
+        &self.tabs[self.active_tab]
+    }
+
+    /// Get current active tab mutably
+    fn tab_mut(&mut self) -> &mut EditorTab {
+        &mut self.tabs[self.active_tab]
+    }
+
+    /// Create a new empty tab
+    fn new_tab(&mut self) {
+        self.tabs.push(EditorTab::new());
+        self.active_tab = self.tabs.len() - 1;
+    }
+
+    /// Close current tab
+    fn close_tab(&mut self) -> bool {
+        if self.tabs.len() <= 1 {
+            return false; // Don't close the last tab
+        }
+        self.tabs.remove(self.active_tab);
+        if self.active_tab >= self.tabs.len() {
+            self.active_tab = self.tabs.len() - 1;
+        }
+        true
+    }
+
+    /// Switch to next tab
+    fn next_tab(&mut self) {
+        if self.tabs.len() > 1 {
+            self.active_tab = (self.active_tab + 1) % self.tabs.len();
+        }
+    }
+
+    /// Switch to previous tab
+    fn prev_tab(&mut self) {
+        if self.tabs.len() > 1 {
+            self.active_tab = if self.active_tab == 0 {
+                self.tabs.len() - 1
+            } else {
+                self.active_tab - 1
+            };
+        }
+    }
+
+    /// Switch to specific tab by index
+    fn switch_to_tab(&mut self, index: usize) {
+        if index < self.tabs.len() {
+            self.active_tab = index;
         }
     }
 
@@ -110,20 +196,29 @@ impl HexEditor {
     }
 
     fn load_file(&mut self, path: PathBuf) -> std::io::Result<()> {
-        self.document.load(path)?;
-        self.cursor_position = 0;
-        self.selection_start = None;
+        self.tab_mut().document.load(path)?;
+        self.tab_mut().cursor_position = 0;
+        self.tab_mut().selection_start = None;
+        Ok(())
+    }
+
+    /// Open file in a new tab
+    fn open_file_in_new_tab(&mut self, path: PathBuf) -> std::io::Result<()> {
+        let mut doc = Document::new();
+        doc.load(path)?;
+        self.tabs.push(EditorTab::with_document(doc));
+        self.active_tab = self.tabs.len() - 1;
         Ok(())
     }
 
     // Selection helper methods
     fn has_selection(&self) -> bool {
-        self.selection_start.is_some()
+        self.tab().selection_start.is_some()
     }
 
     fn selection_range(&self) -> Option<(usize, usize)> {
-        self.selection_start.map(|start| {
-            let end = self.cursor_position;
+        self.tab().selection_start.map(|start| {
+            let end = self.tab().cursor_position;
             if start <= end {
                 (start, end)
             } else {
@@ -133,7 +228,7 @@ impl HexEditor {
     }
 
     fn clear_selection(&mut self) {
-        self.selection_start = None;
+        self.tab_mut().selection_start = None;
     }
 
     fn with_sample_data(cx: &mut Context<Self>) -> Self {
@@ -161,15 +256,15 @@ impl HexEditor {
             }
         }
 
-        editor.document = Document::with_data(data);
+        editor.tab_mut().document = Document::with_data(data);
         editor
     }
 
     // Ensure cursor is visible by scrolling to its row
     fn ensure_cursor_visible_by_row(&mut self) {
-        let cursor_row = self.cursor_position / self.bytes_per_row;
-        let total_rows = ui::row_count(self.document.len(), self.bytes_per_row);
-        let current_offset = self.scroll_handle.offset();
+        let cursor_row = self.tab().cursor_position / self.bytes_per_row;
+        let total_rows = ui::row_count(self.tab().document.len(), self.bytes_per_row);
+        let current_offset = self.tab().scroll_handle.offset();
 
         if let Some(new_y_offset) = ui::calculate_scroll_to_row(
             cursor_row,
@@ -178,42 +273,42 @@ impl HexEditor {
             total_rows,
         ) {
             let new_offset = Point::new(current_offset.x, new_y_offset);
-            self.scroll_handle.set_offset(new_offset);
+            self.tab_mut().scroll_handle.set_offset(new_offset);
             // Keep scroll_offset in sync for mouse drag calculations
-            self.scroll_offset = new_y_offset;
+            self.tab_mut().scroll_offset = new_y_offset;
         }
     }
 
     // Cursor movement methods
     fn move_cursor_left(&mut self) {
-        if self.cursor_position > 0 {
-            self.cursor_position -= 1;
-            self.hex_nibble = HexNibble::High;
+        if self.tab().cursor_position > 0 {
+            self.tab_mut().cursor_position -= 1;
+            self.tab_mut().hex_nibble = HexNibble::High;
             self.ensure_cursor_visible_by_row();
         }
     }
 
     fn move_cursor_right(&mut self) {
-        if self.cursor_position < self.document.len().saturating_sub(1) {
-            self.cursor_position += 1;
-            self.hex_nibble = HexNibble::High;
+        if self.tab().cursor_position < self.tab().document.len().saturating_sub(1) {
+            self.tab_mut().cursor_position += 1;
+            self.tab_mut().hex_nibble = HexNibble::High;
             self.ensure_cursor_visible_by_row();
         }
     }
 
     fn move_cursor_up(&mut self) {
-        if self.cursor_position >= self.bytes_per_row {
-            self.cursor_position -= self.bytes_per_row;
-            self.hex_nibble = HexNibble::High;
+        if self.tab().cursor_position >= self.bytes_per_row {
+            self.tab_mut().cursor_position -= self.bytes_per_row;
+            self.tab_mut().hex_nibble = HexNibble::High;
             self.ensure_cursor_visible_by_row();
         }
     }
 
     fn move_cursor_down(&mut self) {
-        let new_pos = self.cursor_position + self.bytes_per_row;
-        if new_pos < self.document.len() {
-            self.cursor_position = new_pos;
-            self.hex_nibble = HexNibble::High;
+        let new_pos = self.tab().cursor_position + self.bytes_per_row;
+        if new_pos < self.tab().document.len() {
+            self.tab_mut().cursor_position = new_pos;
+            self.tab_mut().hex_nibble = HexNibble::High;
             self.ensure_cursor_visible_by_row();
         }
     }
@@ -222,8 +317,9 @@ impl HexEditor {
     fn move_cursor_page_up(&mut self, visible_rows: usize) {
         let rows_to_move = visible_rows.saturating_sub(1).max(1);
         let bytes_to_move = rows_to_move * self.bytes_per_row;
-        self.cursor_position = self.cursor_position.saturating_sub(bytes_to_move);
-        self.hex_nibble = HexNibble::High;
+        let new_pos = self.tab().cursor_position.saturating_sub(bytes_to_move);
+        self.tab_mut().cursor_position = new_pos;
+        self.tab_mut().hex_nibble = HexNibble::High;
         self.ensure_cursor_visible_by_row();
     }
 
@@ -231,61 +327,62 @@ impl HexEditor {
     fn move_cursor_page_down(&mut self, visible_rows: usize) {
         let rows_to_move = visible_rows.saturating_sub(1).max(1);
         let bytes_to_move = rows_to_move * self.bytes_per_row;
-        let new_pos = self.cursor_position + bytes_to_move;
-        if new_pos < self.document.len() {
-            self.cursor_position = new_pos;
+        let new_pos = self.tab().cursor_position + bytes_to_move;
+        if new_pos < self.tab().document.len() {
+            self.tab_mut().cursor_position = new_pos;
         } else {
-            self.cursor_position = self.document.len().saturating_sub(1);
+            self.tab_mut().cursor_position = self.tab().document.len().saturating_sub(1);
         }
-        self.hex_nibble = HexNibble::High;
+        self.tab_mut().hex_nibble = HexNibble::High;
         self.ensure_cursor_visible_by_row();
     }
 
     // Home: Move cursor to the beginning of the current row
     fn move_cursor_home(&mut self) {
-        let current_row = self.cursor_position / self.bytes_per_row;
-        self.cursor_position = current_row * self.bytes_per_row;
-        self.hex_nibble = HexNibble::High;
+        let current_row = self.tab().cursor_position / self.bytes_per_row;
+        self.tab_mut().cursor_position = current_row * self.bytes_per_row;
+        self.tab_mut().hex_nibble = HexNibble::High;
         self.ensure_cursor_visible_by_row();
     }
 
     // End: Move cursor to the end of the current row
     fn move_cursor_end(&mut self) {
-        let current_row = self.cursor_position / self.bytes_per_row;
-        let row_end = ((current_row + 1) * self.bytes_per_row).min(self.document.len()) - 1;
-        self.cursor_position = row_end;
-        self.hex_nibble = HexNibble::High;
+        let current_row = self.tab().cursor_position / self.bytes_per_row;
+        let row_end = ((current_row + 1) * self.bytes_per_row).min(self.tab().document.len()) - 1;
+        self.tab_mut().cursor_position = row_end;
+        self.tab_mut().hex_nibble = HexNibble::High;
         self.ensure_cursor_visible_by_row();
     }
 
     // Ctrl+Home: Move cursor to the beginning of the file
     fn move_cursor_file_start(&mut self) {
-        self.cursor_position = 0;
-        self.hex_nibble = HexNibble::High;
+        self.tab_mut().cursor_position = 0;
+        self.tab_mut().hex_nibble = HexNibble::High;
         self.ensure_cursor_visible_by_row();
     }
 
     // Ctrl+End: Move cursor to the end of the file
     fn move_cursor_file_end(&mut self) {
-        if self.document.len() > 0 {
-            self.cursor_position = self.document.len() - 1;
+        if self.tab().document.len() > 0 {
+            self.tab_mut().cursor_position = self.tab().document.len() - 1;
         }
-        self.hex_nibble = HexNibble::High;
+        self.tab_mut().hex_nibble = HexNibble::High;
         self.ensure_cursor_visible_by_row();
     }
 
     // Toggle between Hex and ASCII pane
     fn toggle_pane(&mut self) {
-        self.edit_pane = match self.edit_pane {
+        let new_pane = match self.tab().edit_pane {
             EditPane::Hex => EditPane::Ascii,
             EditPane::Ascii => EditPane::Hex,
         };
-        self.hex_nibble = HexNibble::High;
+        self.tab_mut().edit_pane = new_pane;
+        self.tab_mut().hex_nibble = HexNibble::High;
     }
 
     // Handle hex input (0-9, A-F)
     fn input_hex(&mut self, c: char) {
-        if self.cursor_position >= self.document.len() {
+        if self.tab().cursor_position >= self.tab().document.len() {
             return;
         }
 
@@ -296,41 +393,44 @@ impl HexEditor {
             _ => return, // Invalid hex character
         };
 
-        let current_byte = self.document.get_byte(self.cursor_position).unwrap();
+        let cursor_pos = self.tab().cursor_position;
+        let current_byte = self.tab().document.get_byte(cursor_pos).unwrap();
 
-        let new_byte = match self.hex_nibble {
+        let new_byte = match self.tab().hex_nibble {
             HexNibble::High => {
                 // Update upper 4 bits
-                self.hex_nibble = HexNibble::Low;
+                self.tab_mut().hex_nibble = HexNibble::Low;
                 (digit << 4) | (current_byte & 0x0F)
             }
             HexNibble::Low => {
                 // Update lower 4 bits
-                self.hex_nibble = HexNibble::High;
+                self.tab_mut().hex_nibble = HexNibble::High;
                 (current_byte & 0xF0) | digit
             }
         };
 
-        if let Err(e) = self.document.set_byte(self.cursor_position, new_byte) {
+        let cursor_pos = self.tab().cursor_position;
+        if let Err(e) = self.tab_mut().document.set_byte(cursor_pos, new_byte) {
             eprintln!("Failed to set byte: {}", e);
             return;
         }
 
         // Auto-advance to next byte after completing a full byte edit
-        if self.hex_nibble == HexNibble::High {
+        if self.tab().hex_nibble == HexNibble::High {
             self.move_cursor_right();
         }
     }
 
     // Handle ASCII input
     fn input_ascii(&mut self, c: char) {
-        if self.cursor_position >= self.document.len() {
+        if self.tab().cursor_position >= self.tab().document.len() {
             return;
         }
 
         // Only accept printable ASCII characters
         if c >= ' ' && c <= '~' {
-            if let Err(e) = self.document.set_byte(self.cursor_position, c as u8) {
+            let cursor_pos = self.tab().cursor_position;
+            if let Err(e) = self.tab_mut().document.set_byte(cursor_pos, c as u8) {
                 eprintln!("Failed to set byte: {}", e);
                 return;
             }
@@ -341,8 +441,8 @@ impl HexEditor {
 
     // Save file to current path (internal, no confirmation)
     fn save_file(&mut self) -> std::io::Result<()> {
-        self.document.save()?;
-        if let Some(path) = self.document.file_path() {
+        self.tab_mut().document.save()?;
+        if let Some(path) = self.tab().document.file_path() {
             self.save_message = Some(format!("Saved to {}", path.display()));
         }
         Ok(())
@@ -350,7 +450,7 @@ impl HexEditor {
 
     // Save file to a new path
     fn save_file_as(&mut self, path: PathBuf) -> std::io::Result<()> {
-        self.document.save_as(path.clone())?;
+        self.tab_mut().document.save_as(path.clone())?;
         self.save_message = Some(format!("Saved to {}", path.display()));
         Ok(())
     }
@@ -358,14 +458,14 @@ impl HexEditor {
     /// Save file with confirmation dialog
     pub fn save_with_confirmation(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // Check if there are unsaved changes
-        if !self.document.has_unsaved_changes() {
+        if !self.tab().document.has_unsaved_changes() {
             self.save_message = Some("No changes to save".to_string());
             cx.notify();
             return;
         }
 
         // Get file path for the dialog message
-        let file_name = self.document.file_name()
+        let file_name = self.tab().document.file_name()
             .unwrap_or("file")
             .to_string();
 
@@ -414,9 +514,9 @@ impl HexEditor {
             if let Ok(Ok(Some(paths))) = receiver.await {
                 if let Some(path) = paths.into_iter().next() {
                     let _ = entity.update(cx, |editor, cx| {
-                        match editor.load_file(path.clone()) {
+                        match editor.open_file_in_new_tab(path.clone()) {
                             Ok(_) => {
-                                editor.save_message = Some(format!("Opened: {}", path.display()));
+                                editor.save_message = Some(format!("Opened in new tab: {}", path.display()));
                             }
                             Err(e) => {
                                 editor.save_message = Some(format!("Error: {}", e));
@@ -433,7 +533,7 @@ impl HexEditor {
     /// Save As dialog - save file to a new location
     pub fn save_as_dialog(&mut self, cx: &mut Context<Self>) {
         // Get directory and suggested filename from current document
-        let (directory, suggested_name) = if let Some(path) = self.document.file_path() {
+        let (directory, suggested_name) = if let Some(path) = self.tab().document.file_path() {
             let dir = path.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from("."));
             let name = path.file_name().map(|n| n.to_string_lossy().to_string());
             (dir, name)
@@ -461,10 +561,10 @@ impl HexEditor {
         .detach();
     }
 
-    /// Handle file drop event
+    /// Handle file drop event - open in new tab
     pub fn handle_file_drop(&mut self, paths: &ExternalPaths, cx: &mut Context<Self>) {
         if let Some(path) = paths.paths().first() {
-            match self.load_file(path.clone()) {
+            match self.open_file_in_new_tab(path.clone()) {
                 Ok(_) => {
                     self.save_message = Some(format!("Opened: {}", path.display()));
                 }
@@ -488,7 +588,7 @@ impl HexEditor {
 
                 // Check if we should stop (search cancelled or completed)
                 let should_continue = entity.update(cx, |editor, cx| {
-                    if editor.is_searching {
+                    if editor.tab().is_searching {
                         cx.notify(); // Trigger UI refresh
                         true
                     } else {
@@ -519,14 +619,14 @@ impl Render for HexEditor {
             cx.notify(); // Trigger re-render
         }
 
-        let row_count = ui::row_count(self.document.len(), self.bytes_per_row);
+        let row_count = ui::row_count(self.tab().document.len(), self.bytes_per_row);
 
         // Phase 1: Get current scroll position
-        let scroll_position = self.scroll_handle.offset();
-        self.scroll_offset = scroll_position.y;
+        let scroll_position = self.tab().scroll_handle.offset();
+        self.tab_mut().scroll_offset = scroll_position.y;
 
         // Phase 2: Calculate visible range based on viewport
-        let viewport_bounds = self.scroll_handle.bounds();
+        let viewport_bounds = self.tab().scroll_handle.bounds();
         let viewport_height = viewport_bounds.size.height;
 
         // Calculate actual content area height by subtracting header and status bar
@@ -535,7 +635,7 @@ impl Render for HexEditor {
         let content_height = px((f32::from(viewport_height) - f32::from(header_status_height)).max(20.0));
 
         let visible_range = ui::calculate_visible_range(
-            self.scroll_offset,
+            self.tab().scroll_offset,
             content_height,
             row_count,
             self.bytes_per_row,
@@ -555,7 +655,7 @@ impl Render for HexEditor {
         );
 
         // Get display title
-        let title = self.document.file_name()
+        let title = self.tab().document.file_name()
             .unwrap_or("Rust Hex Editor")
             .to_string();
 
@@ -602,7 +702,7 @@ impl Render for HexEditor {
                             .text_color(rgb(0xffffff))
                             .child(format!("{}{}",
                                 title.clone(),
-                                if self.document.has_unsaved_changes() { " *" } else { "" }
+                                if self.tab().document.has_unsaved_changes() { " *" } else { "" }
                             ))
                     )
                     .child(
@@ -610,8 +710,8 @@ impl Render for HexEditor {
                             .text_sm()
                             .text_color(rgb(0x808080))
                             .child(format!("{} bytes{}",
-                                self.document.len(),
-                                if self.document.has_unsaved_changes() { " (modified)" } else { "" }
+                                self.tab().document.len(),
+                                if self.tab().document.has_unsaved_changes() { " (modified)" } else { "" }
                             ))
                     )
                     .child(
@@ -619,7 +719,7 @@ impl Render for HexEditor {
                             .text_sm()
                             .text_color(rgb(0x808080))
                             .child(format!("Edit Mode: {} | Tab: switch | Shift+Arrow: select | Ctrl+A: select all",
-                                match self.edit_pane {
+                                match self.tab().edit_pane {
                                     EditPane::Hex => "HEX",
                                     EditPane::Ascii => "ASCII",
                                 }))
@@ -628,7 +728,7 @@ impl Render for HexEditor {
                         div()
                             .text_sm()
                             .text_color(rgb(0x808080))
-                            .child("Ctrl+O: open | Ctrl+S: save | Ctrl+I: inspector | Ctrl+Z/Y: undo/redo")
+                            .child("Ctrl+O: open | Ctrl+S: save | Ctrl+T: new tab | Ctrl+W: close tab | Ctrl+Z/Y: undo/redo")
                     )
                     .when(self.save_message.is_some(), |header| {
                         header.child(
@@ -639,13 +739,98 @@ impl Render for HexEditor {
                         )
                     })
             )
-            .when(self.search_visible, |parent| {
-                let search_mode_label = match self.search_mode {
+            // Tab bar
+            .when(self.tabs.len() > 1, |parent| {
+                parent.child(
+                    div()
+                        .flex()
+                        .gap_1()
+                        .py_1()
+                        .px_2()
+                        .bg(rgb(0x252525))
+                        .border_b_1()
+                        .border_color(rgb(0x404040))
+                        .children(
+                            self.tabs.iter().enumerate().map(|(idx, tab)| {
+                                let is_active = idx == self.active_tab;
+                                let tab_name = tab.display_name();
+                                div()
+                                    .id(("tab", idx))
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .px_3()
+                                    .py_1()
+                                    .text_sm()
+                                    .cursor_pointer()
+                                    .rounded_t_md()
+                                    .when(is_active, |d| {
+                                        d.bg(rgb(0x1e1e1e))
+                                            .text_color(rgb(0xffffff))
+                                            .border_t_1()
+                                            .border_l_1()
+                                            .border_r_1()
+                                            .border_color(rgb(0x404040))
+                                    })
+                                    .when(!is_active, |d| {
+                                        d.bg(rgb(0x2a2a2a))
+                                            .text_color(rgb(0x808080))
+                                            .hover(|h| h.bg(rgb(0x333333)))
+                                    })
+                                    .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event, _window, cx| {
+                                        this.switch_to_tab(idx);
+                                        cx.notify();
+                                    }))
+                                    .child(tab_name)
+                                    .child(
+                                        // Close button
+                                        div()
+                                            .id(("tab-close", idx))
+                                            .text_xs()
+                                            .text_color(rgb(0x808080))
+                                            .hover(|h| h.text_color(rgb(0xff6666)))
+                                            .cursor_pointer()
+                                            .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event: &gpui::MouseDownEvent, _window, cx| {
+                                                // Close this specific tab
+                                                if this.tabs.len() > 1 {
+                                                    this.tabs.remove(idx);
+                                                    if this.active_tab >= this.tabs.len() {
+                                                        this.active_tab = this.tabs.len() - 1;
+                                                    } else if this.active_tab > idx {
+                                                        this.active_tab -= 1;
+                                                    }
+                                                }
+                                                cx.notify();
+                                            }))
+                                            .child("×")
+                                    )
+                            }).collect::<Vec<_>>()
+                        )
+                        .child(
+                            // New tab button
+                            div()
+                                .id("new-tab")
+                                .px_2()
+                                .py_1()
+                                .text_sm()
+                                .text_color(rgb(0x808080))
+                                .cursor_pointer()
+                                .hover(|h| h.text_color(rgb(0x00ff00)))
+                                .on_mouse_down(gpui::MouseButton::Left, cx.listener(|this, _event, _window, cx| {
+                                    this.new_tab();
+                                    cx.notify();
+                                }))
+                                .child("+")
+                        )
+                )
+            })
+            .when(self.tab().search_visible, |parent| {
+                let search_mode_label = match self.tab().search_mode {
                     SearchMode::Ascii => "ASCII",
                     SearchMode::Hex => "HEX",
                 };
-                let result_count = self.search_results.len();
-                let current_pos = if let Some(idx) = self.current_search_index {
+                let result_count = self.tab().search_results.len();
+                let current_pos = if let Some(idx) = self.tab().current_search_index {
                     idx + 1
                 } else {
                     0
@@ -670,9 +855,9 @@ impl Render for HexEditor {
                                     div()
                                         .text_sm()
                                         .text_color(rgb(0xffffff))
-                                        .child(format!("Search ({}): {}", search_mode_label, self.search_query))
+                                        .child(format!("Search ({}): {}", search_mode_label, self.tab().search_query))
                                 )
-                                .when(self.is_searching, |d| {
+                                .when(self.tab().is_searching, |d| {
                                     d.child(
                                         div()
                                             .text_sm()
@@ -680,19 +865,19 @@ impl Render for HexEditor {
                                             .child("Searching...")
                                     )
                                 })
-                                .when(!self.is_searching && result_count > 0, |d| {
+                                .when(!self.tab().is_searching && result_count > 0, |d| {
                                     d.child(
                                         div()
                                             .text_sm()
-                                            .text_color(if self.search_truncated { rgb(0xffaa00) } else { rgb(0x00ff00) })
-                                            .child(if self.search_truncated {
+                                            .text_color(if self.tab().search_truncated { rgb(0xffaa00) } else { rgb(0x00ff00) })
+                                            .child(if self.tab().search_truncated {
                                                 format!("{} / {}+ matches (truncated)", current_pos, result_count)
                                             } else {
                                                 format!("{} / {} matches", current_pos, result_count)
                                             })
                                     )
                                 })
-                                .when(!self.is_searching && result_count == 0 && !self.search_query.is_empty(), |d| {
+                                .when(!self.tab().is_searching && result_count == 0 && !self.tab().search_query.is_empty(), |d| {
                                     d.child(
                                         div()
                                             .text_sm()
@@ -727,7 +912,7 @@ impl Render for HexEditor {
                             .right_0()
                             .bottom_0()
                             .overflow_y_scroll()
-                            .track_scroll(&self.scroll_handle)
+                            .track_scroll(&self.tab().scroll_handle)
                             .pr(px(24.0))
                             .on_mouse_move(cx.listener(|this, event: &gpui::MouseMoveEvent, _window, cx| {
                                 // Cancel drag if mouse button was released outside the window
@@ -744,8 +929,8 @@ impl Render for HexEditor {
 
                                 // Get current values from this (not captured snapshots)
                                 let bytes_per_row = this.bytes_per_row;
-                                let doc_len = this.document.len();
-                                let scroll_offset_f32: f32 = (-f32::from(this.scroll_offset)).max(0.0);
+                                let doc_len = this.tab().document.len();
+                                let scroll_offset_f32: f32 = (-f32::from(this.tab().scroll_offset)).max(0.0);
 
                                 // Calculate row from Y position
                                 let mouse_y: f32 = event.position.y.into();
@@ -753,7 +938,7 @@ impl Render for HexEditor {
                                 // Content area offset calculated dynamically
                                 // Base: ~152px (header + padding)
                                 // Search bar adds ~50px when visible
-                                let content_top = if this.search_visible {
+                                let content_top = if this.tab().search_visible {
                                     202.0
                                 } else {
                                     152.0
@@ -799,8 +984,8 @@ impl Render for HexEditor {
                                 let byte_in_row = byte_in_row.min(bytes_per_row - 1);
                                 let new_cursor = (row_start + byte_in_row).min(doc_len.saturating_sub(1));
 
-                                if this.cursor_position != new_cursor {
-                                    this.cursor_position = new_cursor;
+                                if this.tab().cursor_position != new_cursor {
+                                    this.tab_mut().cursor_position = new_cursor;
                                     this.ensure_cursor_visible_by_row();
                                     cx.notify();
                                 }
@@ -821,9 +1006,9 @@ impl Render for HexEditor {
                                     .children((render_start..render_end).map(|row| {
                         let address = ui::format_address(row * self.bytes_per_row);
                         let start = row * self.bytes_per_row;
-                        let end = (start + self.bytes_per_row).min(self.document.len());
-                        let cursor_pos = self.cursor_position;
-                        let edit_pane = self.edit_pane;
+                        let end = (start + self.bytes_per_row).min(self.tab().document.len());
+                        let cursor_pos = self.tab().cursor_position;
+                        let edit_pane = self.tab().edit_pane;
                         let selection_range = self.selection_range();
                         let cursor_row = cursor_pos / self.bytes_per_row;
                         let is_cursor_row = row == cursor_row;
@@ -846,7 +1031,7 @@ impl Render for HexEditor {
                                     .gap_1()
                                     .flex_1()
                                     .children((start..end).map(|byte_idx| {
-                                        let byte = self.document.get_byte(byte_idx).unwrap();
+                                        let byte = self.tab().document.get_byte(byte_idx).unwrap();
                                         let hex_str = format!("{:02X}", byte);
                                         let is_cursor = byte_idx == cursor_pos;
                                         let is_selected = selection_range
@@ -854,14 +1039,14 @@ impl Render for HexEditor {
                                             .unwrap_or(false);
 
                                         // Check if this byte is part of a search result (O(1) lookup)
-                                        let is_search_match = self.search_match_set.contains(&byte_idx);
+                                        let is_search_match = self.tab().search_match_set.contains(&byte_idx);
 
                                         // Check if this byte is part of the current (highlighted) search result
-                                        let is_current_search = if let Some(idx) = self.current_search_index {
-                                            let match_start = self.search_results[idx];
-                                            let pattern_len = match self.search_mode {
-                                                SearchMode::Ascii => self.search_query.len(),
-                                                SearchMode::Hex => self.search_query.split_whitespace().count(),
+                                        let is_current_search = if let Some(idx) = self.tab().current_search_index {
+                                            let match_start = self.tab().search_results[idx];
+                                            let pattern_len = match self.tab().search_mode {
+                                                SearchMode::Ascii => self.tab().search_query.len(),
+                                                SearchMode::Hex => self.tab().search_query.split_whitespace().count(),
                                             };
                                             byte_idx >= match_start && byte_idx < match_start + pattern_len
                                         } else {
@@ -870,12 +1055,12 @@ impl Render for HexEditor {
 
                                         div()
                                             .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event: &gpui::MouseDownEvent, _window, cx| {
-                                                this.cursor_position = byte_idx;
-                                                this.selection_start = Some(byte_idx);
+                                                this.tab_mut().cursor_position = byte_idx;
+                                                this.tab_mut().selection_start = Some(byte_idx);
                                                 this.is_dragging = true;
                                                 this.drag_pane = Some(EditPane::Hex);
-                                                this.edit_pane = EditPane::Hex;
-                                                this.hex_nibble = HexNibble::High;
+                                                this.tab_mut().edit_pane = EditPane::Hex;
+                                                this.tab_mut().hex_nibble = HexNibble::High;
                                                 this.ensure_cursor_visible_by_row();
                                                 cx.notify();
                                             }))
@@ -911,7 +1096,7 @@ impl Render for HexEditor {
                                     .flex()
                                     .w(px(160.0))
                                     .children((start..end).map(|byte_idx| {
-                                        let byte = self.document.get_byte(byte_idx).unwrap();
+                                        let byte = self.tab().document.get_byte(byte_idx).unwrap();
                                         let ascii_char = if byte >= 0x20 && byte <= 0x7E {
                                             byte as char
                                         } else {
@@ -923,14 +1108,14 @@ impl Render for HexEditor {
                                             .unwrap_or(false);
 
                                         // Check if this byte is part of a search result (O(1) lookup)
-                                        let is_search_match = self.search_match_set.contains(&byte_idx);
+                                        let is_search_match = self.tab().search_match_set.contains(&byte_idx);
 
                                         // Check if this byte is part of the current (highlighted) search result
-                                        let is_current_search = if let Some(idx) = self.current_search_index {
-                                            let match_start = self.search_results[idx];
-                                            let pattern_len = match self.search_mode {
-                                                SearchMode::Ascii => self.search_query.len(),
-                                                SearchMode::Hex => self.search_query.split_whitespace().count(),
+                                        let is_current_search = if let Some(idx) = self.tab().current_search_index {
+                                            let match_start = self.tab().search_results[idx];
+                                            let pattern_len = match self.tab().search_mode {
+                                                SearchMode::Ascii => self.tab().search_query.len(),
+                                                SearchMode::Hex => self.tab().search_query.split_whitespace().count(),
                                             };
                                             byte_idx >= match_start && byte_idx < match_start + pattern_len
                                         } else {
@@ -939,12 +1124,12 @@ impl Render for HexEditor {
 
                                         div()
                                             .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event: &gpui::MouseDownEvent, _window, cx| {
-                                                this.cursor_position = byte_idx;
-                                                this.selection_start = Some(byte_idx);
+                                                this.tab_mut().cursor_position = byte_idx;
+                                                this.tab_mut().selection_start = Some(byte_idx);
                                                 this.is_dragging = true;
                                                 this.drag_pane = Some(EditPane::Ascii);
-                                                this.edit_pane = EditPane::Ascii;
-                                                this.hex_nibble = HexNibble::High;
+                                                this.tab_mut().edit_pane = EditPane::Ascii;
+                                                this.tab_mut().hex_nibble = HexNibble::High;
                                                 this.ensure_cursor_visible_by_row();
                                                 cx.notify();
                                             }))
@@ -993,18 +1178,18 @@ impl Render for HexEditor {
                             .w(px(12.0))
                             .bg(rgb(0x2a2a2a))
                             .child(
-                                Scrollbar::vertical(&self.scrollbar_state, &self.scroll_handle)
+                                Scrollbar::vertical(&self.tab().scrollbar_state, &self.tab().scroll_handle)
                                     .scrollbar_show(ScrollbarShow::Always)
                             )
                             // Add search result markers on scrollbar
                             .children({
-                                let total_rows = ui::row_count(self.document.len(), self.bytes_per_row);
+                                let total_rows = ui::row_count(self.tab().document.len(), self.bytes_per_row);
                                 let viewport_height = viewport_bounds.size.height;
 
                                 if total_rows == 0 || viewport_height <= px(0.0) {
                                     Vec::new()
                                 } else {
-                                    self.search_results.iter().map(|&result_pos| {
+                                    self.tab().search_results.iter().map(|&result_pos| {
                                         let result_row = result_pos / self.bytes_per_row;
                                         let position_ratio = result_row as f32 / total_rows as f32;
 
@@ -1013,8 +1198,8 @@ impl Render for HexEditor {
                                         let marker_position = viewport_height * position_ratio;
 
                                         // Check if this is the current search result
-                                        let is_current = self.current_search_index
-                                            .map(|idx| self.search_results[idx] == result_pos)
+                                        let is_current = self.tab().current_search_index
+                                            .map(|idx| self.tab().search_results[idx] == result_pos)
                                             .unwrap_or(false);
 
                                         div()
@@ -1062,7 +1247,7 @@ impl Render for HexEditor {
                                     .child(
                                         div()
                                             .text_color(rgb(0x00ff00))
-                                            .child(ui::format_address(self.cursor_position))
+                                            .child(ui::format_address(self.tab().cursor_position))
                                     )
                             )
                             .child(
@@ -1071,7 +1256,7 @@ impl Render for HexEditor {
                                     .flex()
                                     .gap_2()
                                     .text_color(rgb(0x808080))
-                                    .when_some(self.document.get_byte(self.cursor_position), |el, byte| {
+                                    .when_some(self.tab().document.get_byte(self.tab().cursor_position), |el, byte| {
                                         el.child("Value:")
                                             .child(
                                                 div()
@@ -1090,7 +1275,7 @@ impl Render for HexEditor {
                                             )
                                     })
                             )
-                            .when(self.selection_start.is_some(), |el| {
+                            .when(self.tab().selection_start.is_some(), |el| {
                                 // Selection info
                                 let (start, end) = self.selection_range().unwrap();
                                 let selection_size = end - start + 1;
@@ -1113,7 +1298,7 @@ impl Render for HexEditor {
                                     .flex_1()
                                     .text_right()
                                     .text_color(rgb(0x808080))
-                                    .child(format!("Size: {}", ui::format_file_size(self.document.len())))
+                                    .child(format!("Size: {}", ui::format_file_size(self.tab().document.len())))
                             )
                     )
                     // Second line: search status, messages
@@ -1125,9 +1310,9 @@ impl Render for HexEditor {
                             .border_t_1()
                             .border_color(rgb(0x333333))
                             // Search status with progress
-                            .when(self.is_searching, |el| {
-                                let current = self.search_progress.load(Ordering::Relaxed);
-                                let total = self.search_total;
+                            .when(self.tab().is_searching, |el| {
+                                let current = self.tab().search_progress.load(Ordering::Relaxed);
+                                let total = self.tab().search_total;
                                 let percent = if total > 0 {
                                     (current as f64 / total as f64 * 100.0) as usize
                                 } else {
@@ -1142,7 +1327,7 @@ impl Render for HexEditor {
                                         .child(
                                             div()
                                                 .text_color(rgb(0x808080))
-                                                .child(format!("\"{}\"", self.search_query))
+                                                .child(format!("\"{}\"", self.tab().search_query))
                                         )
                                         .child(
                                             div()
@@ -1156,10 +1341,10 @@ impl Render for HexEditor {
                                 )
                             })
                             // Search results info (when not searching)
-                            .when(!self.is_searching && self.search_visible && !self.search_query.is_empty(), |el| {
-                                let result_count = self.search_results.len();
-                                let current_pos = self.current_search_index.map(|i| i + 1).unwrap_or(0);
-                                let mode_str = match self.search_mode {
+                            .when(!self.tab().is_searching && self.tab().search_visible && !self.tab().search_query.is_empty(), |el| {
+                                let result_count = self.tab().search_results.len();
+                                let current_pos = self.tab().current_search_index.map(|i| i + 1).unwrap_or(0);
+                                let mode_str = match self.tab().search_mode {
                                     SearchMode::Ascii => "ASCII",
                                     SearchMode::Hex => "Hex",
                                 };
@@ -1175,13 +1360,13 @@ impl Render for HexEditor {
                                         .child(
                                             div()
                                                 .text_color(rgb(0x4a9eff))
-                                                .child(format!("\"{}\"", self.search_query))
+                                                .child(format!("\"{}\"", self.tab().search_query))
                                         )
                                         .child(
                                             div()
                                                 .text_color(if result_count > 0 { rgb(0x00ff00) } else { rgb(0xff6666) })
                                                 .child(if result_count > 0 {
-                                                    if self.search_truncated {
+                                                    if self.tab().search_truncated {
                                                         format!("{}/{}+ matches (truncated)", current_pos, result_count)
                                                     } else {
                                                         format!("{}/{} matches", current_pos, result_count)
@@ -1201,7 +1386,7 @@ impl Render for HexEditor {
                                 )
                             })
                             // Default message when nothing else to show
-                            .when(!self.is_searching && !self.search_visible && self.save_message.is_none(), |el| {
+                            .when(!self.tab().is_searching && !self.tab().search_visible && self.save_message.is_none(), |el| {
                                 el.child(
                                     div()
                                         .text_color(rgb(0x606060))
@@ -1219,9 +1404,9 @@ impl Render for HexEditor {
 
                 // Get inspector values
                 let values = ui::DataInspectorValues::from_bytes(
-                    |pos| self.document.get_byte(pos),
-                    self.cursor_position,
-                    self.document.len(),
+                    |pos| self.tab().document.get_byte(pos),
+                    self.tab().cursor_position,
+                    self.tab().document.len(),
                     self.inspector_endian,
                 );
 
@@ -1257,7 +1442,7 @@ impl Render for HexEditor {
                                         .child(
                                             div()
                                                 .text_color(rgb(0x808080))
-                                                .child(format!("@ 0x{:08X}", self.cursor_position))
+                                                .child(format!("@ 0x{:08X}", self.tab().cursor_position))
                                         )
                                 )
                                 .child(
@@ -1446,7 +1631,7 @@ impl Render for HexEditor {
                             )
                         })
                         // No data message
-                        .when(self.document.len() == 0, |el| {
+                        .when(self.tab().document.len() == 0, |el| {
                             el.child(
                                 div()
                                     .text_color(rgb(0x808080))

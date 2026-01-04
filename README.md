@@ -29,11 +29,20 @@ A modern hex editor built with Rust and [gpui](https://www.gpui.rs/), featuring 
   - Scrollbar markers showing match positions
 - **Navigation**: F3/Enter (next), Shift+F3 (previous)
 
+### Data Inspector
+- **View bytes as various types** (Ctrl+I to toggle)
+- **Supported types**: Int8/16/32/64, UInt8/16/32/64, Float32/64
+- **Endianness toggle**: Little/Big endian (Ctrl+E)
+
 ### File Operations
 - **Open Files**: Command-line, file dialog (Ctrl+O), or drag & drop
 - **Save**: Ctrl+S / Cmd+S with confirmation dialog
 - **Save As**: Ctrl+Shift+S / Cmd+Shift+S to save to new location
 - **Unsaved Changes Indicator**: Visual feedback in title and status
+- **Multiple File Tabs**: Open multiple files in tabs
+  - Ctrl+T: New tab
+  - Ctrl+W: Close current tab
+  - Ctrl+Tab / Ctrl+Shift+Tab: Switch between tabs
 
 ## Keyboard Shortcuts
 
@@ -56,6 +65,11 @@ A modern hex editor built with Rust and [gpui](https://www.gpui.rs/), featuring 
 | Ctrl+O / Cmd+O | Open file |
 | Ctrl+S / Cmd+S | Save file |
 | Ctrl+Shift+S / Cmd+Shift+S | Save as |
+| **Tabs** ||
+| Ctrl+T / Cmd+T | New tab |
+| Ctrl+W / Cmd+W | Close tab |
+| Ctrl+Tab | Next tab |
+| Ctrl+Shift+Tab | Previous tab |
 | **Search** ||
 | Ctrl+F / Cmd+F | Toggle search |
 | Tab (in search) | Switch ASCII/Hex mode |
@@ -158,10 +172,8 @@ See [todo.md](todo.md) for detailed implementation status and planned features.
 ### Planned Features
 - [ ] Copy/paste support
 - [ ] Exit confirmation dialog for unsaved changes
-- [ ] Data inspector (view bytes as various types)
 - [ ] Search & replace
 - [ ] Bookmarks
-- [ ] Multiple file tabs
 - [ ] Comparison mode
 - [ ] Customizable themes
 
