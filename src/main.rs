@@ -867,11 +867,11 @@ impl Render for HexEditor {
 
                                 // Content area offset calculated dynamically
                                 // Base: ~152px (header + padding)
-                                // Tab bar adds ~30px when multiple tabs exist
+                                // Tab bar adds ~40px when multiple tabs exist (py_1*2 + text + border)
                                 // Search bar adds ~50px when visible
                                 let mut content_top = 152.0;
                                 if this.tabs.len() > 1 {
-                                    content_top += 30.0; // Tab bar height
+                                    content_top += 40.0; // Tab bar height
                                 }
                                 if this.tab().search_visible {
                                     content_top += 50.0; // Search bar height
