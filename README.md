@@ -22,6 +22,7 @@ A modern hex editor built with Rust and [gpui](https://www.gpui.rs/), featuring 
 - **Dual Search Modes**:
   - ASCII text search
   - Hex value search (space-separated, e.g., "48 65 6C 6C 6F")
+  - Wildcard support: `??` matches any byte (e.g., "48 ?? 6C 6C 6F")
 - **Background Search**: Non-blocking search with cancellation support
 - **Visual Indicators**:
   - All matches highlighted in yellow
@@ -43,6 +44,19 @@ A modern hex editor built with Rust and [gpui](https://www.gpui.rs/), featuring 
   - Ctrl+T: New tab
   - Ctrl+W: Close current tab
   - Ctrl+Tab / Ctrl+Shift+Tab: Switch between tabs
+  - Drag & drop tabs to reorder
+
+### Compare Mode
+- **Side-by-side Comparison**: Compare two files in split view (Ctrl+K)
+- **Difference Highlighting**: Bytes that differ are highlighted in red
+- **Synchronized Navigation**: Both panels scroll and navigate together
+
+### Configuration
+- **TOML Configuration File**: `~/.config/rusthex/settings.toml`
+- **Customizable Settings**:
+  - Font size
+  - Bytes per row (default: 16)
+  - Default endianness for data inspector
 
 ## Keyboard Shortcuts
 
@@ -77,6 +91,11 @@ A modern hex editor built with Rust and [gpui](https://www.gpui.rs/), featuring 
 | Shift+F3 | Previous match |
 | Backspace | Delete character |
 | Esc | Close search / Cancel |
+| **Compare** ||
+| Ctrl+K / Cmd+K | Toggle compare mode |
+| **Data Inspector** ||
+| Ctrl+I / Cmd+I | Toggle data inspector |
+| Ctrl+E / Cmd+E | Toggle endianness |
 
 ## Installation
 
@@ -127,11 +146,16 @@ cargo run -- path/to/file.bin
 ```
 rusthex/
 ├── src/
-│   ├── main.rs       # Main application and UI
-│   ├── document.rs   # Document model and file I/O
-│   ├── keyboard.rs   # Keyboard event handling
-│   ├── search.rs     # Search functionality
-│   └── ui.rs         # UI types and utilities
+│   ├── main.rs         # Main application and UI
+│   ├── document.rs     # Document model and file I/O
+│   ├── keyboard.rs     # Keyboard event handling
+│   ├── search.rs       # Search functionality with wildcard support
+│   ├── ui.rs           # UI types and utilities
+│   ├── tab.rs          # Editor tab management
+│   ├── tabs.rs         # Multi-tab operations
+│   ├── config.rs       # Configuration file handling
+│   ├── compare.rs      # Compare mode functionality
+│   └── render_cache.rs # Render optimization cache
 ├── Cargo.toml
 ├── LICENSE-MIT
 ├── LICENSE-APACHE
@@ -145,6 +169,8 @@ RustHex is designed to handle large files efficiently:
 - **Memory-Mapped Files**: Large files are not loaded entirely into memory
 - **Background Search**: Search operations run in separate threads to keep UI responsive
 - **Optimized Rendering**: HashSet-based lookup for instant search result highlighting
+- **Render Cache**: Row-level caching with stable element IDs for efficient UI updates
+- **Font Metrics**: Accurate row height calculation using font metrics
 
 ## Development
 
@@ -174,8 +200,8 @@ See [todo.md](todo.md) for detailed implementation status and planned features.
 - [ ] Exit confirmation dialog for unsaved changes
 - [ ] Search & replace
 - [ ] Bookmarks
-- [ ] Comparison mode
 - [ ] Customizable themes
+- [ ] Export (C array, Base64, Hex dump)
 
 ## License
 
