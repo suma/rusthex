@@ -3,6 +3,7 @@
 //! This module provides search capabilities including:
 //! - ASCII text search
 //! - Hex value search (space-separated bytes)
+//! - Wildcard support (`??` matches any byte)
 //! - Background search execution with cancellation
 //! - Efficient O(1) result lookup using HashSet
 
@@ -23,6 +24,15 @@ pub enum SearchMode {
     Ascii,
     /// Search for hex values (space-separated bytes)
     Hex,
+}
+
+/// A single byte in a search pattern
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PatternByte {
+    /// Match an exact byte value
+    Exact(u8),
+    /// Match any byte (wildcard `??`)
+    Any,
 }
 
 impl HexEditor {
@@ -47,18 +57,23 @@ impl HexEditor {
             return;
         }
 
-        let pattern = match self.tab().search_mode {
+        let pattern: Vec<PatternByte> = match self.tab().search_mode {
             SearchMode::Ascii => {
-                // ASCII search: convert query string to bytes
-                self.tab().search_query.as_bytes().to_vec()
+                // ASCII search: convert query string to exact bytes
+                self.tab().search_query.as_bytes().iter()
+                    .map(|&b| PatternByte::Exact(b))
+                    .collect()
             }
             SearchMode::Hex => {
-                // Hex search: parse space-separated hex values
+                // Hex search: parse space-separated hex values with wildcard support
                 let hex_parts: Vec<&str> = self.tab().search_query.split_whitespace().collect();
                 let mut pattern = Vec::new();
                 for part in hex_parts {
-                    if let Ok(byte) = u8::from_str_radix(part, 16) {
-                        pattern.push(byte);
+                    if part == "??" || part == "?" {
+                        // Wildcard: matches any byte
+                        pattern.push(PatternByte::Any);
+                    } else if let Ok(byte) = u8::from_str_radix(part, 16) {
+                        pattern.push(PatternByte::Exact(byte));
                     } else {
                         // Invalid hex, abort search
                         self.tab_mut().is_searching = false;
@@ -220,7 +235,7 @@ impl HexEditor {
 /// Search in memory data (for small in-memory files)
 fn search_in_memory(
     data: &[u8],
-    pattern: &[u8],
+    pattern: &[PatternByte],
     cancel_flag: &std::sync::atomic::AtomicBool,
     progress: &std::sync::atomic::AtomicUsize,
 ) -> Option<Vec<usize>> {
@@ -239,10 +254,17 @@ fn search_in_memory(
 
         // Check if pattern matches at this position
         let mut matches = true;
-        for j in 0..pattern_len {
-            if data[i + j] != pattern[j] {
-                matches = false;
-                break;
+        for (j, pat_byte) in pattern.iter().enumerate() {
+            match pat_byte {
+                PatternByte::Exact(expected) => {
+                    if data[i + j] != *expected {
+                        matches = false;
+                        break;
+                    }
+                }
+                PatternByte::Any => {
+                    // Wildcard: always matches
+                }
             }
         }
         if matches {
@@ -261,7 +283,7 @@ fn search_in_file(
     path: &std::path::PathBuf,
     overlay: &HashMap<usize, u8>,
     data_len: usize,
-    pattern: &[u8],
+    pattern: &[PatternByte],
     cancel_flag: &std::sync::atomic::AtomicBool,
     progress: &std::sync::atomic::AtomicUsize,
 ) -> Option<Vec<usize>> {
@@ -291,12 +313,19 @@ fn search_in_file(
         // Check if pattern matches at this position
         // Consider overlay modifications
         let mut matches = true;
-        for j in 0..pattern_len {
+        for (j, pat_byte) in pattern.iter().enumerate() {
             let pos = i + j;
             let byte = overlay.get(&pos).copied().unwrap_or_else(|| mmap[pos]);
-            if byte != pattern[j] {
-                matches = false;
-                break;
+            match pat_byte {
+                PatternByte::Exact(expected) => {
+                    if byte != *expected {
+                        matches = false;
+                        break;
+                    }
+                }
+                PatternByte::Any => {
+                    // Wildcard: always matches
+                }
             }
         }
         if matches {

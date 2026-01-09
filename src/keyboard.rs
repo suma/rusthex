@@ -395,6 +395,17 @@ pub fn handle_key_event(
                 cx.notify();
             }
         }
+        "space" => {
+            // Handle space key explicitly (gpui reports it as "space", not " ")
+            if editor.tab().search_visible {
+                editor.tab_mut().search_query.push(' ');
+                editor.perform_search();
+                if editor.tab().is_searching {
+                    editor.start_search_refresh_loop(cx);
+                }
+                cx.notify();
+            }
+        }
         key => {
             // Handle character input
             if key.len() == 1 {
