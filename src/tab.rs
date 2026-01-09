@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::{Arc, Mutex};
 
 use crate::document::Document;
+use crate::render_cache::RenderCache;
 use crate::search::SearchMode;
 use crate::ui::{EditPane, HexNibble};
 
@@ -36,6 +37,8 @@ pub struct EditorTab {
     pub search_match_set: HashSet<usize>,
     pub search_progress: Arc<AtomicUsize>,
     pub search_total: usize,
+    // Render cache for performance optimization
+    pub render_cache: RenderCache,
 }
 
 impl EditorTab {
@@ -61,6 +64,7 @@ impl EditorTab {
             search_match_set: HashSet::new(),
             search_progress: Arc::new(AtomicUsize::new(0)),
             search_total: 0,
+            render_cache: RenderCache::new(),
         }
     }
 

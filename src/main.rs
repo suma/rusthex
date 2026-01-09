@@ -13,6 +13,7 @@ mod compare;
 mod config;
 mod document;
 mod keyboard;
+mod render_cache;
 mod search;
 mod tab;
 mod tabs;
@@ -20,6 +21,7 @@ mod ui;
 
 use config::Settings;
 use document::Document;
+use render_cache::{CacheState, RenderCache};
 pub use search::SearchMode;
 use tab::EditorTab;
 pub use ui::{EditPane, HexNibble, Endian};
@@ -517,6 +519,83 @@ impl HexEditor {
         })
         .detach();
     }
+
+    /// Build current cache state for comparison
+    fn build_cache_state(&self) -> CacheState {
+        let selection_range = self.selection_range();
+        CacheState {
+            cursor_position: self.tab().cursor_position,
+            selection_start: selection_range.map(|(s, _)| s),
+            selection_end: selection_range.map(|(_, e)| e),
+            search_results_count: self.tab().search_results.len(),
+            current_search_index: self.tab().current_search_index,
+            document_len: self.tab().document.len(),
+            bytes_per_row: self.bytes_per_row(),
+        }
+    }
+
+    /// Get current search range for highlighting
+    fn current_search_range(&self) -> Option<(usize, usize)> {
+        self.tab().current_search_index.map(|idx| {
+            let match_start = self.tab().search_results[idx];
+            let pattern_len = match self.tab().search_mode {
+                SearchMode::Ascii => self.tab().search_query.len(),
+                SearchMode::Hex => self.tab().search_query.split_whitespace().count(),
+            };
+            (match_start, match_start + pattern_len)
+        })
+    }
+
+    /// Update render cache for visible rows
+    fn update_render_cache(&mut self, render_start: usize, render_end: usize) {
+        let cache_state = self.build_cache_state();
+
+        // Check if full cache rebuild is needed
+        let full_rebuild = !self.tab().render_cache.is_valid(&cache_state);
+
+        let bytes_per_row = self.bytes_per_row();
+        let document_len = self.tab().document.len();
+        let cursor_position = self.tab().cursor_position;
+        let selection_range = self.selection_range();
+        let current_search_range = self.current_search_range();
+
+        for row in render_start..render_end {
+            // Skip if row is cached and doesn't need rebuild
+            if !full_rebuild
+                && self.tab().render_cache.get_row(row).is_some()
+                && !self.tab().render_cache.row_needs_rebuild(row, bytes_per_row)
+            {
+                continue;
+            }
+
+            // Build row data
+            let row_data = RenderCache::build_row_data(
+                row,
+                bytes_per_row,
+                document_len,
+                cursor_position,
+                selection_range,
+                &self.tab().search_match_set,
+                current_search_range,
+                |idx| self.tab().document.get_byte(idx),
+            );
+
+            self.tab_mut().render_cache.cache_row(row, row_data);
+        }
+
+        // Update cache state
+        self.tab_mut().render_cache.set_state(cache_state);
+    }
+
+    /// Invalidate render cache (call when document content changes)
+    pub fn invalidate_render_cache(&mut self) {
+        self.tab_mut().render_cache.invalidate();
+    }
+
+    /// Mark a byte offset as modified in the render cache
+    pub fn mark_byte_modified(&mut self, offset: usize) {
+        self.tab_mut().render_cache.mark_modified(offset);
+    }
 }
 
 impl Focusable for HexEditor {
@@ -574,6 +653,9 @@ impl Render for HexEditor {
 
         // Update content_view_rows from calculated visible rows
         self.content_view_rows = visible_range.visible_rows;
+
+        // Update render cache for visible rows
+        self.update_render_cache(render_start, render_end);
 
         // Phase 3: Calculate spacer heights for virtual scrolling
         // Uses capped virtual height to avoid f32 precision issues with large files
@@ -978,18 +1060,30 @@ impl Render for HexEditor {
                                             div().h(top_spacer_height)
                                         )
                                     })
-                                    // Render only visible rows
+                                    // Render only visible rows using cached data
                                     .children((render_start..render_end).map(|row| {
-                        let address = ui::format_address(row * self.bytes_per_row());
-                        let start = row * self.bytes_per_row();
-                        let end = (start + self.bytes_per_row()).min(self.tab().document.len());
-                        let cursor_pos = self.tab().cursor_position;
+                        // Get cached row data (always available after update_render_cache)
+                        let row_data = self.tab().render_cache.get_row(row).cloned();
                         let edit_pane = self.tab().edit_pane;
-                        let selection_range = self.selection_range();
-                        let cursor_row = cursor_pos / self.bytes_per_row();
-                        let is_cursor_row = row == cursor_row;
+                        let bytes_per_row = self.bytes_per_row();
+                        let row_start = row * bytes_per_row;
+                        let document_len = self.tab().document.len();
+
+                        // Use cached data if available, otherwise compute inline
+                        let (address, is_cursor_row) = match &row_data {
+                            Some(data) => (data.address.clone(), data.is_cursor_row),
+                            None => {
+                                let addr = ui::format_address(row_start);
+                                let cursor_row = self.tab().cursor_position / bytes_per_row;
+                                (addr, row == cursor_row)
+                            }
+                        };
+
+                        // Calculate end for this row
+                        let row_end = (row_start + bytes_per_row).min(document_len);
 
                         div()
+                            .id(("hex-row", row))  // Stable ID for efficient diffing
                             .flex()
                             .gap_4()
                             .mb_1()
@@ -1001,35 +1095,28 @@ impl Render for HexEditor {
                                     .child(address)
                             )
                             .child(
-                                // Hex column - each byte separately
+                                // Hex column - each byte separately (using cached data)
                                 div()
                                     .flex()
                                     .gap_1()
                                     .flex_1()
-                                    .children((start..end).map(|byte_idx| {
-                                        let byte = self.tab().document.get_byte(byte_idx).unwrap();
-                                        let hex_str = format!("{:02X}", byte);
-                                        let is_cursor = byte_idx == cursor_pos;
-                                        let is_selected = selection_range
-                                            .map(|(sel_start, sel_end)| byte_idx >= sel_start && byte_idx <= sel_end)
-                                            .unwrap_or(false);
-
-                                        // Check if this byte is part of a search result (O(1) lookup)
-                                        let is_search_match = self.tab().search_match_set.contains(&byte_idx);
-
-                                        // Check if this byte is part of the current (highlighted) search result
-                                        let is_current_search = if let Some(idx) = self.tab().current_search_index {
-                                            let match_start = self.tab().search_results[idx];
-                                            let pattern_len = match self.tab().search_mode {
-                                                SearchMode::Ascii => self.tab().search_query.len(),
-                                                SearchMode::Hex => self.tab().search_query.split_whitespace().count(),
+                                    .children((row_start..row_end).enumerate().map(|(i, byte_idx)| {
+                                        // Get byte data from cache or compute
+                                        let (hex_str, is_cursor, is_selected, is_search_match, is_current_search) =
+                                            match &row_data {
+                                                Some(data) if i < data.bytes.len() => {
+                                                    let b = &data.bytes[i];
+                                                    (format!("{:02X}", b.value), b.is_cursor, b.is_selected, b.is_search_match, b.is_current_search)
+                                                }
+                                                _ => {
+                                                    // Fallback: compute inline (shouldn't happen if cache is properly updated)
+                                                    let byte = self.tab().document.get_byte(byte_idx).unwrap_or(0);
+                                                    (format!("{:02X}", byte), false, false, false, false)
+                                                }
                                             };
-                                            byte_idx >= match_start && byte_idx < match_start + pattern_len
-                                        } else {
-                                            false
-                                        };
 
                                         div()
+                                            .id(("hex-byte", byte_idx))  // Stable ID for efficient diffing
                                             .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event: &gpui::MouseDownEvent, _window, cx| {
                                                 this.tab_mut().cursor_position = byte_idx;
                                                 this.tab_mut().selection_start = Some(byte_idx);
@@ -1067,38 +1154,33 @@ impl Render for HexEditor {
                                     }))
                             )
                             .child(
-                                // ASCII column - each byte separately
+                                // ASCII column - each byte separately (using cached data)
                                 div()
                                     .flex()
                                     .w(px(160.0))
-                                    .children((start..end).map(|byte_idx| {
-                                        let byte = self.tab().document.get_byte(byte_idx).unwrap();
-                                        let ascii_char = if byte >= 0x20 && byte <= 0x7E {
-                                            byte as char
-                                        } else {
-                                            '.'
-                                        };
-                                        let is_cursor = byte_idx == cursor_pos;
-                                        let is_selected = selection_range
-                                            .map(|(sel_start, sel_end)| byte_idx >= sel_start && byte_idx <= sel_end)
-                                            .unwrap_or(false);
-
-                                        // Check if this byte is part of a search result (O(1) lookup)
-                                        let is_search_match = self.tab().search_match_set.contains(&byte_idx);
-
-                                        // Check if this byte is part of the current (highlighted) search result
-                                        let is_current_search = if let Some(idx) = self.tab().current_search_index {
-                                            let match_start = self.tab().search_results[idx];
-                                            let pattern_len = match self.tab().search_mode {
-                                                SearchMode::Ascii => self.tab().search_query.len(),
-                                                SearchMode::Hex => self.tab().search_query.split_whitespace().count(),
+                                    .children((row_start..row_end).enumerate().map(|(i, byte_idx)| {
+                                        // Get byte data from cache
+                                        let (ascii_char, is_cursor, is_selected, is_search_match, is_current_search) =
+                                            match &row_data {
+                                                Some(data) if i < data.bytes.len() => {
+                                                    let b = &data.bytes[i];
+                                                    let c = if b.value >= 0x20 && b.value <= 0x7E {
+                                                        b.value as char
+                                                    } else {
+                                                        '.'
+                                                    };
+                                                    (c, b.is_cursor, b.is_selected, b.is_search_match, b.is_current_search)
+                                                }
+                                                _ => {
+                                                    // Fallback: compute inline
+                                                    let byte = self.tab().document.get_byte(byte_idx).unwrap_or(0);
+                                                    let c = if byte >= 0x20 && byte <= 0x7E { byte as char } else { '.' };
+                                                    (c, false, false, false, false)
+                                                }
                                             };
-                                            byte_idx >= match_start && byte_idx < match_start + pattern_len
-                                        } else {
-                                            false
-                                        };
 
                                         div()
+                                            .id(("ascii-byte", byte_idx))  // Stable ID for efficient diffing
                                             .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event: &gpui::MouseDownEvent, _window, cx| {
                                                 this.tab_mut().cursor_position = byte_idx;
                                                 this.tab_mut().selection_start = Some(byte_idx);
