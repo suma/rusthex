@@ -12,6 +12,7 @@
 mod compare;
 mod config;
 mod document;
+mod encoding;
 mod keyboard;
 mod render_cache;
 mod search;
@@ -24,7 +25,8 @@ use document::Document;
 use render_cache::{CacheState, RenderCache};
 pub use search::SearchMode;
 use tab::EditorTab;
-pub use ui::{EditPane, HexNibble, Endian};
+pub use ui::{EditPane, HexNibble, Endian, TextEncoding};
+use encoding::{decode_for_display, DisplayChar};
 use gpui::{
     App, Application, Bounds, Context, ExternalPaths, Focusable, FocusHandle, Font, FontFeatures,
     FontStyle, FontWeight, PathPromptOptions, Point, PromptLevel, SharedString, Timer, Window,
@@ -56,6 +58,11 @@ struct HexEditor {
     compare_selection_visible: bool,
     // Cached row height (calculated from font metrics in render)
     cached_row_height: f32,
+    // Cached line heights for different text sizes (calculated from font metrics)
+    cached_line_height_xl: f32,
+    cached_line_height_sm: f32,
+    // Text encoding for ASCII column display
+    text_encoding: TextEncoding,
 }
 
 impl HexEditor {
@@ -82,6 +89,9 @@ impl HexEditor {
             compare_tab_index: None,
             compare_selection_visible: false,
             cached_row_height: 24.0, // Default, will be updated in render()
+            cached_line_height_xl: 24.0, // Default, will be updated in render()
+            cached_line_height_sm: 17.0, // Default, will be updated in render()
+            text_encoding: TextEncoding::default(),
         }
     }
 
@@ -93,6 +103,44 @@ impl HexEditor {
     /// Get row height (cached from font metrics calculation in render())
     fn row_height(&self) -> f64 {
         self.cached_row_height as f64
+    }
+
+    /// Calculate header height based on cached font metrics
+    /// Header content + Tab bar (conditional) + Search bar (conditional)
+    fn calculate_header_height(&self) -> f32 {
+        // Header div: text_xl + 3 * text_sm + pb_4(16) + border_b_1(1)
+        // Using minimal estimates for line heights
+        let base_header = self.cached_line_height_xl + 3.0 * self.cached_line_height_sm + 17.0;
+
+        // Tab bar (conditional): ~30px total
+        let tab_bar = if self.tabs.len() > 1 {
+            self.cached_line_height_sm + 12.0
+        } else {
+            0.0
+        };
+
+        // Search bar (conditional): ~35px total
+        let search_bar = if self.tab().search_visible {
+            self.cached_line_height_sm + 20.0
+        } else {
+            0.0
+        };
+
+        base_header + tab_bar + search_bar
+    }
+
+    /// Calculate status bar height based on cached font metrics
+    fn calculate_status_bar_height(&self) -> f32 {
+        // Two lines of text_sm with minimal padding: ~45px total
+        2.0 * self.cached_line_height_sm + 20.0
+    }
+
+    /// Calculate total non-content height (header + status bar)
+    fn calculate_non_content_height(&self) -> f32 {
+        let calculated = self.calculate_header_height() + self.calculate_status_bar_height();
+        // Debug: print calculated value
+        // eprintln!("non_content_height: {}, header: {}, status: {}", calculated, self.calculate_header_height(), self.calculate_status_bar_height());
+        calculated
     }
 
     /// Get current active tab
@@ -116,6 +164,20 @@ impl HexEditor {
             Endian::Little => Endian::Big,
             Endian::Big => Endian::Little,
         };
+    }
+
+    /// Cycle to next text encoding
+    fn cycle_encoding(&mut self) {
+        self.text_encoding = self.text_encoding.next();
+        self.invalidate_render_cache();
+    }
+
+    /// Set text encoding directly
+    fn set_encoding(&mut self, encoding: TextEncoding) {
+        if self.text_encoding != encoding {
+            self.text_encoding = encoding;
+            self.invalidate_render_cache();
+        }
     }
 
     fn load_file(&mut self, path: PathBuf) -> std::io::Result<()> {
@@ -531,6 +593,7 @@ impl HexEditor {
             current_search_index: self.tab().current_search_index,
             document_len: self.tab().document.len(),
             bytes_per_row: self.bytes_per_row(),
+            text_encoding: self.text_encoding,
         }
     }
 
@@ -606,7 +669,7 @@ impl Focusable for HexEditor {
 
 impl Render for HexEditor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // Calculate row height from font metrics
+        // Calculate and cache font metrics for different text sizes
         let font = Font {
             family: "Monaco".into(),
             features: FontFeatures::default(),
@@ -615,12 +678,25 @@ impl Render for HexEditor {
             style: FontStyle::Normal,
         };
         let font_id = window.text_system().resolve_font(&font);
+
+        // Main content font (configurable size)
         let font_size = px(self.settings.display.font_size);
         let ascent = window.text_system().ascent(font_id, font_size);
         let descent = window.text_system().descent(font_id, font_size);
-        // Line height = ascent + |descent| (descent is negative)
         // Row height = line height + mb_1 margin (4px)
         self.cached_row_height = f32::from(ascent) + f32::from(descent).abs() + 4.0;
+
+        // text_xl (20px) for header title
+        let xl_size = px(20.0);
+        let xl_ascent = window.text_system().ascent(font_id, xl_size);
+        let xl_descent = window.text_system().descent(font_id, xl_size);
+        self.cached_line_height_xl = f32::from(xl_ascent) + f32::from(xl_descent).abs();
+
+        // text_sm (14px) for status bar and info lines
+        let sm_size = px(14.0);
+        let sm_ascent = window.text_system().ascent(font_id, sm_size);
+        let sm_descent = window.text_system().descent(font_id, sm_size);
+        self.cached_line_height_sm = f32::from(sm_ascent) + f32::from(sm_descent).abs();
 
         // Update search results if search completed
         if self.update_search_results() {
@@ -638,9 +714,9 @@ impl Render for HexEditor {
         let viewport_height = viewport_bounds.size.height;
 
         // Calculate actual content area height by subtracting header and status bar
-        // Header (~40px) + Status bar (~40px) = 80px total
-        let header_status_height = px(80.0);
-        let content_height = px((f32::from(viewport_height) - f32::from(header_status_height)).max(20.0));
+        // Uses dynamically calculated heights based on font metrics
+        let non_content_height = self.calculate_non_content_height();
+        let content_height = px((f32::from(viewport_height) - non_content_height).max(20.0));
 
         let visible_range = ui::calculate_visible_range(
             self.tab().scroll_offset,
@@ -993,17 +1069,9 @@ impl Render for HexEditor {
                                 // Calculate row from Y position
                                 let mouse_y: f32 = event.position.y.into();
 
-                                // Content area offset calculated dynamically
-                                // Base: ~152px (header + padding) + row_height (header row within content)
-                                // Tab bar adds ~40px when multiple tabs exist (py_1*2 + text + border)
-                                // Search bar adds ~50px when visible
-                                let mut content_top = 152.0 + row_height;
-                                if this.tabs.len() > 1 {
-                                    content_top += 40.0; // Tab bar height
-                                }
-                                if this.tab().search_visible {
-                                    content_top += 50.0; // Search bar height
-                                }
+                                // Content area offset calculated dynamically from font metrics
+                                // Uses calculate_header_height() which includes tab bar and search bar
+                                let content_top = this.calculate_header_height() + row_height;
                                 let relative_y = mouse_y - content_top + scroll_offset_f32;
 
                                 let row = if relative_y < 0.0 {
@@ -1082,6 +1150,12 @@ impl Render for HexEditor {
                         // Calculate end for this row
                         let row_end = (row_start + bytes_per_row).min(document_len);
 
+                        // Decode bytes for ASCII column display based on current encoding
+                        let row_bytes: Vec<u8> = (row_start..row_end)
+                            .filter_map(|i| self.tab().document.get_byte(i))
+                            .collect();
+                        let decoded_chars = decode_for_display(&row_bytes, self.text_encoding);
+
                         div()
                             .id(("hex-row", row))  // Stable ID for efficient diffing
                             .flex()
@@ -1154,29 +1228,24 @@ impl Render for HexEditor {
                                     }))
                             )
                             .child(
-                                // ASCII column - each byte separately (using cached data)
+                                // ASCII column - each byte separately (using cached data + encoding)
                                 div()
                                     .flex()
                                     .w(px(160.0))
                                     .children((row_start..row_end).enumerate().map(|(i, byte_idx)| {
-                                        // Get byte data from cache
-                                        let (ascii_char, is_cursor, is_selected, is_search_match, is_current_search) =
+                                        // Get display character from decoded data
+                                        let display_char = decoded_chars.get(i).cloned().unwrap_or(DisplayChar::Invalid);
+                                        let ascii_char = display_char.to_char();
+                                        let is_continuation = display_char.is_continuation();
+
+                                        // Get cursor/selection state from cache
+                                        let (is_cursor, is_selected, is_search_match, is_current_search) =
                                             match &row_data {
                                                 Some(data) if i < data.bytes.len() => {
                                                     let b = &data.bytes[i];
-                                                    let c = if b.value >= 0x20 && b.value <= 0x7E {
-                                                        b.value as char
-                                                    } else {
-                                                        '.'
-                                                    };
-                                                    (c, b.is_cursor, b.is_selected, b.is_search_match, b.is_current_search)
+                                                    (b.is_cursor, b.is_selected, b.is_search_match, b.is_current_search)
                                                 }
-                                                _ => {
-                                                    // Fallback: compute inline
-                                                    let byte = self.tab().document.get_byte(byte_idx).unwrap_or(0);
-                                                    let c = if byte >= 0x20 && byte <= 0x7E { byte as char } else { '.' };
-                                                    (c, false, false, false, false)
-                                                }
+                                                _ => (false, false, false, false)
                                             };
 
                                         div()
@@ -1211,7 +1280,12 @@ impl Render for HexEditor {
                                                 div.bg(rgb(0x505050))
                                                     .text_color(rgb(0xffffff))
                                             })
-                                            .when(!is_cursor && !is_current_search && !is_search_match && !is_selected, |div| {
+                                            // Continuation bytes shown in dim color
+                                            .when(!is_cursor && !is_current_search && !is_search_match && !is_selected && is_continuation, |div| {
+                                                div.text_color(rgb(0x606060))
+                                            })
+                                            // Normal characters in white
+                                            .when(!is_cursor && !is_current_search && !is_search_match && !is_selected && !is_continuation, |div| {
                                                 div.text_color(rgb(0xffffff))
                                             })
                                             .child(ascii_char.to_string())
@@ -1501,6 +1575,34 @@ impl Render for HexEditor {
                                         )
                                 )
                             })
+                            .child(
+                                // Text encoding selector
+                                div()
+                                    .flex()
+                                    .gap_1()
+                                    .items_center()
+                                    .child(
+                                        div()
+                                            .text_color(rgb(0x808080))
+                                            .child("Enc:")
+                                    )
+                                    .children(TextEncoding::all().iter().map(|enc| {
+                                        let is_selected = self.text_encoding == *enc;
+                                        let enc_copy = *enc;
+                                        div()
+                                            .px_1()
+                                            .rounded_sm()
+                                            .cursor_pointer()
+                                            .bg(if is_selected { rgb(0x4a9eff) } else { rgb(0x333333) })
+                                            .text_color(if is_selected { rgb(0x000000) } else { rgb(0x808080) })
+                                            .hover(|h| h.bg(if is_selected { rgb(0x4a9eff) } else { rgb(0x444444) }))
+                                            .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event: &gpui::MouseDownEvent, _window, cx| {
+                                                this.set_encoding(enc_copy);
+                                                cx.notify();
+                                            }))
+                                            .child(enc.label())
+                                    }))
+                            )
                             .child(
                                 // File size (right aligned)
                                 div()
