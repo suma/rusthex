@@ -299,9 +299,11 @@ pub fn calculate_visible_range(
         }
     };
 
-    // Calculate number of fully visible rows (use floor to exclude partial rows)
-    // This is used for cursor visibility - we only count rows that are completely visible
-    let visible_row_count = (content_height_f64 / row_height).floor() as usize;
+    // Calculate number of visible rows
+    // row_height includes mb_1 margin, but actual rendering may show more rows
+    // Add adjustment to match actual visible rows on screen
+    let base_rows = (content_height_f64 / row_height).floor() as usize;
+    let visible_row_count = base_rows + 4; // Add margin for partial rows and layout differences
     let visible_row_count = visible_row_count.max(5); // Minimum rows for rendering
 
     // Add buffer rows to prevent flickering during scroll
@@ -363,8 +365,8 @@ pub fn calculate_scroll_to_row(
     let max_first_row = total_rows.saturating_sub(visible_rows);
     let first_visible_row = first_visible_row.min(max_first_row);
 
-    // Last visible row
-    let last_visible_row = first_visible_row + visible_rows.saturating_sub(1);
+    // Last visible row (subtract 1 for safety margin to prevent cursor going off-screen)
+    let last_visible_row = first_visible_row + visible_rows.saturating_sub(2);
 
     // Check if cursor is already visible
     if cursor_row >= first_visible_row && cursor_row <= last_visible_row {
@@ -376,8 +378,9 @@ pub fn calculate_scroll_to_row(
         // Scrolling up: put cursor at top
         cursor_row
     } else {
-        // Scrolling down: scroll just enough to show cursor at bottom
-        cursor_row.saturating_sub(visible_rows.saturating_sub(1))
+        // Scrolling down: put cursor near bottom with same margin as last_visible_row
+        // Use visible_rows - 3 to ensure cursor stays visible after scroll
+        cursor_row.saturating_sub(visible_rows.saturating_sub(3))
     };
 
     // Don't clamp target_row too aggressively - allow scrolling to show last row
