@@ -87,9 +87,20 @@ pub fn handle_key_event(
         return;
     }
 
+    // Check for Ctrl+Shift+E or Cmd+Shift+E (cycle text encoding)
+    if event.keystroke.key == "e"
+        && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
+        && event.keystroke.modifiers.shift
+    {
+        editor.cycle_encoding();
+        cx.notify();
+        return;
+    }
+
     // Check for Ctrl+E or Cmd+E (toggle endianness when inspector is visible)
     if event.keystroke.key == "e"
         && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
+        && !event.keystroke.modifiers.shift
         && editor.inspector_visible
     {
         editor.toggle_inspector_endian();

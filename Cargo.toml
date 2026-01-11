@@ -11,3 +11,4 @@ memmap2 = "0.9"
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
 dirs = "5.0"
+encoding_rs = "0.8"

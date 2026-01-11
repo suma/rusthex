@@ -24,6 +24,57 @@ pub enum Endian {
     Big,
 }
 
+/// Text encoding for ASCII column display
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum TextEncoding {
+    /// ASCII (0x20-0x7E only)
+    #[default]
+    Ascii,
+    /// Latin-1 (ISO-8859-1, 0x00-0xFF as single bytes)
+    Latin1,
+    /// UTF-8 (1-4 bytes per character)
+    Utf8,
+    /// Shift-JIS (Japanese, 1-2 bytes per character)
+    ShiftJis,
+    /// EUC-JP (Japanese, 1-3 bytes per character)
+    EucJp,
+}
+
+impl TextEncoding {
+    /// Get display label for this encoding
+    pub fn label(&self) -> &'static str {
+        match self {
+            TextEncoding::Ascii => "ASCII",
+            TextEncoding::Latin1 => "Latin1",
+            TextEncoding::Utf8 => "UTF-8",
+            TextEncoding::ShiftJis => "SJIS",
+            TextEncoding::EucJp => "EUC",
+        }
+    }
+
+    /// Get all available encodings
+    pub fn all() -> &'static [TextEncoding] {
+        &[
+            TextEncoding::Ascii,
+            TextEncoding::Latin1,
+            TextEncoding::Utf8,
+            TextEncoding::ShiftJis,
+            TextEncoding::EucJp,
+        ]
+    }
+
+    /// Cycle to next encoding
+    pub fn next(&self) -> TextEncoding {
+        match self {
+            TextEncoding::Ascii => TextEncoding::Latin1,
+            TextEncoding::Latin1 => TextEncoding::Utf8,
+            TextEncoding::Utf8 => TextEncoding::ShiftJis,
+            TextEncoding::ShiftJis => TextEncoding::EucJp,
+            TextEncoding::EucJp => TextEncoding::Ascii,
+        }
+    }
+}
+
 /// Hex nibble position tracker
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HexNibble {

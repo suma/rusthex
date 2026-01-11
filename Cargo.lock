@@ -4726,6 +4726,7 @@ name = "rusthex"
 version = "0.1.0"
 dependencies = [
  "dirs 5.0.1",
+ "encoding_rs",
  "gpui",
  "gpui-component",
  "memmap2",

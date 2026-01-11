@@ -4,6 +4,7 @@
 //! recalculating byte states on every render cycle.
 
 use std::collections::{HashMap, HashSet};
+use crate::ui::TextEncoding;
 
 /// Cached render data for a single byte
 #[derive(Clone, PartialEq)]
@@ -33,6 +34,7 @@ pub struct CacheState {
     pub current_search_index: Option<usize>,
     pub document_len: usize,
     pub bytes_per_row: usize,
+    pub text_encoding: TextEncoding,
 }
 
 /// Row render cache

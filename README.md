@@ -35,6 +35,12 @@ A modern hex editor built with Rust and [gpui](https://www.gpui.rs/), featuring 
 - **Supported types**: Int8/16/32/64, UInt8/16/32/64, Float32/64
 - **Endianness toggle**: Little/Big endian (Ctrl+E)
 
+### Text Encoding Support
+- **Multiple Encodings**: ASCII, Latin-1, UTF-8, Shift-JIS, EUC-JP
+- **Display Only**: Encoding affects text display, editing remains byte-based
+- **Quick Switch**: Ctrl+Shift+E to cycle through encodings, or click in status bar
+- **Multi-byte Display**: First byte shows character, continuation bytes show `·`
+
 ### File Operations
 - **Open Files**: Command-line, file dialog (Ctrl+O), or drag & drop
 - **Save**: Ctrl+S / Cmd+S with confirmation dialog
@@ -96,6 +102,8 @@ A modern hex editor built with Rust and [gpui](https://www.gpui.rs/), featuring 
 | **Data Inspector** ||
 | Ctrl+I / Cmd+I | Toggle data inspector |
 | Ctrl+E / Cmd+E | Toggle endianness |
+| **Text Encoding** ||
+| Ctrl+Shift+E / Cmd+Shift+E | Cycle text encoding |
 
 ## Installation
 
@@ -155,7 +163,8 @@ rusthex/
 │   ├── tabs.rs         # Multi-tab operations
 │   ├── config.rs       # Configuration file handling
 │   ├── compare.rs      # Compare mode functionality
-│   └── render_cache.rs # Render optimization cache
+│   ├── render_cache.rs # Render optimization cache
+│   └── encoding.rs     # Text encoding support (ASCII, UTF-8, SJIS, etc.)
 ├── Cargo.toml
 ├── LICENSE-MIT
 ├── LICENSE-APACHE
@@ -171,6 +180,13 @@ RustHex is designed to handle large files efficiently:
 - **Optimized Rendering**: HashSet-based lookup for instant search result highlighting
 - **Render Cache**: Row-level caching with stable element IDs for efficient UI updates
 - **Font Metrics**: Accurate row height calculation using font metrics
+
+## Text Encoding Notes
+
+- **Display Only**: Text encoding setting only affects the ASCII column display. Editing is always byte-based.
+- **Layout Preserved**: Each byte occupies one display slot. Multi-byte characters show the decoded character at the first byte position, with `·` markers for continuation bytes.
+- **Boundary Handling**: Multi-byte sequences that start mid-row may display as invalid (`.`).
+- **No IME Support**: Keyboard input remains ASCII/hex only.
 
 ## Development
 
