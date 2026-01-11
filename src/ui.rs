@@ -386,9 +386,15 @@ pub fn calculate_scroll_to_row(
         // Scrolling up: put cursor at top
         cursor_row
     } else {
-        // Scrolling down: scroll by 1 row to keep cursor at same screen position
-        // This prevents the visual "jump" when scrolling
-        first_visible_row + 1
+        // Scrolling down
+        let distance = cursor_row.saturating_sub(last_visible_row);
+        if distance <= 1 {
+            // Small movement (e.g., Down key): scroll by 1 row for smooth scrolling
+            first_visible_row + 1
+        } else {
+            // Large jump (e.g., Ctrl+End): position cursor near bottom of visible area
+            cursor_row.saturating_sub(visible_rows.saturating_sub(3))
+        }
     };
 
     // Don't clamp target_row too aggressively - allow scrolling to show last row
