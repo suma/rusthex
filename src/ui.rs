@@ -365,8 +365,16 @@ pub fn calculate_scroll_to_row(
     let max_first_row = total_rows.saturating_sub(visible_rows);
     let first_visible_row = first_visible_row.min(max_first_row);
 
-    // Last visible row (subtract 1 for safety margin to prevent cursor going off-screen)
-    let last_visible_row = first_visible_row + visible_rows.saturating_sub(2);
+    // Last visible row calculation
+    // At the end of document, extend to include all remaining rows to prevent toggle scrolling
+    let at_end = first_visible_row >= max_first_row;
+    let last_visible_row = if at_end {
+        // At document end: all remaining rows are visible
+        total_rows.saturating_sub(1)
+    } else {
+        // Use visible_rows - 3 as margin (triggers scroll 1 row earlier)
+        first_visible_row + visible_rows.saturating_sub(3)
+    };
 
     // Check if cursor is already visible
     if cursor_row >= first_visible_row && cursor_row <= last_visible_row {
@@ -378,9 +386,9 @@ pub fn calculate_scroll_to_row(
         // Scrolling up: put cursor at top
         cursor_row
     } else {
-        // Scrolling down: put cursor near bottom with same margin as last_visible_row
-        // Use visible_rows - 3 to ensure cursor stays visible after scroll
-        cursor_row.saturating_sub(visible_rows.saturating_sub(3))
+        // Scrolling down: scroll by 1 row to keep cursor at same screen position
+        // This prevents the visual "jump" when scrolling
+        first_visible_row + 1
     };
 
     // Don't clamp target_row too aggressively - allow scrolling to show last row
