@@ -63,6 +63,8 @@ struct HexEditor {
     cached_line_height_sm: f32,
     // Text encoding for ASCII column display
     text_encoding: TextEncoding,
+    // Cached monospace character width (calculated from font metrics in render)
+    cached_char_width: f32,
 }
 
 impl HexEditor {
@@ -92,6 +94,7 @@ impl HexEditor {
             cached_line_height_xl: 24.0, // Default, will be updated in render()
             cached_line_height_sm: 17.0, // Default, will be updated in render()
             text_encoding: TextEncoding::default(),
+            cached_char_width: 8.4, // Default (14 * 0.6), will be updated in render()
         }
     }
 
@@ -685,6 +688,11 @@ impl Render for HexEditor {
         let descent = window.text_system().descent(font_id, font_size);
         // Row height = line height + mb_1 margin (4px)
         self.cached_row_height = f32::from(ascent) + f32::from(descent).abs() + 4.0;
+        // Monospace character width from em_advance (fallback to ascent * 0.6 if unavailable)
+        self.cached_char_width = match window.text_system().em_advance(font_id, font_size) {
+            Ok(advance) => f32::from(advance),
+            Err(_) => f32::from(ascent) * 0.6, // Fallback approximation
+        };
 
         // text_xl (20px) for header title
         let xl_size = px(20.0);
@@ -1057,21 +1065,21 @@ impl Render for HexEditor {
                                 let bytes_per_row = this.bytes_per_row();
                                 let doc_len = this.tab().document.len();
                                 let scroll_offset_f32: f32 = (-f32::from(this.tab().scroll_offset)).max(0.0);
-                                let font_size = this.settings.display.font_size;
 
-                                // Use cached row height calculated from font metrics in render()
+                                // Use cached values calculated from font metrics in render()
                                 let row_height = this.cached_row_height;
-                                // Monospace char width ≈ font_size * 0.6
-                                let char_width = font_size * 0.6;
+                                let char_width = this.cached_char_width;
                                 // Hex byte: 2 chars + gap_1 (4px)
                                 let hex_byte_width = char_width * 2.0 + 4.0;
 
                                 // Calculate row from Y position
+                                // event.position is in window coordinates
                                 let mouse_y: f32 = event.position.y.into();
 
-                                // Content area offset calculated dynamically from font metrics
-                                // Uses calculate_header_height() which includes tab bar and search bar
-                                let content_top = this.calculate_header_height() + row_height;
+                                // Content area offset: outer padding + header height + content top padding + first row offset
+                                let outer_padding = 16.0; // p_4
+                                let content_top_padding = 16.0; // pt_4
+                                let content_top = outer_padding + this.calculate_header_height() + content_top_padding + row_height;
                                 let relative_y = mouse_y - content_top + scroll_offset_f32;
 
                                 let row = if relative_y < 0.0 {
@@ -1083,11 +1091,12 @@ impl Render for HexEditor {
                                 let row_start = row * bytes_per_row;
 
                                 // Calculate byte in row from X position
+                                // Window coordinates: outer padding (16) + Address (80) + gap_4 (16) = 112px for hex start
                                 let mouse_x: f32 = event.position.x.into();
+                                let hex_start = 112.0; // 16 + 80 + 16
+                                let gap = 16.0; // gap_4
                                 let byte_in_row = match this.drag_pane {
                                     Some(EditPane::Hex) => {
-                                        // Hex column starts at ~112px (16 padding + 80 addr + 16 gap)
-                                        let hex_start = 112.0;
                                         if mouse_x < hex_start {
                                             0
                                         } else {
@@ -1095,9 +1104,8 @@ impl Render for HexEditor {
                                         }
                                     }
                                     Some(EditPane::Ascii) => {
-                                        // ASCII column position depends on hex column width
                                         let hex_column_width = bytes_per_row as f32 * hex_byte_width;
-                                        let ascii_start = 112.0 + hex_column_width + 16.0;
+                                        let ascii_start = hex_start + hex_column_width + gap;
                                         if mouse_x < ascii_start {
                                             0
                                         } else {
