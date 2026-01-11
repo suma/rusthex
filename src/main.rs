@@ -1095,6 +1095,7 @@ impl Render for HexEditor {
                                 let mouse_x: f32 = event.position.x.into();
                                 let hex_start = 112.0; // 16 + 80 + 16
                                 let gap = 16.0; // gap_4
+                                let gap_1 = 4.0; // gap_1 between hex bytes
                                 let byte_in_row = match this.drag_pane {
                                     Some(EditPane::Hex) => {
                                         if mouse_x < hex_start {
@@ -1104,11 +1105,14 @@ impl Render for HexEditor {
                                         }
                                     }
                                     Some(EditPane::Ascii) => {
-                                        let hex_column_width = bytes_per_row as f32 * hex_byte_width;
+                                        // Hex column: each byte is 2 chars, with gap_1 between bytes (not after last)
+                                        let hex_column_width = bytes_per_row as f32 * char_width * 2.0
+                                            + (bytes_per_row - 1) as f32 * gap_1;
                                         let ascii_start = hex_start + hex_column_width + gap;
                                         if mouse_x < ascii_start {
                                             0
                                         } else {
+                                            // ASCII column: each character is char_width, no gaps
                                             ((mouse_x - ascii_start) / char_width) as usize
                                         }
                                     }
@@ -1177,38 +1181,47 @@ impl Render for HexEditor {
                                     .child(address)
                             )
                             .child(
-                                // Hex column - each byte separately (using cached data)
+                                // Hex column - always render bytes_per_row slots for consistent width
                                 div()
                                     .flex()
                                     .gap_1()
-                                    .flex_1()
-                                    .children((row_start..row_end).enumerate().map(|(i, byte_idx)| {
+                                    .children((0..bytes_per_row).map(|i| {
+                                        let byte_idx = row_start + i;
+                                        let has_data = byte_idx < document_len;
+
                                         // Get byte data from cache or compute
                                         let (hex_str, is_cursor, is_selected, is_search_match, is_current_search) =
-                                            match &row_data {
-                                                Some(data) if i < data.bytes.len() => {
-                                                    let b = &data.bytes[i];
-                                                    (format!("{:02X}", b.value), b.is_cursor, b.is_selected, b.is_search_match, b.is_current_search)
+                                            if has_data {
+                                                match &row_data {
+                                                    Some(data) if i < data.bytes.len() => {
+                                                        let b = &data.bytes[i];
+                                                        (format!("{:02X}", b.value), b.is_cursor, b.is_selected, b.is_search_match, b.is_current_search)
+                                                    }
+                                                    _ => {
+                                                        // Fallback: compute inline (shouldn't happen if cache is properly updated)
+                                                        let byte = self.tab().document.get_byte(byte_idx).unwrap_or(0);
+                                                        (format!("{:02X}", byte), false, false, false, false)
+                                                    }
                                                 }
-                                                _ => {
-                                                    // Fallback: compute inline (shouldn't happen if cache is properly updated)
-                                                    let byte = self.tab().document.get_byte(byte_idx).unwrap_or(0);
-                                                    (format!("{:02X}", byte), false, false, false, false)
-                                                }
+                                            } else {
+                                                // Empty slot - use spaces to maintain width
+                                                ("  ".to_string(), false, false, false, false)
                                             };
 
                                         div()
-                                            .id(("hex-byte", byte_idx))  // Stable ID for efficient diffing
-                                            .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event: &gpui::MouseDownEvent, _window, cx| {
-                                                this.tab_mut().cursor_position = byte_idx;
-                                                this.tab_mut().selection_start = Some(byte_idx);
-                                                this.is_dragging = true;
-                                                this.drag_pane = Some(EditPane::Hex);
-                                                this.tab_mut().edit_pane = EditPane::Hex;
-                                                this.tab_mut().hex_nibble = HexNibble::High;
-                                                this.ensure_cursor_visible_by_row();
-                                                cx.notify();
-                                            }))
+                                            .id(("hex-byte", row_start * 100 + i))  // Unique ID even for empty slots
+                                            .when(has_data, |div| {
+                                                div.on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event: &gpui::MouseDownEvent, _window, cx| {
+                                                    this.tab_mut().cursor_position = byte_idx;
+                                                    this.tab_mut().selection_start = Some(byte_idx);
+                                                    this.is_dragging = true;
+                                                    this.drag_pane = Some(EditPane::Hex);
+                                                    this.tab_mut().edit_pane = EditPane::Hex;
+                                                    this.tab_mut().hex_nibble = HexNibble::High;
+                                                    this.ensure_cursor_visible_by_row();
+                                                    cx.notify();
+                                                }))
+                                            })
                                             .when(is_cursor && edit_pane == EditPane::Hex, |div| {
                                                 div.bg(rgb(0x4a9eff))
                                                     .text_color(rgb(0x000000))
