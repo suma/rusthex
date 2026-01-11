@@ -137,8 +137,8 @@ fn decode_utf8(data: &[u8]) -> Vec<DisplayChar> {
         // Try to decode the sequence
         if let Ok(s) = std::str::from_utf8(&data[i..i + seq_len]) {
             if let Some(c) = s.chars().next() {
-                // Check if printable
-                if c.is_control() && c != '\t' && c != '\n' && c != '\r' {
+                // Check if printable (all control characters shown as dot)
+                if c.is_control() {
                     result[i] = DisplayChar::NonPrintable;
                 } else {
                     result[i] = DisplayChar::Char(c);
@@ -197,7 +197,7 @@ fn decode_encoding_rs_granular(
 
             if !had_errors && !s.is_empty() {
                 if let Some(c) = s.chars().next() {
-                    if c.is_control() && c != '\t' && c != '\n' && c != '\r' {
+                    if c.is_control() {
                         result[i] = DisplayChar::NonPrintable;
                     } else {
                         result[i] = DisplayChar::Char(c);
@@ -244,7 +244,7 @@ fn map_decoded_to_bytes(
         let char_bytes = if c.is_ascii() { 1 } else { 2 };
         let actual_bytes = char_bytes.min(data.len() - byte_pos);
 
-        if c.is_control() && c != '\t' && c != '\n' && c != '\r' {
+        if c.is_control() {
             result[byte_pos] = DisplayChar::NonPrintable;
         } else {
             result[byte_pos] = DisplayChar::Char(c);
