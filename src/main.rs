@@ -63,6 +63,8 @@ struct HexEditor {
     cached_line_height_sm: f32,
     // Text encoding for ASCII column display
     text_encoding: TextEncoding,
+    // Encoding dropdown open state
+    encoding_dropdown_open: bool,
     // Cached monospace character width (calculated from font metrics in render)
     cached_char_width: f32,
 }
@@ -94,6 +96,7 @@ impl HexEditor {
             cached_line_height_xl: 24.0, // Default, will be updated in render()
             cached_line_height_sm: 17.0, // Default, will be updated in render()
             text_encoding: TextEncoding::default(),
+            encoding_dropdown_open: false,
             cached_char_width: 8.4, // Default (14 * 0.6), will be updated in render()
         }
     }
@@ -1597,8 +1600,9 @@ impl Render for HexEditor {
                                 )
                             })
                             .child(
-                                // Text encoding selector
+                                // Text encoding dropdown selector
                                 div()
+                                    .relative()
                                     .flex()
                                     .gap_1()
                                     .items_center()
@@ -1607,22 +1611,60 @@ impl Render for HexEditor {
                                             .text_color(rgb(0x808080))
                                             .child("Enc:")
                                     )
-                                    .children(TextEncoding::all().iter().map(|enc| {
-                                        let is_selected = self.text_encoding == *enc;
-                                        let enc_copy = *enc;
+                                    .child(
+                                        // Dropdown button
                                         div()
-                                            .px_1()
+                                            .id("encoding-dropdown-button")
+                                            .px_2()
                                             .rounded_sm()
                                             .cursor_pointer()
-                                            .bg(if is_selected { rgb(0x4a9eff) } else { rgb(0x333333) })
-                                            .text_color(if is_selected { rgb(0x000000) } else { rgb(0x808080) })
-                                            .hover(|h| h.bg(if is_selected { rgb(0x4a9eff) } else { rgb(0x444444) }))
-                                            .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event: &gpui::MouseDownEvent, _window, cx| {
-                                                this.set_encoding(enc_copy);
+                                            .bg(rgb(0x333333))
+                                            .text_color(rgb(0xffffff))
+                                            .hover(|h| h.bg(rgb(0x444444)))
+                                            .on_mouse_down(gpui::MouseButton::Left, cx.listener(|this, _event: &gpui::MouseDownEvent, _window, cx| {
+                                                this.encoding_dropdown_open = !this.encoding_dropdown_open;
                                                 cx.notify();
                                             }))
-                                            .child(enc.label())
-                                    }))
+                                            .child(format!("{} \u{25BC}", self.text_encoding.label()))
+                                    )
+                                    // Dropdown menu (shown when open)
+                                    .when(self.encoding_dropdown_open, |el| {
+                                        el.child(
+                                            div()
+                                                .absolute()
+                                                .bottom(px(24.0))
+                                                .left_0()
+                                                .bg(rgb(0x2a2a2a))
+                                                .border_1()
+                                                .border_color(rgb(0x555555))
+                                                .rounded_md()
+                                                .shadow_lg()
+                                                .py_1()
+                                                .min_w(px(100.0))
+                                                .children(TextEncoding::all().iter().map(|enc| {
+                                                    let is_selected = self.text_encoding == *enc;
+                                                    let enc_copy = *enc;
+                                                    div()
+                                                        .id(SharedString::from(format!("enc-{}", enc.label())))
+                                                        .px_3()
+                                                        .py_1()
+                                                        .cursor_pointer()
+                                                        .bg(if is_selected { rgb(0x4a9eff) } else { rgb(0x2a2a2a) })
+                                                        .text_color(if is_selected { rgb(0x000000) } else { rgb(0xcccccc) })
+                                                        .hover(|h| h.bg(if is_selected { rgb(0x4a9eff) } else { rgb(0x3a3a3a) }))
+                                                        .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event: &gpui::MouseDownEvent, _window, cx| {
+                                                            this.set_encoding(enc_copy);
+                                                            this.encoding_dropdown_open = false;
+                                                            cx.notify();
+                                                        }))
+                                                        .child(if is_selected {
+                                                            format!("\u{2713} {}", enc.label())
+                                                        } else {
+                                                            format!("  {}", enc.label())
+                                                        })
+                                                }))
+                                        )
+                                    })
                             )
                             .child(
                                 // File size (right aligned)
