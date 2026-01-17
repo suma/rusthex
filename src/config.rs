@@ -29,6 +29,8 @@ pub struct DisplaySettings {
     pub bytes_per_row: usize,
     /// Font size in pixels
     pub font_size: f32,
+    /// Font family name (e.g., "Monaco", "Menlo", "Consolas")
+    pub font_name: String,
 }
 
 impl Default for DisplaySettings {
@@ -36,6 +38,7 @@ impl Default for DisplaySettings {
         Self {
             bytes_per_row: 16,
             font_size: 12.0,
+            font_name: "Monaco".to_string(),
         }
     }
 }

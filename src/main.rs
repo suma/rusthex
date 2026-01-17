@@ -677,13 +677,14 @@ impl Render for HexEditor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Calculate and cache font metrics for different text sizes
         let font = Font {
-            family: "Monaco".into(),
+            family: self.settings.display.font_name.clone().into(),
             features: FontFeatures::default(),
             fallbacks: None,
             weight: FontWeight::default(),
             style: FontStyle::Normal,
         };
         let font_id = window.text_system().resolve_font(&font);
+        let font_name = self.settings.display.font_name.clone();
 
         // Main content font (configurable size)
         let font_size = px(self.settings.display.font_size);
@@ -1135,7 +1136,7 @@ impl Render for HexEditor {
                                 div()
                                     .flex()
                                     .flex_col()
-                                    .font_family("Monaco")
+                                    .font_family(&font_name)
                                     .text_size(px(self.settings.display.font_size))
                                     // Phase 3: Top spacer for virtual scrolling
                                     .when(render_start > 0, |parent| {
@@ -1470,7 +1471,7 @@ impl Render for HexEditor {
                                                             div()
                                                                 .w(px(70.0))
                                                                 .text_color(if is_cursor_row { rgb(0x4a9eff) } else { rgb(0x808080) })
-                                                                .font_family("Monaco")
+                                                                .font_family(&font_name)
                                                                 .text_size(px(font_size))
                                                                 .child(address.clone())
                                                         )
@@ -1480,7 +1481,7 @@ impl Render for HexEditor {
                                                                 .flex()
                                                                 .gap_1()
                                                                 .flex_1()
-                                                                .font_family("Monaco")
+                                                                .font_family(&font_name)
                                                                 .text_size(px(font_size))
                                                                 .children((start..(start + self.bytes_per_row()).min(active_doc.len())).map(|byte_idx| {
                                                                     let byte = active_doc.get_byte(byte_idx).unwrap_or(0);
@@ -1505,7 +1506,7 @@ impl Render for HexEditor {
                                                                 .flex()
                                                                 .gap_1()
                                                                 .flex_1()
-                                                                .font_family("Monaco")
+                                                                .font_family(&font_name)
                                                                 .text_size(px(font_size))
                                                                 .children((start..(start + self.bytes_per_row()).min(compare_doc.len())).map(|byte_idx| {
                                                                     let byte = compare_doc.get_byte(byte_idx).unwrap_or(0);
@@ -1537,7 +1538,7 @@ impl Render for HexEditor {
                     .border_t_1()
                     .border_color(rgb(0x404040))
                     .text_sm()
-                    .font_family("Monaco")
+                    .font_family(&font_name)
                     // First line: cursor position, byte value, selection
                     .child(
                         div()
@@ -1794,7 +1795,7 @@ impl Render for HexEditor {
                         .border_t_1()
                         .border_color(rgb(0x404040))
                         .text_sm()
-                        .font_family("Monaco")
+                        .font_family(&font_name)
                         // Header row
                         .child(
                             div()
