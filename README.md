@@ -67,6 +67,14 @@ A modern hex editor built with Rust and [gpui](https://www.gpui.rs/), featuring 
   - Bytes per row (default: 16)
   - Default endianness for data inspector
 
+**Example config.toml:**
+```toml
+[display]
+font_name = "Menlo"
+font_size = 14.0
+bytes_per_row = 16
+```
+
 ## Keyboard Shortcuts
 
 | Shortcut | Action |
