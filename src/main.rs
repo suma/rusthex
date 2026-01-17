@@ -698,6 +698,9 @@ impl Render for HexEditor {
             Err(_) => f32::from(ascent) * 0.6, // Fallback approximation
         };
 
+        // Address column width: 8 characters for "00000000" format
+        let address_width = self.cached_char_width * 8.0;
+
         // text_xl (20px) for header title
         let xl_size = px(20.0);
         let xl_ascent = window.text_system().ascent(font_id, xl_size);
@@ -1175,12 +1178,15 @@ impl Render for HexEditor {
                         div()
                             .id(("hex-row", row))  // Stable ID for efficient diffing
                             .flex()
+                            .flex_shrink_0()
+                            .whitespace_nowrap()
                             .gap_4()
                             .mb_1()
                             .child(
                                 // Address column - highlight cursor row
                                 div()
-                                    .w(px(80.0))
+                                    .w(px(address_width))
+                                    .flex_shrink_0()
                                     .text_color(if is_cursor_row { rgb(0x4a9eff) } else { rgb(0x808080) })
                                     .child(address)
                             )
@@ -1464,12 +1470,15 @@ impl Render for HexEditor {
 
                                                     div()
                                                         .flex()
+                                                        .flex_shrink_0()
+                                                        .whitespace_nowrap()
                                                         .gap_2()
                                                         .mb_1()
                                                         // Address column
                                                         .child(
                                                             div()
-                                                                .w(px(70.0))
+                                                                .w(px(address_width))
+                                                                .flex_shrink_0()
                                                                 .text_color(if is_cursor_row { rgb(0x4a9eff) } else { rgb(0x808080) })
                                                                 .font_family(&font_name)
                                                                 .text_size(px(font_size))
