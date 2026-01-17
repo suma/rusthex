@@ -58,7 +58,7 @@ A modern hex editor built with Rust and [gpui](https://www.gpui.rs/), featuring 
 - **Synchronized Navigation**: Both panels scroll and navigate together
 
 ### Configuration
-- **TOML Configuration File**: `~/.config/rusthex/settings.toml`
+- **TOML Configuration File**: `~/.config/rusthex/config.toml`
 - **Customizable Settings**:
   - Font size
   - Bytes per row (default: 16)
