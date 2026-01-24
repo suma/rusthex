@@ -5,7 +5,7 @@
 
 use gpui::{px, Pixels, ScrollHandle};
 use gpui_component::scroll::ScrollbarState;
-use std::collections::HashSet;
+use std::collections::{HashSet, BTreeSet};
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::{Arc, Mutex};
 
@@ -39,6 +39,8 @@ pub struct EditorTab {
     pub search_total: usize,
     // Render cache for performance optimization
     pub render_cache: RenderCache,
+    // Bookmarks (sorted set of byte offsets)
+    pub bookmarks: BTreeSet<usize>,
 }
 
 impl EditorTab {
@@ -65,6 +67,7 @@ impl EditorTab {
             search_progress: Arc::new(AtomicUsize::new(0)),
             search_total: 0,
             render_cache: RenderCache::new(),
+            bookmarks: BTreeSet::new(),
         }
     }
 

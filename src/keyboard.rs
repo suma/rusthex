@@ -160,6 +160,20 @@ pub fn handle_key_event(
         }
     }
 
+    // Check for F2 (next bookmark)
+    if event.keystroke.key == "f2" && !event.keystroke.modifiers.shift {
+        editor.next_bookmark();
+        cx.notify();
+        return;
+    }
+
+    // Check for Shift+F2 (previous bookmark)
+    if event.keystroke.key == "f2" && event.keystroke.modifiers.shift {
+        editor.prev_bookmark();
+        cx.notify();
+        return;
+    }
+
     // Check for F3 (next search result)
     if event.keystroke.key == "f3" && !event.keystroke.modifiers.shift {
         editor.next_search_result();
@@ -204,6 +218,26 @@ pub fn handle_key_event(
         && !event.keystroke.modifiers.shift
     {
         editor.save_with_confirmation(window, cx);
+        return;
+    }
+
+    // Check for Ctrl+B or Cmd+B (toggle bookmark)
+    if event.keystroke.key == "b"
+        && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
+        && !event.keystroke.modifiers.shift
+    {
+        editor.toggle_bookmark();
+        cx.notify();
+        return;
+    }
+
+    // Check for Ctrl+Shift+B or Cmd+Shift+B (clear all bookmarks)
+    if event.keystroke.key == "b"
+        && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
+        && event.keystroke.modifiers.shift
+    {
+        editor.clear_bookmarks();
+        cx.notify();
         return;
     }
 

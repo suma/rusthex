@@ -393,6 +393,71 @@ impl HexEditor {
         self.tab_mut().hex_nibble = HexNibble::High;
     }
 
+    // Toggle bookmark at current cursor position
+    fn toggle_bookmark(&mut self) {
+        let pos = self.tab().cursor_position;
+        if self.tab().bookmarks.contains(&pos) {
+            self.tab_mut().bookmarks.remove(&pos);
+            self.save_message = Some(format!("Bookmark removed at 0x{:08X}", pos));
+        } else {
+            self.tab_mut().bookmarks.insert(pos);
+            self.save_message = Some(format!("Bookmark added at 0x{:08X}", pos));
+        }
+    }
+
+    // Jump to next bookmark
+    fn next_bookmark(&mut self) {
+        let current = self.tab().cursor_position;
+        let bookmarks = &self.tab().bookmarks;
+
+        if bookmarks.is_empty() {
+            self.save_message = Some("No bookmarks set".to_string());
+            return;
+        }
+
+        // Find the first bookmark after current position
+        if let Some(&next) = bookmarks.range((current + 1)..).next() {
+            self.move_position(next);
+            self.save_message = Some(format!("Jumped to bookmark at 0x{:08X}", next));
+        } else {
+            // Wrap around to first bookmark
+            if let Some(&first) = bookmarks.iter().next() {
+                self.move_position(first);
+                self.save_message = Some(format!("Jumped to bookmark at 0x{:08X} (wrapped)", first));
+            }
+        }
+    }
+
+    // Jump to previous bookmark
+    fn prev_bookmark(&mut self) {
+        let current = self.tab().cursor_position;
+        let bookmarks = &self.tab().bookmarks;
+
+        if bookmarks.is_empty() {
+            self.save_message = Some("No bookmarks set".to_string());
+            return;
+        }
+
+        // Find the last bookmark before current position
+        if let Some(&prev) = bookmarks.range(..current).next_back() {
+            self.move_position(prev);
+            self.save_message = Some(format!("Jumped to bookmark at 0x{:08X}", prev));
+        } else {
+            // Wrap around to last bookmark
+            if let Some(&last) = bookmarks.iter().next_back() {
+                self.move_position(last);
+                self.save_message = Some(format!("Jumped to bookmark at 0x{:08X} (wrapped)", last));
+            }
+        }
+    }
+
+    // Clear all bookmarks
+    fn clear_bookmarks(&mut self) {
+        let count = self.tab().bookmarks.len();
+        self.tab_mut().bookmarks.clear();
+        self.save_message = Some(format!("Cleared {} bookmark(s)", count));
+    }
+
     // Handle hex input (0-9, A-F)
     fn input_hex(&mut self, c: char) {
         if self.tab().cursor_position >= self.tab().document.len() {
@@ -1271,6 +1336,9 @@ impl Render for HexEditor {
                             .collect();
                         let decoded_chars = decode_for_display(&row_bytes, self.text_encoding);
 
+                        // Check if this row has any bookmarks
+                        let has_bookmark = self.tab().bookmarks.range(row_start..row_end).next().is_some();
+
                         div()
                             .id(("hex-row", row))  // Stable ID for efficient diffing
                             .flex()
@@ -1279,12 +1347,30 @@ impl Render for HexEditor {
                             .gap_4()
                             .mb_1()
                             .child(
-                                // Address column - highlight cursor row
+                                // Address column - highlight cursor row, show bookmark indicator
                                 div()
+                                    .flex()
+                                    .items_center()
                                     .w(px(address_width))
                                     .flex_shrink_0()
-                                    .text_color(if is_cursor_row { rgb(0x4a9eff) } else { rgb(0x808080) })
-                                    .child(address)
+                                    .when(has_bookmark, |d| {
+                                        d.child(
+                                            div()
+                                                .w(px(8.0))
+                                                .h(px(8.0))
+                                                .mr(px(4.0))
+                                                .bg(rgb(0x00bfff))
+                                                .rounded(px(4.0))
+                                        )
+                                    })
+                                    .when(!has_bookmark, |d| {
+                                        d.child(div().w(px(12.0))) // Spacer to align addresses
+                                    })
+                                    .child(
+                                        div()
+                                            .text_color(if is_cursor_row { rgb(0x4a9eff) } else { rgb(0x808080) })
+                                            .child(address)
+                                    )
                             )
                             .child(
                                 // Hex column - always render bytes_per_row slots for consistent width
@@ -1473,6 +1559,31 @@ impl Render for HexEditor {
                                                 rgb(0xffff00) // Yellow for other results
                                             })
                                             .opacity(0.8)
+                                    }).collect::<Vec<_>>()
+                                }
+                            })
+                            // Add bookmark markers on scrollbar
+                            .children({
+                                let total_rows = ui::row_count(self.tab().document.len(), self.bytes_per_row());
+                                let viewport_height = viewport_bounds.size.height;
+
+                                if total_rows == 0 || viewport_height <= px(0.0) {
+                                    Vec::new()
+                                } else {
+                                    self.tab().bookmarks.iter().map(|&bookmark_pos| {
+                                        let bookmark_row = bookmark_pos / self.bytes_per_row();
+                                        let position_ratio = bookmark_row as f32 / total_rows as f32;
+                                        let marker_position = viewport_height * position_ratio;
+
+                                        div()
+                                            .absolute()
+                                            .left(px(0.0))
+                                            .w(px(6.0))
+                                            .h(px(6.0))
+                                            .top(marker_position)
+                                            .bg(rgb(0x00bfff)) // Cyan/DeepSkyBlue for bookmarks
+                                            .rounded(px(3.0))
+                                            .opacity(0.9)
                                     }).collect::<Vec<_>>()
                                 }
                             })
