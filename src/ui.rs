@@ -364,15 +364,7 @@ pub fn calculate_visible_row_range(
     let first_visible_row = first_visible_row.min(max_first_row);
 
     // Last visible row calculation
-    // At the end of document, extend to include all remaining rows to prevent toggle scrolling
-    let at_end = first_visible_row >= max_first_row;
-    let last_visible_row = if at_end {
-        // At document end: all remaining rows are visible
-        total_rows.saturating_sub(1)
-    } else {
-        // Use visible_rows - 3 as margin (triggers scroll 1 row earlier)
-        first_visible_row + visible_rows.saturating_sub(3)
-    };
+    let last_visible_row = first_visible_row + visible_rows.saturating_sub(1);
 
     (first_visible_row, last_visible_row)
 }
@@ -399,14 +391,14 @@ pub fn calculate_scroll_offset(
     let target_row = target_row.min(max_target_row);
 
     // Calculate offset using integer row position to avoid float drift
-    // Round to exact row boundary to prevent accumulating errors
+    // Use floor() to match calculate_visible_row_range calculation
     if actual_total_height > MAX_VIRTUAL_HEIGHT {
         let ratio = target_row as f64 / total_rows as f64;
-        let offset = (ratio * MAX_VIRTUAL_HEIGHT).round();
+        let offset = (ratio * MAX_VIRTUAL_HEIGHT).floor();
         px(-offset as f32)
     } else {
-        // Use exact integer multiplication to avoid float errors
-        let offset = (target_row as f64 * row_height).round();
+        // Use floor() to ensure consistency with visible row calculation
+        let offset = (target_row as f64 * row_height).floor();
         px(-offset as f32)
     }
 }
@@ -441,8 +433,15 @@ pub fn calculate_scroll_to_row(
 
     // Calculate target row (first visible row after scrolling)
     let target_row = if cursor_row < first_visible_row {
-        // Scrolling up: put cursor at top
-        cursor_row
+        // Scrolling up
+        let distance = first_visible_row.saturating_sub(cursor_row);
+        if distance <= 1 {
+            // Small movement (e.g., Up key): scroll by 1 row for smooth scrolling
+            first_visible_row.saturating_sub(1)
+        } else {
+            // Large jump (beyond screen): put cursor at top
+            cursor_row
+        }
     } else {
         // Scrolling down
         let distance = cursor_row.saturating_sub(last_visible_row);
