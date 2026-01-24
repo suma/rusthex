@@ -52,6 +52,14 @@ A modern hex editor built with Rust and [gpui](https://www.gpui.rs/), featuring 
   - Ctrl+Tab / Ctrl+Shift+Tab: Switch between tabs
   - Drag & drop tabs to reorder
 
+### Bookmarks
+- **Toggle Bookmark**: Ctrl+B to add/remove bookmark at cursor position
+- **Navigate Bookmarks**: F2 (next), Shift+F2 (previous) with wraparound
+- **Clear All**: Ctrl+Shift+B to remove all bookmarks
+- **Visual Indicators**:
+  - Cyan dot markers on scrollbar
+  - Cyan indicator in address column for bookmarked rows
+
 ### Compare Mode
 - **Side-by-side Comparison**: Compare two files in split view (Ctrl+K)
 - **Difference Highlighting**: Bytes that differ are highlighted in red
@@ -108,6 +116,11 @@ bytes_per_row = 16
 | Shift+F3 | Previous match |
 | Backspace | Delete character |
 | Esc | Close search / Cancel |
+| **Bookmarks** ||
+| Ctrl+B / Cmd+B | Toggle bookmark at cursor |
+| F2 | Jump to next bookmark |
+| Shift+F2 | Jump to previous bookmark |
+| Ctrl+Shift+B / Cmd+Shift+B | Clear all bookmarks |
 | **Compare** ||
 | Ctrl+K / Cmd+K | Toggle compare mode |
 | **Data Inspector** ||
@@ -224,9 +237,7 @@ See [todo.md](todo.md) for detailed implementation status and planned features.
 
 ### Planned Features
 - [ ] Copy/paste support
-- [ ] Exit confirmation dialog for unsaved changes
 - [ ] Search & replace
-- [ ] Bookmarks
 - [ ] Customizable themes
 - [ ] Export (C array, Base64, Hex dump)
 
