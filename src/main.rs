@@ -9,6 +9,7 @@
 //! - `keyboard` - Keyboard event handling and shortcuts
 //! - `ui` - UI types and utility functions
 
+mod bitmap;
 mod compare;
 mod config;
 mod document;
@@ -69,6 +70,10 @@ struct HexEditor {
     cached_char_width: f32,
     // Force close flag - when true, skip unsaved changes confirmation
     force_close: bool,
+    // Bitmap visualization state
+    bitmap_visible: bool,
+    bitmap_width: usize,
+    bitmap_color_mode: bitmap::BitmapColorMode,
 }
 
 impl HexEditor {
@@ -101,6 +106,9 @@ impl HexEditor {
             encoding_dropdown_open: false,
             cached_char_width: 8.4, // Default (14 * 0.6), will be updated in render()
             force_close: false,
+            bitmap_visible: false,
+            bitmap_width: bitmap::DEFAULT_BITMAP_WIDTH,
+            bitmap_color_mode: bitmap::BitmapColorMode::default(),
         }
     }
 
@@ -456,6 +464,38 @@ impl HexEditor {
         let count = self.tab().bookmarks.len();
         self.tab_mut().bookmarks.clear();
         self.save_message = Some(format!("Cleared {} bookmark(s)", count));
+    }
+
+    // Toggle bitmap visualization
+    fn toggle_bitmap(&mut self) {
+        self.bitmap_visible = !self.bitmap_visible;
+        if self.bitmap_visible {
+            self.save_message = Some(format!(
+                "Bitmap: {} ({}px wide)",
+                self.bitmap_color_mode.label(),
+                self.bitmap_width
+            ));
+        } else {
+            self.save_message = Some("Bitmap view closed".to_string());
+        }
+    }
+
+    // Cycle bitmap color mode
+    fn cycle_bitmap_color_mode(&mut self) {
+        self.bitmap_color_mode = self.bitmap_color_mode.next();
+        self.save_message = Some(format!("Bitmap mode: {}", self.bitmap_color_mode.label()));
+    }
+
+    // Increase bitmap width
+    fn increase_bitmap_width(&mut self) {
+        self.bitmap_width = bitmap::next_width(self.bitmap_width);
+        self.save_message = Some(format!("Bitmap width: {}px", self.bitmap_width));
+    }
+
+    // Decrease bitmap width
+    fn decrease_bitmap_width(&mut self) {
+        self.bitmap_width = bitmap::prev_width(self.bitmap_width);
+        self.save_message = Some(format!("Bitmap width: {}px", self.bitmap_width));
     }
 
     // Handle hex input (0-9, A-F)
@@ -2302,6 +2342,105 @@ impl Render for HexEditor {
                                             )
                                     }).collect::<Vec<_>>()
                                 )
+                        )
+                )
+            })
+            // Bitmap visualization panel
+            .when(self.bitmap_visible, |parent| {
+                let bitmap_width = self.bitmap_width;
+                let color_mode = self.bitmap_color_mode;
+                let doc_len = self.tab().document.len();
+                let bitmap_height = (doc_len + bitmap_width - 1) / bitmap_width;
+                let max_display_height = 400usize;
+                let display_height = bitmap_height.min(max_display_height);
+
+                // Calculate scroll position for bitmap (based on cursor)
+                let cursor_row = self.tab().cursor_position / bitmap_width;
+                let bitmap_scroll_start = cursor_row.saturating_sub(display_height / 2);
+
+                parent.child(
+                    div()
+                        .absolute()
+                        .right(px(20.0))
+                        .top(px(100.0))
+                        .bg(rgb(0x2a2a2a))
+                        .border_1()
+                        .border_color(rgb(0x4a9eff))
+                        .rounded_md()
+                        .p_2()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .child(
+                            // Header
+                            div()
+                                .flex()
+                                .justify_between()
+                                .items_center()
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .text_color(rgb(0x4a9eff))
+                                        .child(format!("Bitmap View ({})", color_mode.label()))
+                                )
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .text_color(rgb(0x808080))
+                                        .child(format!("{}x{}", bitmap_width, bitmap_height))
+                                )
+                        )
+                        .child(
+                            // Controls hint
+                            div()
+                                .text_xs()
+                                .text_color(rgb(0x606060))
+                                .child("C: color | +/-: width | Ctrl+M: close")
+                        )
+                        .child(
+                            // Bitmap canvas
+                            div()
+                                .flex()
+                                .flex_col()
+                                .overflow_hidden()
+                                .children((0..display_height).map(|row_idx| {
+                                    let actual_row = bitmap_scroll_start + row_idx;
+                                    let row_start = actual_row * bitmap_width;
+
+                                    div()
+                                        .flex()
+                                        .h(px(2.0))
+                                        .children((0..bitmap_width).map(|col| {
+                                            let byte_offset = row_start + col;
+                                            let color = if byte_offset < doc_len {
+                                                let byte = self.tab().document.get_byte(byte_offset).unwrap_or(0);
+                                                let (r, g, b) = color_mode.byte_to_color(byte);
+                                                rgb((r as u32) << 16 | (g as u32) << 8 | b as u32)
+                                            } else {
+                                                rgb(0x1e1e1e) // Background for empty area
+                                            };
+
+                                            // Highlight cursor position
+                                            let is_cursor = byte_offset == self.tab().cursor_position;
+
+                                            div()
+                                                .w(px(2.0))
+                                                .h(px(2.0))
+                                                .bg(color)
+                                                .when(is_cursor, |d| d.border_1().border_color(rgb(0xff0000)))
+                                        }).collect::<Vec<_>>())
+                                }).collect::<Vec<_>>())
+                        )
+                        .child(
+                            // Position info
+                            div()
+                                .text_xs()
+                                .text_color(rgb(0x808080))
+                                .child(format!("Cursor: row {}, col {} (0x{:08X})",
+                                    self.tab().cursor_position / bitmap_width,
+                                    self.tab().cursor_position % bitmap_width,
+                                    self.tab().cursor_position
+                                ))
                         )
                 )
             })

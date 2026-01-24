@@ -241,6 +241,38 @@ pub fn handle_key_event(
         return;
     }
 
+    // Check for Ctrl+M or Cmd+M (toggle bitmap view)
+    if event.keystroke.key == "m"
+        && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
+        && !event.keystroke.modifiers.shift
+    {
+        editor.toggle_bitmap();
+        cx.notify();
+        return;
+    }
+
+    // Bitmap view controls (when visible)
+    if editor.bitmap_visible {
+        // C key to cycle color mode
+        if event.keystroke.key == "c" && !event.keystroke.modifiers.control && !event.keystroke.modifiers.platform {
+            editor.cycle_bitmap_color_mode();
+            cx.notify();
+            return;
+        }
+        // + or = key to increase width
+        if event.keystroke.key == "=" || event.keystroke.key == "+" {
+            editor.increase_bitmap_width();
+            cx.notify();
+            return;
+        }
+        // - key to decrease width
+        if event.keystroke.key == "-" {
+            editor.decrease_bitmap_width();
+            cx.notify();
+            return;
+        }
+    }
+
     // Check for Ctrl+Z or Cmd+Z (undo)
     if event.keystroke.key == "z"
         && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
