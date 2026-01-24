@@ -8,12 +8,23 @@
 //! - `search` - Search functionality (ASCII and Hex search)
 //! - `keyboard` - Keyboard event handling and shortcuts
 //! - `ui` - UI types and utility functions
+//! - `cursor` - Cursor movement and navigation
+//! - `bookmark` - Bookmark management
+//! - `file_ops` - File operations (load, save, dialogs)
+//! - `input` - Byte input handling (hex, ASCII)
+//! - `inspector` - Data Inspector panel
+//! - `tabs` - Tab management
 
 mod bitmap;
+mod bookmark;
 mod compare;
 mod config;
+mod cursor;
 mod document;
 mod encoding;
+mod file_ops;
+mod input;
+mod inspector;
 mod keyboard;
 mod render_cache;
 mod search;
@@ -30,13 +41,13 @@ pub use ui::{EditPane, HexNibble, Endian, TextEncoding};
 use encoding::{decode_for_display, DisplayChar};
 use gpui::{
     App, Application, Bounds, Context, ExternalPaths, Focusable, FocusHandle, Font, FontFeatures,
-    FontStyle, FontWeight, PathPromptOptions, Point, PromptLevel, SharedString, Timer, Window,
-    WindowBounds, WindowOptions, div, prelude::*, px, rgb, rgba, size,
+    FontStyle, FontWeight, SharedString, Timer, Window, WindowBounds, WindowOptions, div,
+    prelude::*, px, rgb, rgba, size,
 };
+use std::path::PathBuf;
 use std::time::Duration;
 use std::sync::atomic::Ordering;
 use gpui_component::scroll::{Scrollbar, ScrollbarShow};
-use std::path::PathBuf;
 
 struct HexEditor {
     tabs: Vec<EditorTab>,
@@ -173,19 +184,6 @@ impl HexEditor {
         &mut self.tabs[self.active_tab]
     }
 
-    /// Toggle data inspector visibility
-    fn toggle_inspector(&mut self) {
-        self.inspector_visible = !self.inspector_visible;
-    }
-
-    /// Toggle inspector endianness
-    fn toggle_inspector_endian(&mut self) {
-        self.inspector_endian = match self.inspector_endian {
-            Endian::Little => Endian::Big,
-            Endian::Big => Endian::Little,
-        };
-    }
-
     /// Cycle to next text encoding
     fn cycle_encoding(&mut self) {
         self.text_encoding = self.text_encoding.next();
@@ -200,32 +198,12 @@ impl HexEditor {
         }
     }
 
-    fn load_file(&mut self, path: PathBuf) -> std::io::Result<()> {
-        self.tab_mut().document.load(path)?;
-        self.tab_mut().cursor_position = 0;
-        self.tab_mut().selection_start = None;
-        Ok(())
-    }
-
-    // Selection helper methods
-    fn has_selection(&self) -> bool {
-        self.tab().selection_start.is_some()
-    }
-
-    fn selection_range(&self) -> Option<(usize, usize)> {
-        self.tab().selection_start.map(|start| {
-            let end = self.tab().cursor_position;
-            if start <= end {
-                (start, end)
-            } else {
-                (end, start)
-            }
-        })
-    }
-
-    fn clear_selection(&mut self) {
-        self.tab_mut().selection_start = None;
-    }
+    // Selection, file operations, cursor, and input methods are in separate modules:
+    // - cursor.rs (movement)
+    // - bookmark.rs (bookmarks)
+    // - file_ops.rs (load/save)
+    // - input.rs (selection, hex/ascii input)
+    // - inspector.rs (data inspector)
 
     fn with_sample_data(cx: &mut Context<Self>) -> Self {
         let mut editor = Self::new(cx);
@@ -254,219 +232,6 @@ impl HexEditor {
 
         editor.tab_mut().document = Document::with_data(data);
         editor
-    }
-
-    // Ensure cursor is visible by scrolling to its row
-    fn ensure_cursor_visible_by_row(&mut self) {
-        let cursor_row = self.tab().cursor_position / self.bytes_per_row();
-        let total_rows = ui::row_count(self.tab().document.len(), self.bytes_per_row());
-        let current_offset = self.tab().scroll_handle.offset();
-
-        // If cursor is at position 0, reset scroll to top
-        if self.tab().cursor_position == 0 {
-            let new_offset = Point::new(current_offset.x, px(0.0));
-            self.tab_mut().scroll_handle.set_offset(new_offset);
-            self.tab_mut().scroll_offset = px(0.0);
-            return;
-        }
-
-        if let Some(new_y_offset) = ui::calculate_scroll_to_row(
-            cursor_row,
-            current_offset.y,
-            self.content_view_rows,
-            total_rows,
-            self.row_height(),
-        ) {
-            let new_offset = Point::new(current_offset.x, new_y_offset);
-            self.tab_mut().scroll_handle.set_offset(new_offset);
-            // Keep scroll_offset in sync for mouse drag calculations
-            self.tab_mut().scroll_offset = new_y_offset;
-        }
-    }
-
-    /// Calculate new position from current position with relative offset.
-    /// Handles boundary checks to prevent underflow/overflow.
-    /// Based on suma/hex cursor.cpp getRelativePosition.
-    fn get_relative_position(&self, relative_pos: i64) -> usize {
-        let current_pos = self.tab().cursor_position;
-        let doc_len = self.tab().document.len();
-
-        if relative_pos < 0 {
-            // Moving backward
-            let diff = relative_pos.unsigned_abs() as usize;
-            if current_pos < diff {
-                0
-            } else {
-                current_pos - diff
-            }
-        } else {
-            // Moving forward
-            let diff = relative_pos as usize;
-            let max_pos = doc_len.saturating_sub(1);
-            if current_pos.checked_add(diff).map_or(true, |p| p > max_pos) {
-                max_pos
-            } else {
-                current_pos + diff
-            }
-        }
-    }
-
-    /// Move cursor to the specified position with common post-processing.
-    /// Resets nibble state and ensures cursor visibility.
-    /// Based on suma/hex cursor.cpp movePosition.
-    fn move_position(&mut self, new_pos: usize) {
-        let max_pos = self.tab().document.len().saturating_sub(1);
-        self.tab_mut().cursor_position = new_pos.min(max_pos);
-        self.tab_mut().hex_nibble = HexNibble::High;
-        self.ensure_cursor_visible_by_row();
-    }
-
-    // Cursor movement methods
-    fn move_cursor_left(&mut self) {
-        let new_pos = self.get_relative_position(-1);
-        if new_pos != self.tab().cursor_position {
-            self.move_position(new_pos);
-        }
-    }
-
-    fn move_cursor_right(&mut self) {
-        let new_pos = self.get_relative_position(1);
-        if new_pos != self.tab().cursor_position {
-            self.move_position(new_pos);
-        }
-    }
-
-    fn move_cursor_up(&mut self) {
-        let offset = -(self.bytes_per_row() as i64);
-        let new_pos = self.get_relative_position(offset);
-        if new_pos != self.tab().cursor_position {
-            self.move_position(new_pos);
-        }
-    }
-
-    fn move_cursor_down(&mut self) {
-        let offset = self.bytes_per_row() as i64;
-        let new_pos = self.get_relative_position(offset);
-        if new_pos != self.tab().cursor_position {
-            self.move_position(new_pos);
-        }
-    }
-
-    // Page Up: Move cursor up by one page
-    fn move_cursor_page_up(&mut self, visible_rows: usize) {
-        let rows_to_move = visible_rows.saturating_sub(1).max(1);
-        let bytes_to_move = rows_to_move * self.bytes_per_row();
-        let offset = -(bytes_to_move as i64);
-        let new_pos = self.get_relative_position(offset);
-        self.move_position(new_pos);
-    }
-
-    // Page Down: Move cursor down by one page
-    fn move_cursor_page_down(&mut self, visible_rows: usize) {
-        let rows_to_move = visible_rows.saturating_sub(1).max(1);
-        let bytes_to_move = rows_to_move * self.bytes_per_row();
-        let new_pos = self.get_relative_position(bytes_to_move as i64);
-        self.move_position(new_pos);
-    }
-
-    // Home: Move cursor to the beginning of the current row
-    fn move_cursor_home(&mut self) {
-        let current_row = self.tab().cursor_position / self.bytes_per_row();
-        let new_pos = current_row * self.bytes_per_row();
-        self.move_position(new_pos);
-    }
-
-    // End: Move cursor to the end of the current row
-    fn move_cursor_end(&mut self) {
-        let current_row = self.tab().cursor_position / self.bytes_per_row();
-        let row_end = ((current_row + 1) * self.bytes_per_row()).min(self.tab().document.len()).saturating_sub(1);
-        self.move_position(row_end);
-    }
-
-    // Ctrl+Home: Move cursor to the beginning of the file
-    fn move_cursor_file_start(&mut self) {
-        self.move_position(0);
-    }
-
-    // Ctrl+End: Move cursor to the end of the file
-    fn move_cursor_file_end(&mut self) {
-        let end_pos = self.tab().document.len().saturating_sub(1);
-        self.move_position(end_pos);
-    }
-
-    // Toggle between Hex and ASCII pane
-    fn toggle_pane(&mut self) {
-        let new_pane = match self.tab().edit_pane {
-            EditPane::Hex => EditPane::Ascii,
-            EditPane::Ascii => EditPane::Hex,
-        };
-        self.tab_mut().edit_pane = new_pane;
-        self.tab_mut().hex_nibble = HexNibble::High;
-    }
-
-    // Toggle bookmark at current cursor position
-    fn toggle_bookmark(&mut self) {
-        let pos = self.tab().cursor_position;
-        if self.tab().bookmarks.contains(&pos) {
-            self.tab_mut().bookmarks.remove(&pos);
-            self.save_message = Some(format!("Bookmark removed at 0x{:08X}", pos));
-        } else {
-            self.tab_mut().bookmarks.insert(pos);
-            self.save_message = Some(format!("Bookmark added at 0x{:08X}", pos));
-        }
-    }
-
-    // Jump to next bookmark
-    fn next_bookmark(&mut self) {
-        let current = self.tab().cursor_position;
-        let bookmarks = &self.tab().bookmarks;
-
-        if bookmarks.is_empty() {
-            self.save_message = Some("No bookmarks set".to_string());
-            return;
-        }
-
-        // Find the first bookmark after current position
-        if let Some(&next) = bookmarks.range((current + 1)..).next() {
-            self.move_position(next);
-            self.save_message = Some(format!("Jumped to bookmark at 0x{:08X}", next));
-        } else {
-            // Wrap around to first bookmark
-            if let Some(&first) = bookmarks.iter().next() {
-                self.move_position(first);
-                self.save_message = Some(format!("Jumped to bookmark at 0x{:08X} (wrapped)", first));
-            }
-        }
-    }
-
-    // Jump to previous bookmark
-    fn prev_bookmark(&mut self) {
-        let current = self.tab().cursor_position;
-        let bookmarks = &self.tab().bookmarks;
-
-        if bookmarks.is_empty() {
-            self.save_message = Some("No bookmarks set".to_string());
-            return;
-        }
-
-        // Find the last bookmark before current position
-        if let Some(&prev) = bookmarks.range(..current).next_back() {
-            self.move_position(prev);
-            self.save_message = Some(format!("Jumped to bookmark at 0x{:08X}", prev));
-        } else {
-            // Wrap around to last bookmark
-            if let Some(&last) = bookmarks.iter().next_back() {
-                self.move_position(last);
-                self.save_message = Some(format!("Jumped to bookmark at 0x{:08X} (wrapped)", last));
-            }
-        }
-    }
-
-    // Clear all bookmarks
-    fn clear_bookmarks(&mut self) {
-        let count = self.tab().bookmarks.len();
-        self.tab_mut().bookmarks.clear();
-        self.save_message = Some(format!("Cleared {} bookmark(s)", count));
     }
 
     // Toggle bitmap visualization
@@ -499,268 +264,6 @@ impl HexEditor {
     fn decrease_bitmap_width(&mut self) {
         self.bitmap_width = bitmap::prev_width(self.bitmap_width);
         self.save_message = Some(format!("Bitmap width: {}px", self.bitmap_width));
-    }
-
-    // Handle hex input (0-9, A-F)
-    fn input_hex(&mut self, c: char) {
-        if self.tab().cursor_position >= self.tab().document.len() {
-            return;
-        }
-
-        // Parse hex digit
-        let digit = match c.to_ascii_uppercase() {
-            '0'..='9' => c as u8 - b'0',
-            'A'..='F' => c.to_ascii_uppercase() as u8 - b'A' + 10,
-            _ => return, // Invalid hex character
-        };
-
-        let cursor_pos = self.tab().cursor_position;
-        let current_byte = self.tab().document.get_byte(cursor_pos).unwrap();
-
-        let new_byte = match self.tab().hex_nibble {
-            HexNibble::High => {
-                // Update upper 4 bits
-                self.tab_mut().hex_nibble = HexNibble::Low;
-                (digit << 4) | (current_byte & 0x0F)
-            }
-            HexNibble::Low => {
-                // Update lower 4 bits
-                self.tab_mut().hex_nibble = HexNibble::High;
-                (current_byte & 0xF0) | digit
-            }
-        };
-
-        let cursor_pos = self.tab().cursor_position;
-        if let Err(e) = self.tab_mut().document.set_byte(cursor_pos, new_byte) {
-            eprintln!("Failed to set byte: {}", e);
-            return;
-        }
-
-        // Auto-advance to next byte after completing a full byte edit
-        if self.tab().hex_nibble == HexNibble::High {
-            self.move_cursor_right();
-        }
-    }
-
-    // Handle ASCII input
-    fn input_ascii(&mut self, c: char) {
-        if self.tab().cursor_position >= self.tab().document.len() {
-            return;
-        }
-
-        // Only accept printable ASCII characters
-        if c >= ' ' && c <= '~' {
-            let cursor_pos = self.tab().cursor_position;
-            if let Err(e) = self.tab_mut().document.set_byte(cursor_pos, c as u8) {
-                eprintln!("Failed to set byte: {}", e);
-                return;
-            }
-            // Auto-advance to next byte
-            self.move_cursor_right();
-        }
-    }
-
-    // Save file to current path (internal, no confirmation)
-    fn save_file(&mut self) -> std::io::Result<()> {
-        self.tab_mut().document.save()?;
-        if let Some(path) = self.tab().document.file_path() {
-            self.save_message = Some(format!("Saved to {}", path.display()));
-        }
-        Ok(())
-    }
-
-    // Save file to a new path
-    fn save_file_as(&mut self, path: PathBuf) -> std::io::Result<()> {
-        self.tab_mut().document.save_as(path.clone())?;
-        self.save_message = Some(format!("Saved to {}", path.display()));
-        Ok(())
-    }
-
-    /// Save file with confirmation dialog
-    pub fn save_with_confirmation(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        // Check if there are unsaved changes
-        if !self.tab().document.has_unsaved_changes() {
-            self.save_message = Some("No changes to save".to_string());
-            cx.notify();
-            return;
-        }
-
-        // Get file path for the dialog message
-        let file_name = self.tab().document.file_name()
-            .unwrap_or("file")
-            .to_string();
-
-        let receiver = window.prompt(
-            PromptLevel::Warning,
-            "Save File",
-            Some(&format!("Do you want to save changes to '{}'?", file_name)),
-            &["Save", "Cancel"],
-            cx,
-        );
-
-        cx.spawn_in(window, async move |entity, cx| {
-            if let Ok(answer) = receiver.await {
-                if answer == 0 {
-                    // User clicked "Save"
-                    let _ = entity.update(cx, |editor, cx| {
-                        match editor.save_file() {
-                            Ok(_) => {
-                                eprintln!("File saved successfully");
-                            }
-                            Err(e) => {
-                                eprintln!("Failed to save file: {}", e);
-                                editor.save_message = Some(format!("Error: {}", e));
-                            }
-                        }
-                        cx.notify();
-                    });
-                }
-            }
-        })
-        .detach();
-    }
-
-    /// Check if any tab has unsaved changes
-    pub fn has_any_unsaved_changes(&self) -> bool {
-        self.tabs.iter().any(|tab| tab.document.has_unsaved_changes())
-    }
-
-    /// Get list of files with unsaved changes
-    fn get_unsaved_file_names(&self) -> Vec<String> {
-        self.tabs
-            .iter()
-            .filter(|tab| tab.document.has_unsaved_changes())
-            .map(|tab| {
-                tab.document
-                    .file_name()
-                    .unwrap_or("Untitled")
-                    .to_string()
-            })
-            .collect()
-    }
-
-    /// Show confirmation dialog before closing with unsaved changes
-    pub fn confirm_close_with_unsaved(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let unsaved_files = self.get_unsaved_file_names();
-        if unsaved_files.is_empty() {
-            // No unsaved changes, just quit
-            self.force_close = true;
-            cx.quit();
-            return;
-        }
-
-        let message = if unsaved_files.len() == 1 {
-            format!("'{}' has unsaved changes.", unsaved_files[0])
-        } else {
-            format!(
-                "{} files have unsaved changes:\n{}",
-                unsaved_files.len(),
-                unsaved_files.join(", ")
-            )
-        };
-
-        let receiver = window.prompt(
-            PromptLevel::Warning,
-            "Unsaved Changes",
-            Some(&format!("{}\n\nDo you want to discard changes and quit?", message)),
-            &["Discard and Quit", "Cancel"],
-            cx,
-        );
-
-        cx.spawn_in(window, async move |entity, cx| {
-            if let Ok(answer) = receiver.await {
-                if answer == 0 {
-                    // User clicked "Discard and Quit"
-                    let _ = entity.update(cx, |editor, cx| {
-                        editor.force_close = true;
-                        cx.quit();
-                    });
-                }
-                // If Cancel (answer == 1), do nothing - window stays open
-            }
-        })
-        .detach();
-    }
-
-    /// Open file dialog and load selected file
-    pub fn open_file_dialog(&mut self, cx: &mut Context<Self>) {
-        let options = PathPromptOptions {
-            files: true,
-            directories: false,
-            multiple: false,
-            prompt: Some(SharedString::from("Open File")),
-        };
-
-        let receiver = cx.prompt_for_paths(options);
-
-        cx.spawn(async move |entity, cx| {
-            if let Ok(Ok(Some(paths))) = receiver.await {
-                if let Some(path) = paths.into_iter().next() {
-                    let _ = entity.update(cx, |editor, cx| {
-                        match editor.open_file_in_new_tab(path.clone()) {
-                            Ok(_) => {
-                                editor.save_message = Some(format!("Opened in new tab: {}", path.display()));
-                            }
-                            Err(e) => {
-                                editor.save_message = Some(format!("Error: {}", e));
-                            }
-                        }
-                        cx.notify();
-                    });
-                }
-            }
-        })
-        .detach();
-    }
-
-    /// Save As dialog - save file to a new location
-    pub fn save_as_dialog(&mut self, cx: &mut Context<Self>) {
-        // Get directory and suggested filename from current document
-        let (directory, suggested_name) = if let Some(path) = self.tab().document.file_path() {
-            let dir = path.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from("."));
-            let name = path.file_name().map(|n| n.to_string_lossy().to_string());
-            (dir, name)
-        } else {
-            (PathBuf::from("."), Some("untitled.bin".to_string()))
-        };
-
-        let receiver = cx.prompt_for_new_path(&directory, suggested_name.as_deref());
-
-        cx.spawn(async move |entity, cx| {
-            if let Ok(Ok(Some(path))) = receiver.await {
-                let _ = entity.update(cx, |editor, cx| {
-                    match editor.save_file_as(path.clone()) {
-                        Ok(_) => {
-                            editor.save_message = Some(format!("Saved as: {}", path.display()));
-                        }
-                        Err(e) => {
-                            editor.save_message = Some(format!("Error: {}", e));
-                        }
-                    }
-                    cx.notify();
-                });
-            }
-        })
-        .detach();
-    }
-
-    /// Handle file drop event - open in new tab
-    pub fn handle_file_drop(&mut self, paths: &ExternalPaths, cx: &mut Context<Self>) {
-        if let Some(path) = paths.paths().first() {
-            match self.open_file_in_new_tab(path.clone()) {
-                Ok(_) => {
-                    self.save_message = Some(format!("Opened: {}", path.display()));
-                }
-                Err(e) => {
-                    self.save_message = Some(format!("Error: {}", e));
-                }
-            }
-            cx.notify();
-        }
     }
 
     /// Start a background refresh loop to update UI during search
