@@ -67,6 +67,8 @@ struct HexEditor {
     encoding_dropdown_open: bool,
     // Cached monospace character width (calculated from font metrics in render)
     cached_char_width: f32,
+    // Force close flag - when true, skip unsaved changes confirmation
+    force_close: bool,
 }
 
 impl HexEditor {
@@ -98,6 +100,7 @@ impl HexEditor {
             text_encoding: TextEncoding::default(),
             encoding_dropdown_open: false,
             cached_char_width: 8.4, // Default (14 * 0.6), will be updated in render()
+            force_close: false,
         }
     }
 
@@ -504,6 +507,72 @@ impl HexEditor {
                         cx.notify();
                     });
                 }
+            }
+        })
+        .detach();
+    }
+
+    /// Check if any tab has unsaved changes
+    pub fn has_any_unsaved_changes(&self) -> bool {
+        self.tabs.iter().any(|tab| tab.document.has_unsaved_changes())
+    }
+
+    /// Get list of files with unsaved changes
+    fn get_unsaved_file_names(&self) -> Vec<String> {
+        self.tabs
+            .iter()
+            .filter(|tab| tab.document.has_unsaved_changes())
+            .map(|tab| {
+                tab.document
+                    .file_name()
+                    .unwrap_or("Untitled")
+                    .to_string()
+            })
+            .collect()
+    }
+
+    /// Show confirmation dialog before closing with unsaved changes
+    pub fn confirm_close_with_unsaved(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let unsaved_files = self.get_unsaved_file_names();
+        if unsaved_files.is_empty() {
+            // No unsaved changes, just quit
+            self.force_close = true;
+            cx.quit();
+            return;
+        }
+
+        let message = if unsaved_files.len() == 1 {
+            format!("'{}' has unsaved changes.", unsaved_files[0])
+        } else {
+            format!(
+                "{} files have unsaved changes:\n{}",
+                unsaved_files.len(),
+                unsaved_files.join(", ")
+            )
+        };
+
+        let receiver = window.prompt(
+            PromptLevel::Warning,
+            "Unsaved Changes",
+            Some(&format!("{}\n\nDo you want to discard changes and quit?", message)),
+            &["Discard and Quit", "Cancel"],
+            cx,
+        );
+
+        cx.spawn_in(window, async move |entity, cx| {
+            if let Ok(answer) = receiver.await {
+                if answer == 0 {
+                    // User clicked "Discard and Quit"
+                    let _ = entity.update(cx, |editor, cx| {
+                        editor.force_close = true;
+                        cx.quit();
+                    });
+                }
+                // If Cancel (answer == 1), do nothing - window stays open
             }
         })
         .detach();
@@ -2147,10 +2216,11 @@ fn main() {
                 ..Default::default()
             },
             move |window, cx| {
-                cx.new(move |cx| {
+                let args_clone = args.clone();
+                let entity = cx.new(|cx| {
                     // If file path is provided, load it; otherwise use sample data
-                    let editor = if args.len() > 1 {
-                        let file_path = PathBuf::from(&args[1]);
+                    let editor = if args_clone.len() > 1 {
+                        let file_path = PathBuf::from(&args_clone[1]);
                         let mut editor = HexEditor::new(cx);
                         match editor.load_file(file_path.clone()) {
                             Ok(_) => editor,
@@ -2162,11 +2232,42 @@ fn main() {
                     } else {
                         HexEditor::with_sample_data(cx)
                     };
-
-                    // Set initial focus
-                    cx.focus_self(window);
                     editor
-                })
+                });
+
+                // Set initial focus
+                entity.update(cx, |_editor, cx| {
+                    cx.focus_self(window);
+                });
+
+                // Set up window close confirmation for unsaved changes
+                let weak_entity = entity.downgrade();
+                window.on_window_should_close(cx, move |window, cx| {
+                    if let Some(entity) = weak_entity.upgrade() {
+                        let editor = entity.read(cx);
+
+                        // If force_close is set, allow closing
+                        if editor.force_close {
+                            return true;
+                        }
+
+                        // If no unsaved changes, allow closing
+                        if !editor.has_any_unsaved_changes() {
+                            return true;
+                        }
+
+                        // Has unsaved changes - show confirmation dialog
+                        let _ = entity.update(cx, |editor, cx| {
+                            editor.confirm_close_with_unsaved(window, cx);
+                        });
+
+                        // Prevent closing for now - dialog will handle quit if confirmed
+                        return false;
+                    }
+                    true
+                });
+
+                entity
             },
         )
         .unwrap();
