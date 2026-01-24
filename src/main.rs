@@ -248,6 +248,14 @@ impl HexEditor {
         let total_rows = ui::row_count(self.tab().document.len(), self.bytes_per_row());
         let current_offset = self.tab().scroll_handle.offset();
 
+        // If cursor is at position 0, reset scroll to top
+        if self.tab().cursor_position == 0 {
+            let new_offset = Point::new(current_offset.x, px(0.0));
+            self.tab_mut().scroll_handle.set_offset(new_offset);
+            self.tab_mut().scroll_offset = px(0.0);
+            return;
+        }
+
         if let Some(new_y_offset) = ui::calculate_scroll_to_row(
             cursor_row,
             current_offset.y,
