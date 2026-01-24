@@ -299,22 +299,21 @@ pub fn calculate_visible_range(
         }
     };
 
-    // Calculate number of visible rows
-    // row_height includes mb_1 margin, but actual rendering may show more rows
-    // Add adjustment to match actual visible rows on screen
-    let base_rows = (content_height_f64 / row_height).floor() as usize;
-    let visible_row_count = base_rows + 4; // Add margin for partial rows and layout differences
+    // Calculate number of visible rows (actual rows that fit in viewport)
+    let visible_row_count = (content_height_f64 / row_height).floor() as usize;
     let visible_row_count = visible_row_count.max(5); // Minimum rows for rendering
 
     // Add buffer rows to prevent flickering during scroll
     let buffer_rows = 10;
+    // Additional margin for partial rows and layout differences
+    let render_margin = 4;
 
     // Clamp first_visible_row to ensure we can render full viewport at the end
     let max_first_row = total_rows.saturating_sub(visible_row_count);
     let first_visible_row = first_visible_row.min(max_first_row);
 
     let render_start = first_visible_row.saturating_sub(buffer_rows);
-    let render_end = (first_visible_row + visible_row_count + buffer_rows).min(total_rows);
+    let render_end = (first_visible_row + visible_row_count + buffer_rows + render_margin).min(total_rows);
 
     VisibleRange {
         render_start,
