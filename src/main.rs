@@ -74,6 +74,8 @@ struct HexEditor {
     bitmap_visible: bool,
     bitmap_width: usize,
     bitmap_color_mode: bitmap::BitmapColorMode,
+    // Bitmap panel width (inline panel)
+    bitmap_panel_width: f32,
 }
 
 impl HexEditor {
@@ -109,6 +111,7 @@ impl HexEditor {
             bitmap_visible: false,
             bitmap_width: bitmap::DEFAULT_BITMAP_WIDTH,
             bitmap_color_mode: bitmap::BitmapColorMode::default(),
+            bitmap_panel_width: 520.0,
         }
     }
 
@@ -1235,15 +1238,41 @@ impl Render for HexEditor {
                         )
                 )
             })
-            // Normal mode: single pane view
-            .when(!self.compare_mode, |parent| parent.child(
-                // Content area with scrollbar
-                div()
-                    .flex()
-                    .flex_1()
-                    .pt_4()
-                    .relative()
-                    .overflow_hidden()
+            // Normal mode: single pane view (with optional bitmap panel)
+            .when(!self.compare_mode, |parent| {
+                let bitmap_visible = self.bitmap_visible;
+                let bitmap_width_pixels = self.bitmap_width;
+                let bitmap_color_mode = self.bitmap_color_mode;
+                let bitmap_panel_width = self.bitmap_panel_width;
+
+                // Calculate minimum width for hex/ASCII content area
+                let char_width = self.cached_char_width;
+                let bytes_per_row = self.bytes_per_row();
+                let address_width = char_width * 8.0 + 16.0; // 8 chars + bookmark indicator + padding
+                let hex_column_width = bytes_per_row as f32 * char_width * 2.0
+                    + (bytes_per_row - 1) as f32 * 4.0; // 2 chars per byte + gaps
+                let ascii_column_width = bytes_per_row as f32 * char_width + 8.0; // Dynamic based on char_width + padding
+                let gaps = 16.0 * 2.0; // gap_4 between columns
+                let scrollbar_area = 24.0 + 16.0; // pr(24) + scrollbar width + margin
+                let content_min_width = address_width + hex_column_width + ascii_column_width + gaps + scrollbar_area;
+
+                parent.child(
+                    // Outer container for hex view + bitmap (horizontal layout)
+                    div()
+                        .flex()
+                        .flex_1()
+                        .pt_4()
+                        .gap_2()
+                        .overflow_hidden()
+                        .child(
+                            // Main hex/ASCII content area with scrollbar (priority over bitmap)
+                            div()
+                                .flex()
+                                .flex_1()
+                                .flex_shrink_0() // Never shrink - ASCII view has priority
+                                .min_w(px(content_min_width)) // Calculated minimum width
+                                .relative()
+                                .overflow_hidden()
                     .child(
                         // Scrollable content
                         div()
@@ -1484,7 +1513,7 @@ impl Render for HexEditor {
                                 // ASCII column - each byte separately (using cached data + encoding)
                                 div()
                                     .flex()
-                                    .w(px(160.0))
+                                    .w(px(self.cached_char_width * bytes_per_row as f32))
                                     .children((row_start..row_end).enumerate().map(|(i, byte_idx)| {
                                         // Get display character from decoded data
                                         let display_char = decoded_chars.get(i).cloned().unwrap_or(DisplayChar::Invalid);
@@ -1627,8 +1656,108 @@ impl Render for HexEditor {
                                     }).collect::<Vec<_>>()
                                 }
                             })
-                    )
-            ))
+                        )
+                    ) // End of main hex/ASCII content area
+                    // Bitmap panel (when visible)
+                    .when(bitmap_visible, |container| {
+                        let doc_len = self.tab().document.len();
+                        let bitmap_height = (doc_len + bitmap_width_pixels - 1) / bitmap_width_pixels;
+
+                        // Calculate pixel size based on panel width
+                        let pixel_size = ((bitmap_panel_width - 20.0) / bitmap_width_pixels as f32).max(1.0).min(4.0);
+                        let canvas_height = 400.0; // Fixed canvas height
+                        let display_height = ((canvas_height / pixel_size) as usize).min(bitmap_height);
+
+                        // Calculate scroll position for bitmap (based on cursor)
+                        let cursor_row = self.tab().cursor_position / bitmap_width_pixels;
+                        let bitmap_scroll_start = cursor_row.saturating_sub(display_height / 2);
+
+                        container.child(
+                            div()
+                                .w(px(bitmap_panel_width))
+                                .flex()
+                                .flex_col()
+                                .bg(rgb(0x252525))
+                                .border_l_1()
+                                .border_color(rgb(0x404040))
+                                .p_2()
+                                .gap_2()
+                                .overflow_hidden()
+                                .child(
+                                    // Header
+                                    div()
+                                        .flex()
+                                        .justify_between()
+                                        .items_center()
+                                        .child(
+                                            div()
+                                                .text_sm()
+                                                .text_color(rgb(0x4a9eff))
+                                                .child(format!("Bitmap ({})", bitmap_color_mode.label()))
+                                        )
+                                        .child(
+                                            div()
+                                                .text_sm()
+                                                .text_color(rgb(0x808080))
+                                                .child(format!("{}x{}", bitmap_width_pixels, bitmap_height))
+                                        )
+                                )
+                                .child(
+                                    // Controls hint
+                                    div()
+                                        .text_xs()
+                                        .text_color(rgb(0x606060))
+                                        .child("C: color | +/-: width | Ctrl+M: close")
+                                )
+                                .child(
+                                    // Bitmap canvas
+                                    div()
+                                        .flex()
+                                        .flex_col()
+                                        .flex_1()
+                                        .overflow_hidden()
+                                        .children((0..display_height).map(|row_idx| {
+                                            let actual_row = bitmap_scroll_start + row_idx;
+                                            let row_start = actual_row * bitmap_width_pixels;
+
+                                            div()
+                                                .flex()
+                                                .h(px(pixel_size))
+                                                .children((0..bitmap_width_pixels).map(|col| {
+                                                    let byte_offset = row_start + col;
+                                                    let color = if byte_offset < doc_len {
+                                                        let byte = self.tab().document.get_byte(byte_offset).unwrap_or(0);
+                                                        let (r, g, b) = bitmap_color_mode.byte_to_color(byte);
+                                                        rgb((r as u32) << 16 | (g as u32) << 8 | b as u32)
+                                                    } else {
+                                                        rgb(0x1e1e1e)
+                                                    };
+
+                                                    let is_cursor = byte_offset == self.tab().cursor_position;
+
+                                                    div()
+                                                        .w(px(pixel_size))
+                                                        .h(px(pixel_size))
+                                                        .bg(color)
+                                                        .when(is_cursor, |d| d.border_1().border_color(rgb(0xff0000)))
+                                                }).collect::<Vec<_>>())
+                                        }).collect::<Vec<_>>())
+                                )
+                                .child(
+                                    // Position info
+                                    div()
+                                        .text_xs()
+                                        .text_color(rgb(0x808080))
+                                        .child(format!("Cursor: row {}, col {} (0x{:08X})",
+                                            self.tab().cursor_position / bitmap_width_pixels,
+                                            self.tab().cursor_position % bitmap_width_pixels,
+                                            self.tab().cursor_position
+                                        ))
+                                )
+                        )
+                    })
+                ) // End of outer container
+            })
             // Compare mode: dual pane view with virtual scrolling
             .when(self.compare_mode, |parent| {
                 let compare_tab_idx = self.compare_tab_index.unwrap_or(0);
@@ -2342,105 +2471,6 @@ impl Render for HexEditor {
                                             )
                                     }).collect::<Vec<_>>()
                                 )
-                        )
-                )
-            })
-            // Bitmap visualization panel
-            .when(self.bitmap_visible, |parent| {
-                let bitmap_width = self.bitmap_width;
-                let color_mode = self.bitmap_color_mode;
-                let doc_len = self.tab().document.len();
-                let bitmap_height = (doc_len + bitmap_width - 1) / bitmap_width;
-                let max_display_height = 400usize;
-                let display_height = bitmap_height.min(max_display_height);
-
-                // Calculate scroll position for bitmap (based on cursor)
-                let cursor_row = self.tab().cursor_position / bitmap_width;
-                let bitmap_scroll_start = cursor_row.saturating_sub(display_height / 2);
-
-                parent.child(
-                    div()
-                        .absolute()
-                        .right(px(20.0))
-                        .top(px(100.0))
-                        .bg(rgb(0x2a2a2a))
-                        .border_1()
-                        .border_color(rgb(0x4a9eff))
-                        .rounded_md()
-                        .p_2()
-                        .flex()
-                        .flex_col()
-                        .gap_2()
-                        .child(
-                            // Header
-                            div()
-                                .flex()
-                                .justify_between()
-                                .items_center()
-                                .child(
-                                    div()
-                                        .text_sm()
-                                        .text_color(rgb(0x4a9eff))
-                                        .child(format!("Bitmap View ({})", color_mode.label()))
-                                )
-                                .child(
-                                    div()
-                                        .text_sm()
-                                        .text_color(rgb(0x808080))
-                                        .child(format!("{}x{}", bitmap_width, bitmap_height))
-                                )
-                        )
-                        .child(
-                            // Controls hint
-                            div()
-                                .text_xs()
-                                .text_color(rgb(0x606060))
-                                .child("C: color | +/-: width | Ctrl+M: close")
-                        )
-                        .child(
-                            // Bitmap canvas
-                            div()
-                                .flex()
-                                .flex_col()
-                                .overflow_hidden()
-                                .children((0..display_height).map(|row_idx| {
-                                    let actual_row = bitmap_scroll_start + row_idx;
-                                    let row_start = actual_row * bitmap_width;
-
-                                    div()
-                                        .flex()
-                                        .h(px(2.0))
-                                        .children((0..bitmap_width).map(|col| {
-                                            let byte_offset = row_start + col;
-                                            let color = if byte_offset < doc_len {
-                                                let byte = self.tab().document.get_byte(byte_offset).unwrap_or(0);
-                                                let (r, g, b) = color_mode.byte_to_color(byte);
-                                                rgb((r as u32) << 16 | (g as u32) << 8 | b as u32)
-                                            } else {
-                                                rgb(0x1e1e1e) // Background for empty area
-                                            };
-
-                                            // Highlight cursor position
-                                            let is_cursor = byte_offset == self.tab().cursor_position;
-
-                                            div()
-                                                .w(px(2.0))
-                                                .h(px(2.0))
-                                                .bg(color)
-                                                .when(is_cursor, |d| d.border_1().border_color(rgb(0xff0000)))
-                                        }).collect::<Vec<_>>())
-                                }).collect::<Vec<_>>())
-                        )
-                        .child(
-                            // Position info
-                            div()
-                                .text_xs()
-                                .text_color(rgb(0x808080))
-                                .child(format!("Cursor: row {}, col {} (0x{:08X})",
-                                    self.tab().cursor_position / bitmap_width,
-                                    self.tab().cursor_position % bitmap_width,
-                                    self.tab().cursor_position
-                                ))
                         )
                 )
             })
