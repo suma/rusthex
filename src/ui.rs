@@ -382,15 +382,21 @@ pub fn calculate_visible_row_range(
 ///
 /// Arguments:
 /// - target_row: The row to position at the top of the visible area
+/// - visible_rows: Number of rows visible in the content area
 /// - total_rows: Total number of rows in the document
 /// - row_height: Height of each row in pixels (font_size + margin)
 ///
 /// Returns: Scroll offset in pixels (negative value)
-pub fn calculate_scroll_offset(target_row: usize, total_rows: usize, row_height: f64) -> Pixels {
+pub fn calculate_scroll_offset(
+    target_row: usize,
+    visible_rows: usize,
+    total_rows: usize,
+    row_height: f64,
+) -> Pixels {
     let actual_total_height = total_rows as f64 * row_height;
 
-    // Clamp target_row to valid range
-    let max_target_row = total_rows.saturating_sub(1);
+    // Clamp target_row so that the last row appears at the bottom of visible area
+    let max_target_row = total_rows.saturating_sub(visible_rows);
     let target_row = target_row.min(max_target_row);
 
     // Calculate offset using integer row position to avoid float drift
@@ -445,12 +451,12 @@ pub fn calculate_scroll_to_row(
             // Small movement (e.g., Down key): scroll by 1 row for smooth scrolling
             first_visible_row + 1
         } else {
-            // Large jump (e.g., Ctrl+End): position cursor near bottom of visible area
-            cursor_row.saturating_sub(visible_rows.saturating_sub(3))
+            // Large jump (e.g., Ctrl+End): position cursor at bottom of visible area
+            cursor_row.saturating_sub(visible_rows.saturating_sub(1))
         }
     };
 
-    Some(calculate_scroll_offset(target_row, total_rows, row_height))
+    Some(calculate_scroll_offset(target_row, visible_rows, total_rows, row_height))
 }
 
 /// Calculate spacer heights for virtual scrolling
