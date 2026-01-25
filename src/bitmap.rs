@@ -34,6 +34,16 @@ impl BitmapColorMode {
         }
     }
 
+    /// Get viewport indicator color for this color mode
+    /// Returns RGB color value as u32
+    pub fn indicator_color(&self) -> u32 {
+        match self {
+            BitmapColorMode::Grayscale => 0x00ff00,  // Green: high contrast against grayscale
+            BitmapColorMode::Heatmap => 0xeeeeee,    // Light gray: visible against colorful gradient
+            BitmapColorMode::Category => 0xeeeeee,   // Light gray: visible against colorful background
+        }
+    }
+
     /// Convert byte value to RGB color based on color mode
     pub fn byte_to_color(&self, byte: u8) -> (u8, u8, u8) {
         match self {

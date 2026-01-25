@@ -1276,7 +1276,7 @@ impl Render for HexEditor {
                                                 .w(px(width_px))
                                                 .h(px(height_px))
                                                 .border_1()
-                                                .border_color(rgb(0x00ff00))
+                                                .border_color(rgb(bitmap_color_mode.indicator_color()))
                                                 .when(!in_display, |d| d.invisible())
                                         })
                                 )
