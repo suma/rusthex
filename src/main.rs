@@ -1383,10 +1383,65 @@ impl Render for HexEditor {
                                                     );
 
                                                     // Virtual height container for scrolling
+                                                    // Capture values for click handler
+                                                    let click_bitmap_width = bitmap_width_pixels;
+                                                    let click_pixel_size = pixel_size;
+                                                    let click_doc_len = doc_len;
+
                                                     div()
+                                                        .id("bitmap-click-area")
                                                         .relative()
                                                         .w_full()
                                                         .h(px(bitmap_height as f32 * pixel_size))
+                                                        .cursor_pointer()
+                                                        .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, event: &gpui::MouseDownEvent, _window, cx| {
+                                                            // Calculate byte offset from click position
+                                                            // Get bitmap scroll container bounds to calculate relative position
+                                                            let container_bounds = this.bitmap_scroll_handle.bounds();
+                                                            let container_origin_x: f32 = container_bounds.origin.x.into();
+                                                            let container_origin_y: f32 = container_bounds.origin.y.into();
+
+                                                            // Calculate position relative to scroll container
+                                                            let click_x: f32 = f32::from(event.position.x) - container_origin_x;
+                                                            let click_y: f32 = f32::from(event.position.y) - container_origin_y;
+
+                                                            // Account for bitmap scroll offset
+                                                            let scroll_offset_y: f32 = (-f32::from(this.bitmap_scroll_handle.offset().y)).max(0.0);
+                                                            let adjusted_y = click_y + scroll_offset_y;
+
+                                                            let row = (adjusted_y / click_pixel_size) as usize;
+                                                            let col = ((click_x / click_pixel_size).max(0.0) as usize).min(click_bitmap_width.saturating_sub(1));
+                                                            let byte_offset = row * click_bitmap_width + col;
+                                                            let byte_offset = byte_offset.min(click_doc_len.saturating_sub(1));
+
+                                                            // Move cursor to clicked position and clear selection
+                                                            this.tab_mut().cursor_position = byte_offset;
+                                                            this.tab_mut().hex_nibble = ui::HexNibble::High;
+                                                            this.tab_mut().selection_start = None;
+
+                                                            // Scroll hex view to show cursor
+                                                            let bytes_per_row = this.bytes_per_row();
+                                                            let cursor_row = byte_offset / bytes_per_row;
+                                                            let row_height = this.row_height();
+                                                            let visible_rows = this.content_view_rows;
+                                                            let doc_len = this.tab().document.len();
+                                                            let total_rows = (doc_len + bytes_per_row - 1) / bytes_per_row;
+
+                                                            // Center the cursor row in view
+                                                            let target_row = cursor_row.saturating_sub(visible_rows / 2);
+                                                            let new_y_offset = ui::calculate_scroll_offset(
+                                                                target_row,
+                                                                visible_rows,
+                                                                total_rows,
+                                                                row_height,
+                                                            );
+                                                            let current_offset = this.tab().scroll_handle.offset();
+                                                            let new_offset = gpui::Point::new(current_offset.x, new_y_offset);
+                                                            this.tab_mut().scroll_handle.set_offset(new_offset);
+                                                            this.tab_mut().scroll_offset = new_y_offset;
+
+                                                            cx.notify();
+                                                        }))
                                                         .child(
                                                             // Bitmap image (positioned at scroll offset)
                                                             div()
