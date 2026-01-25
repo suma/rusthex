@@ -543,6 +543,9 @@ pub fn handle_key_event(
                                 cx.notify();
                             }
                         }
+                        EditPane::Bitmap => {
+                            // Bitmap mode doesn't accept character input
+                        }
                     }
                 }
             }

@@ -73,6 +73,7 @@ impl HexEditor {
         let new_pane = match self.tab().edit_pane {
             EditPane::Hex => EditPane::Ascii,
             EditPane::Ascii => EditPane::Hex,
+            EditPane::Bitmap => EditPane::Hex,
         };
         self.tab_mut().edit_pane = new_pane;
         self.tab_mut().hex_nibble = HexNibble::High;

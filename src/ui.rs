@@ -5,13 +5,15 @@
 
 use gpui::{Pixels, px};
 
-/// Edit pane selection (Hex or ASCII)
+/// Edit pane selection (Hex, ASCII, or Bitmap)
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum EditPane {
     /// Hex editing mode
     Hex,
     /// ASCII editing mode
     Ascii,
+    /// Bitmap viewport indicator drag mode
+    Bitmap,
 }
 
 /// Byte order for multi-byte value interpretation

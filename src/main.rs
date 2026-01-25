@@ -87,6 +87,9 @@ struct HexEditor {
     bitmap_color_mode: bitmap::BitmapColorMode,
     // Bitmap panel width (inline panel)
     bitmap_panel_width: f32,
+    // Bitmap viewport indicator drag state
+    bitmap_drag_start_y: Option<f32>,
+    bitmap_drag_start_row: Option<usize>,
 }
 
 impl HexEditor {
@@ -123,6 +126,8 @@ impl HexEditor {
             bitmap_width: bitmap::DEFAULT_BITMAP_WIDTH,
             bitmap_color_mode: bitmap::BitmapColorMode::default(),
             bitmap_panel_width: 520.0,
+            bitmap_drag_start_y: None,
+            bitmap_drag_start_row: None,
         }
     }
 
@@ -483,6 +488,8 @@ impl Render for HexEditor {
                 if this.is_dragging {
                     this.is_dragging = false;
                     this.drag_pane = None;
+                    this.bitmap_drag_start_y = None;
+                    this.bitmap_drag_start_row = None;
                     cx.notify();
                 }
             }))
@@ -491,7 +498,53 @@ impl Render for HexEditor {
                 if this.is_dragging && !event.dragging() {
                     this.is_dragging = false;
                     this.drag_pane = None;
+                    this.bitmap_drag_start_y = None;
+                    this.bitmap_drag_start_row = None;
                     cx.notify();
+                    return;
+                }
+
+                // Handle bitmap viewport indicator drag at root level
+                if this.drag_pane == Some(EditPane::Bitmap) && this.is_dragging {
+                    if let (Some(start_y), Some(start_row)) = (this.bitmap_drag_start_y, this.bitmap_drag_start_row) {
+                        let mouse_y: f32 = event.position.y.into();
+                        let delta_y = mouse_y - start_y;
+
+                        // Convert pixel delta to bitmap rows
+                        let bitmap_width = this.bitmap_width;
+                        let bitmap_panel_width = this.bitmap_panel_width;
+                        let pixel_size = ((bitmap_panel_width - 20.0) / bitmap_width as f32).max(1.0).min(4.0);
+                        let delta_bitmap_rows = (delta_y / pixel_size) as isize;
+
+                        // Convert bitmap rows to hex view rows
+                        let bytes_per_row = this.bytes_per_row();
+                        let delta_hex_rows = delta_bitmap_rows * bitmap_width as isize / bytes_per_row as isize;
+
+                        // Calculate new scroll position
+                        let new_row = if delta_hex_rows >= 0 {
+                            start_row.saturating_add(delta_hex_rows as usize)
+                        } else {
+                            start_row.saturating_sub((-delta_hex_rows) as usize)
+                        };
+
+                        // Calculate scroll offset and apply
+                        let doc_len = this.tab().document.len();
+                        let total_rows = (doc_len + bytes_per_row - 1) / bytes_per_row;
+                        let row_height = this.row_height();
+                        let visible_rows = this.content_view_rows;
+
+                        let new_y_offset = ui::calculate_scroll_offset(
+                            new_row,
+                            visible_rows,
+                            total_rows,
+                            row_height,
+                        );
+                        let current_offset = this.tab().scroll_handle.offset();
+                        let new_offset = gpui::Point::new(current_offset.x, new_y_offset);
+                        this.tab_mut().scroll_handle.set_offset(new_offset);
+                        this.tab_mut().scroll_offset = new_y_offset;
+                        cx.notify();
+                    }
                 }
             }))
             .on_key_down(cx.listener(keyboard::handle_key_event))
@@ -532,6 +585,7 @@ impl Render for HexEditor {
                                 match self.tab().edit_pane {
                                     EditPane::Hex => "HEX",
                                     EditPane::Ascii => "ASCII",
+                                    EditPane::Bitmap => "HEX",
                                 }))
                     )
                     .child(
@@ -797,11 +851,57 @@ impl Render for HexEditor {
                                 if this.is_dragging && !event.dragging() {
                                     this.is_dragging = false;
                                     this.drag_pane = None;
+                                    this.bitmap_drag_start_y = None;
+                                    this.bitmap_drag_start_row = None;
                                     cx.notify();
                                     return;
                                 }
 
                                 if !this.is_dragging || this.drag_pane.is_none() {
+                                    return;
+                                }
+
+                                // Handle bitmap viewport indicator drag separately
+                                if this.drag_pane == Some(EditPane::Bitmap) {
+                                    if let (Some(start_y), Some(start_row)) = (this.bitmap_drag_start_y, this.bitmap_drag_start_row) {
+                                        let mouse_y: f32 = event.position.y.into();
+                                        let delta_y = mouse_y - start_y;
+
+                                        // Convert pixel delta to bitmap rows
+                                        let bitmap_width = this.bitmap_width;
+                                        let bitmap_panel_width = this.bitmap_panel_width;
+                                        let pixel_size = ((bitmap_panel_width - 20.0) / bitmap_width as f32).max(1.0).min(4.0);
+                                        let delta_bitmap_rows = (delta_y / pixel_size) as isize;
+
+                                        // Convert bitmap rows to hex view rows
+                                        let bytes_per_row = this.bytes_per_row();
+                                        let delta_hex_rows = delta_bitmap_rows * bitmap_width as isize / bytes_per_row as isize;
+
+                                        // Calculate new scroll position
+                                        let new_row = if delta_hex_rows >= 0 {
+                                            start_row.saturating_add(delta_hex_rows as usize)
+                                        } else {
+                                            start_row.saturating_sub((-delta_hex_rows) as usize)
+                                        };
+
+                                        // Calculate scroll offset and apply
+                                        let doc_len = this.tab().document.len();
+                                        let total_rows = (doc_len + bytes_per_row - 1) / bytes_per_row;
+                                        let row_height = this.row_height();
+                                        let visible_rows = this.content_view_rows;
+
+                                        let new_y_offset = ui::calculate_scroll_offset(
+                                            new_row,
+                                            visible_rows,
+                                            total_rows,
+                                            row_height,
+                                        );
+                                        let current_offset = this.tab().scroll_handle.offset();
+                                        let new_offset = gpui::Point::new(current_offset.x, new_y_offset);
+                                        this.tab_mut().scroll_handle.set_offset(new_offset);
+                                        this.tab_mut().scroll_offset = new_y_offset;
+                                        cx.notify();
+                                    }
                                     return;
                                 }
 
@@ -860,6 +960,7 @@ impl Render for HexEditor {
                                             ((mouse_x - ascii_start) / char_width) as usize
                                         }
                                     }
+                                    Some(EditPane::Bitmap) => 0, // Bitmap drag handled separately above
                                     None => 0,
                                 };
 
@@ -1269,7 +1370,10 @@ impl Render for HexEditor {
                                             let height_px = (height_rows as f32 * pixel_size).min(display_height as f32 * pixel_size - top_px);
                                             let width_px = bitmap_width_pixels as f32 * pixel_size;
 
+                                            let current_render_start = render_start;
+
                                             div()
+                                                .id("bitmap-viewport-indicator")
                                                 .absolute()
                                                 .top(px(top_px))
                                                 .left_0()
@@ -1277,6 +1381,14 @@ impl Render for HexEditor {
                                                 .h(px(height_px))
                                                 .border_1()
                                                 .border_color(rgb(bitmap_color_mode.indicator_color()))
+                                                .cursor_grab()
+                                                .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, event: &gpui::MouseDownEvent, _window, cx| {
+                                                    this.bitmap_drag_start_y = Some(event.position.y.into());
+                                                    this.bitmap_drag_start_row = Some(current_render_start);
+                                                    this.is_dragging = true;
+                                                    this.drag_pane = Some(EditPane::Bitmap);
+                                                    cx.notify();
+                                                }))
                                                 .when(!in_display, |d| d.invisible())
                                         })
                                 )
