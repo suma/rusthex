@@ -162,6 +162,23 @@ cargo build --release
 # The binary will be in target/release/rusthex
 ```
 
+### Windows Build Script
+
+On Windows, you can use `scripts\build.bat` for building.
+
+```cmd
+scripts\build.bat           # Debug build
+scripts\build.bat release   # Release build
+scripts\build.bat run       # Run the application
+scripts\build.bat test      # Run tests
+scripts\build.bat check     # Compilation check
+scripts\build.bat clean     # Clean build artifacts
+scripts\build.bat fmt       # Format code
+scripts\build.bat clippy    # Run linter
+```
+
+**Note**: Building on Windows requires Visual Studio Build Tools (C++ compiler).
+
 ## Usage
 
 ```bash
