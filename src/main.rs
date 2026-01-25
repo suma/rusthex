@@ -1,3 +1,5 @@
+#![windows_subsystem = "windows"]
+
 //! RustHex - A modern hex editor built with gpui
 //!
 //! This is the main module containing the HexEditor struct and core editor functionality.
