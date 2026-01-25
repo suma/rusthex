@@ -748,6 +748,10 @@ impl Render for HexEditor {
                 let bitmap_color_mode = self.bitmap_color_mode;
                 let bitmap_panel_width = self.bitmap_panel_width;
 
+                // Hex view visible range (for bitmap viewport indicator)
+                let hex_visible_start = render_start * self.bytes_per_row();
+                let hex_visible_end = render_end * self.bytes_per_row();
+
                 // Calculate minimum width for hex/ASCII content area
                 let char_width = self.cached_char_width;
                 let bytes_per_row = self.bytes_per_row();
@@ -1213,12 +1217,14 @@ impl Render for HexEditor {
                                         .child("C: color | +/-: width | Ctrl+M: close")
                                 )
                                 .child(
-                                    // Bitmap canvas
+                                    // Bitmap canvas with viewport overlay
                                     div()
+                                        .relative()
                                         .flex()
                                         .flex_col()
                                         .flex_1()
                                         .overflow_hidden()
+                                        // Bitmap pixels
                                         .children((0..display_height).map(|row_idx| {
                                             let actual_row = bitmap_scroll_start + row_idx;
                                             let row_start = actual_row * bitmap_width_pixels;
@@ -1245,6 +1251,34 @@ impl Render for HexEditor {
                                                         .when(is_cursor, |d| d.border_1().border_color(rgb(0xff0000)))
                                                 }).collect::<Vec<_>>())
                                         }).collect::<Vec<_>>())
+                                        // Viewport indicator overlay (thin green rectangle)
+                                        .child({
+                                            // Calculate visible range position in bitmap coordinates
+                                            let visible_start_row = hex_visible_start / bitmap_width_pixels;
+                                            let visible_end_row = hex_visible_end.saturating_sub(1) / bitmap_width_pixels;
+
+                                            // Convert to display coordinates (relative to bitmap_scroll_start)
+                                            let display_start_row = visible_start_row.saturating_sub(bitmap_scroll_start);
+                                            let display_end_row = visible_end_row.saturating_sub(bitmap_scroll_start);
+
+                                            // Check if visible range is within displayed area
+                                            let in_display = display_start_row < display_height || display_end_row < display_height;
+
+                                            let top_px = (display_start_row as f32 * pixel_size).max(0.0);
+                                            let height_rows = display_end_row.saturating_sub(display_start_row) + 1;
+                                            let height_px = (height_rows as f32 * pixel_size).min(display_height as f32 * pixel_size - top_px);
+                                            let width_px = bitmap_width_pixels as f32 * pixel_size;
+
+                                            div()
+                                                .absolute()
+                                                .top(px(top_px))
+                                                .left_0()
+                                                .w(px(width_px))
+                                                .h(px(height_px))
+                                                .border_1()
+                                                .border_color(rgb(0x00ff00))
+                                                .when(!in_display, |d| d.invisible())
+                                        })
                                 )
                                 .child(
                                     // Position info
