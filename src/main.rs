@@ -94,6 +94,21 @@ struct HexEditor {
     // Bitmap independent scroll
     bitmap_scroll_handle: gpui::ScrollHandle,
     bitmap_scrollbar_state: gpui_component::scroll::ScrollbarState,
+    // Bitmap image cache
+    cached_bitmap_image: Option<std::sync::Arc<gpui::RenderImage>>,
+    cached_bitmap_params: Option<BitmapCacheParams>,
+}
+
+/// Parameters used to determine if bitmap cache is valid
+#[derive(Clone, PartialEq)]
+struct BitmapCacheParams {
+    scroll_start: usize,
+    display_height: usize,
+    bitmap_width: usize,
+    pixel_size: u32,
+    color_mode: bitmap::BitmapColorMode,
+    cursor_position: usize,
+    doc_len: usize,
 }
 
 impl HexEditor {
@@ -135,6 +150,8 @@ impl HexEditor {
             bitmap_drag_start_row: None,
             bitmap_scroll_handle: gpui::ScrollHandle::new(),
             bitmap_scrollbar_state: gpui_component::scroll::ScrollbarState::default(),
+            cached_bitmap_image: None,
+            cached_bitmap_params: None,
         }
     }
 
@@ -194,6 +211,68 @@ impl HexEditor {
     /// Get current active tab mutably
     fn tab_mut(&mut self) -> &mut EditorTab {
         &mut self.tabs[self.active_tab]
+    }
+
+    /// Update bitmap image cache if parameters changed
+    fn update_bitmap_cache(&mut self) {
+        let doc_len = self.tab().document.len();
+        let bitmap_width_pixels = self.bitmap_width;
+        let bitmap_height = (doc_len + bitmap_width_pixels - 1) / bitmap_width_pixels;
+
+        // Calculate pixel size
+        let scrollbar_width = 12.0;
+        let bitmap_area_width = self.bitmap_panel_width - 16.0 - scrollbar_width - 4.0;
+        let pixel_size = (bitmap_area_width / bitmap_width_pixels as f32).max(1.0).floor();
+
+        // Calculate canvas and display height
+        let viewport_bounds = self.tab().scroll_handle.bounds();
+        let bitmap_panel_height = f32::from(viewport_bounds.size.height);
+        let panel_overhead = self.cached_line_height_sm
+            + self.cached_line_height_xs * 2.0
+            + 8.0 * 2.0
+            + 8.0 * 3.0;
+        let canvas_height = (bitmap_panel_height - panel_overhead).max(10.0 * pixel_size);
+        let display_height = ((canvas_height / pixel_size) as usize).min(bitmap_height);
+
+        // Calculate scroll position
+        let bitmap_scroll_offset = self.bitmap_scroll_handle.offset();
+        let bitmap_scroll_y: f32 = (-f32::from(bitmap_scroll_offset.y)).max(0.0);
+        let bitmap_scroll_start = (bitmap_scroll_y / pixel_size) as usize;
+        let bitmap_scroll_start = bitmap_scroll_start.min(bitmap_height.saturating_sub(display_height));
+
+        let cursor_pos = self.tab().cursor_position;
+
+        let current_params = BitmapCacheParams {
+            scroll_start: bitmap_scroll_start,
+            display_height,
+            bitmap_width: bitmap_width_pixels,
+            pixel_size: pixel_size as u32,
+            color_mode: self.bitmap_color_mode,
+            cursor_position: cursor_pos,
+            doc_len,
+        };
+
+        // Check if cache is valid
+        let cache_valid = self.cached_bitmap_params.as_ref()
+            .map(|p| *p == current_params)
+            .unwrap_or(false);
+
+        if !cache_valid {
+            // Create new bitmap image
+            let doc = &self.tab().document;
+            let new_image = bitmap::create_bitmap_image(
+                |offset| doc.get_byte(offset),
+                doc_len,
+                bitmap_scroll_start,
+                display_height,
+                bitmap_width_pixels,
+                pixel_size,
+                self.bitmap_color_mode,
+                cursor_pos,
+            );
+            self.cached_bitmap_image = Some(new_image);
+            self.cached_bitmap_params = Some(current_params);
+        }
     }
 
     /// Cycle to next text encoding
@@ -472,6 +551,11 @@ impl Render for HexEditor {
 
         // Update render cache for visible rows
         self.update_render_cache(render_start, render_end);
+
+        // Update bitmap image cache if bitmap is visible
+        if self.bitmap_visible {
+            self.update_bitmap_cache();
+        }
 
         // Phase 3: Calculate spacer heights for virtual scrolling
         // Uses capped virtual height to avoid f32 precision issues with large files
@@ -1365,22 +1449,9 @@ impl Render for HexEditor {
                                                 .overflow_y_scroll()
                                                 .track_scroll(&self.bitmap_scroll_handle)
                                                 .child({
-                                                    // Create bitmap image using gpui::img for efficient rendering
-                                                    let doc = &self.tab().document;
-                                                    let cursor_pos = self.tab().cursor_position;
-
-                                                    // Collect bytes for the visible region
-                                                    // Image is created at display size (scaled by pixel_size)
-                                                    let bitmap_image = bitmap::create_bitmap_image(
-                                                        |offset| doc.get_byte(offset),
-                                                        doc_len,
-                                                        bitmap_scroll_start,
-                                                        display_height,
-                                                        bitmap_width_pixels,
-                                                        pixel_size,
-                                                        bitmap_color_mode,
-                                                        cursor_pos,
-                                                    );
+                                                    // Use cached bitmap image (updated in update_bitmap_cache)
+                                                    let bitmap_image = self.cached_bitmap_image.clone()
+                                                        .expect("Bitmap cache should be populated");
 
                                                     // Virtual height container for scrolling
                                                     // Capture values for click handler
