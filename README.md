@@ -65,6 +65,15 @@ A modern hex editor built with Rust and [gpui](https://www.gpui.rs/), featuring 
 - **Difference Highlighting**: Bytes that differ are highlighted in red
 - **Synchronized Navigation**: Both panels scroll and navigate together
 
+### Bitmap Visualization
+- **Toggle Bitmap View**: Ctrl+M to show/hide bitmap panel
+- **Color Modes** (press C to cycle):
+  - Grayscale: 0x00 = black, 0xFF = white
+  - Heatmap: Blue (low) to Red (high)
+  - Category: Colors by byte type (null, control, digits, letters, etc.)
+- **Width Adjustment**: +/- keys to change bitmap width (64, 128, 256, 512, 1024)
+- **Cursor Tracking**: Current position highlighted in bitmap view
+
 ### Configuration
 - **TOML Configuration File**:
   - macOS: `~/Library/Application Support/rusthex/config.toml`
@@ -128,6 +137,11 @@ bytes_per_row = 16
 | Ctrl+E / Cmd+E | Toggle endianness |
 | **Text Encoding** ||
 | Ctrl+Shift+E / Cmd+Shift+E | Cycle text encoding |
+| **Bitmap** ||
+| Ctrl+M / Cmd+M | Toggle bitmap view |
+| C (in bitmap) | Cycle color mode |
+| + / = | Increase bitmap width |
+| - | Decrease bitmap width |
 
 ## Installation
 
@@ -178,13 +192,19 @@ cargo run -- path/to/file.bin
 ```
 rusthex/
 ├── src/
-│   ├── main.rs         # Main application and UI
+│   ├── main.rs         # Main application, HexEditor struct, and render implementation
 │   ├── document.rs     # Document model and file I/O
 │   ├── keyboard.rs     # Keyboard event handling
 │   ├── search.rs       # Search functionality with wildcard support
 │   ├── ui.rs           # UI types and utilities
-│   ├── tab.rs          # Editor tab management
+│   ├── tab.rs          # Editor tab state
 │   ├── tabs.rs         # Multi-tab operations
+│   ├── cursor.rs       # Cursor movement and navigation
+│   ├── bookmark.rs     # Bookmark management
+│   ├── file_ops.rs     # File operations and dialogs
+│   ├── input.rs        # Hex/ASCII input handling
+│   ├── inspector.rs    # Data inspector panel
+│   ├── bitmap.rs       # Bitmap visualization
 │   ├── config.rs       # Configuration file handling
 │   ├── compare.rs      # Compare mode functionality
 │   ├── render_cache.rs # Render optimization cache
@@ -240,6 +260,7 @@ See [todo.md](todo.md) for detailed implementation status and planned features.
 - [ ] Search & replace
 - [ ] Customizable themes
 - [ ] Export (C array, Base64, Hex dump)
+- [x] Bitmap visualization (implemented)
 
 ## License
 
