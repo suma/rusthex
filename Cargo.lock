@@ -4729,8 +4729,10 @@ dependencies = [
  "encoding_rs",
  "gpui",
  "gpui-component",
+ "image",
  "memmap2",
  "serde",
+ "smallvec",
  "toml 0.8.23",
 ]
 

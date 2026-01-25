@@ -41,7 +41,7 @@ pub use ui::{EditPane, HexNibble, Endian, TextEncoding};
 use encoding::{decode_for_display, DisplayChar};
 use gpui::{
     App, Application, Bounds, Context, ExternalPaths, Focusable, FocusHandle, Font, FontFeatures,
-    FontStyle, FontWeight, SharedString, Timer, Window, WindowBounds, WindowOptions, div,
+    FontStyle, FontWeight, SharedString, Timer, Window, WindowBounds, WindowOptions, div, img,
     prelude::*, px, rgb, rgba, size,
 };
 use std::path::PathBuf;
@@ -73,6 +73,7 @@ struct HexEditor {
     // Cached line heights for different text sizes (calculated from font metrics)
     cached_line_height_xl: f32,
     cached_line_height_sm: f32,
+    cached_line_height_xs: f32,
     // Text encoding for ASCII column display
     text_encoding: TextEncoding,
     // Encoding dropdown open state
@@ -90,6 +91,9 @@ struct HexEditor {
     // Bitmap viewport indicator drag state
     bitmap_drag_start_y: Option<f32>,
     bitmap_drag_start_row: Option<usize>,
+    // Bitmap independent scroll
+    bitmap_scroll_handle: gpui::ScrollHandle,
+    bitmap_scrollbar_state: gpui_component::scroll::ScrollbarState,
 }
 
 impl HexEditor {
@@ -118,6 +122,7 @@ impl HexEditor {
             cached_row_height: 24.0, // Default, will be updated in render()
             cached_line_height_xl: 24.0, // Default, will be updated in render()
             cached_line_height_sm: 17.0, // Default, will be updated in render()
+            cached_line_height_xs: 15.0, // Default, will be updated in render()
             text_encoding: TextEncoding::default(),
             encoding_dropdown_open: false,
             cached_char_width: 8.4, // Default (14 * 0.6), will be updated in render()
@@ -128,6 +133,8 @@ impl HexEditor {
             bitmap_panel_width: 520.0,
             bitmap_drag_start_y: None,
             bitmap_drag_start_row: None,
+            bitmap_scroll_handle: gpui::ScrollHandle::new(),
+            bitmap_scrollbar_state: gpui_component::scroll::ScrollbarState::default(),
         }
     }
 
@@ -424,6 +431,12 @@ impl Render for HexEditor {
         let sm_ascent = window.text_system().ascent(font_id, sm_size);
         let sm_descent = window.text_system().descent(font_id, sm_size);
         self.cached_line_height_sm = f32::from(sm_ascent) + f32::from(sm_descent).abs();
+
+        // text_xs (12px) for small hints and labels
+        let xs_size = px(12.0);
+        let xs_ascent = window.text_system().ascent(font_id, xs_size);
+        let xs_descent = window.text_system().descent(font_id, xs_size);
+        self.cached_line_height_xs = f32::from(xs_ascent) + f32::from(xs_descent).abs();
 
         // Update search results if search completed
         if self.update_search_results() {
@@ -1272,17 +1285,32 @@ impl Render for HexEditor {
                         let bitmap_height = (doc_len + bitmap_width_pixels - 1) / bitmap_width_pixels;
 
                         // Calculate pixel size based on panel width
-                        let pixel_size = ((bitmap_panel_width - 20.0) / bitmap_width_pixels as f32).max(1.0).min(4.0);
-                        let canvas_height = 400.0; // Fixed canvas height
+                        // Account for scrollbar (12px) and gaps (8px padding + 4px gap)
+                        let scrollbar_width = 12.0;
+                        let bitmap_area_width = bitmap_panel_width - 16.0 - scrollbar_width - 4.0; // p_2 padding + gap
+                        // Use floor to ensure consistent integer pixel size across all calculations
+                        let pixel_size = (bitmap_area_width / bitmap_width_pixels as f32).max(1.0).floor();
+
+                        // Calculate canvas height for bitmap display area
+                        // Subtract bitmap panel's internal elements from available height
+                        let panel_overhead = self.cached_line_height_sm  // header
+                            + self.cached_line_height_xs * 2.0           // controls hint + position info
+                            + 8.0 * 2.0                                  // p_2 padding (top + bottom)
+                            + 8.0 * 3.0;                                 // gap_2 (3 gaps between 4 children)
+                        let available_height = f32::from(content_height);
+                        let canvas_height = (available_height - panel_overhead).max(10.0 * pixel_size);
                         let display_height = ((canvas_height / pixel_size) as usize).min(bitmap_height);
 
-                        // Calculate scroll position for bitmap (based on cursor)
-                        let cursor_row = self.tab().cursor_position / bitmap_width_pixels;
-                        let bitmap_scroll_start = cursor_row.saturating_sub(display_height / 2);
+                        // Calculate scroll position from scroll handle
+                        let bitmap_scroll_offset = self.bitmap_scroll_handle.offset();
+                        let bitmap_scroll_y: f32 = (-f32::from(bitmap_scroll_offset.y)).max(0.0);
+                        let bitmap_scroll_start = (bitmap_scroll_y / pixel_size) as usize;
+                        let bitmap_scroll_start = bitmap_scroll_start.min(bitmap_height.saturating_sub(display_height));
 
                         container.child(
                             div()
                                 .w(px(bitmap_panel_width))
+                                .h_full()  // Fill available vertical space
                                 .flex()
                                 .flex_col()
                                 .bg(rgb(0x252525))
@@ -1318,79 +1346,96 @@ impl Render for HexEditor {
                                         .child("C: color | +/-: width | Ctrl+M: close")
                                 )
                                 .child(
-                                    // Bitmap canvas with viewport overlay
+                                    // Bitmap canvas with scrollbar (horizontal layout)
                                     div()
-                                        .relative()
                                         .flex()
-                                        .flex_col()
                                         .flex_1()
-                                        .overflow_hidden()
-                                        // Bitmap pixels
-                                        .children((0..display_height).map(|row_idx| {
-                                            let actual_row = bitmap_scroll_start + row_idx;
-                                            let row_start = actual_row * bitmap_width_pixels;
-
+                                        .gap_1()
+                                        .h(px(canvas_height))
+                                        .child(
+                                            // Scrollable bitmap canvas
                                             div()
-                                                .flex()
-                                                .h(px(pixel_size))
-                                                .children((0..bitmap_width_pixels).map(|col| {
-                                                    let byte_offset = row_start + col;
-                                                    let color = if byte_offset < doc_len {
-                                                        let byte = self.tab().document.get_byte(byte_offset).unwrap_or(0);
-                                                        let (r, g, b) = bitmap_color_mode.byte_to_color(byte);
-                                                        rgb((r as u32) << 16 | (g as u32) << 8 | b as u32)
-                                                    } else {
-                                                        rgb(0x1e1e1e)
-                                                    };
+                                                .id("bitmap-scroll-container")
+                                                .relative()
+                                                .flex_1()
+                                                .h_full()
+                                                .overflow_y_scroll()
+                                                .track_scroll(&self.bitmap_scroll_handle)
+                                                .child({
+                                                    // Create bitmap image using gpui::img for efficient rendering
+                                                    let doc = &self.tab().document;
+                                                    let cursor_pos = self.tab().cursor_position;
 
-                                                    let is_cursor = byte_offset == self.tab().cursor_position;
+                                                    // Collect bytes for the visible region
+                                                    // Image is created at display size (scaled by pixel_size)
+                                                    let bitmap_image = bitmap::create_bitmap_image(
+                                                        |offset| doc.get_byte(offset),
+                                                        doc_len,
+                                                        bitmap_scroll_start,
+                                                        display_height,
+                                                        bitmap_width_pixels,
+                                                        pixel_size,
+                                                        bitmap_color_mode,
+                                                        cursor_pos,
+                                                    );
+
+                                                    // Virtual height container for scrolling
+                                                    div()
+                                                        .relative()
+                                                        .w_full()
+                                                        .h(px(bitmap_height as f32 * pixel_size))
+                                                        .child(
+                                                            // Bitmap image (positioned at scroll offset)
+                                                            div()
+                                                                .absolute()
+                                                                .top(px(bitmap_scroll_start as f32 * pixel_size))
+                                                                .left_0()
+                                                                .child(img(bitmap_image))
+                                                        )
+                                                        // Viewport indicator overlay (thin rectangle)
+                                                        .child({
+                                                    // Calculate visible range position in bitmap coordinates
+                                                    let visible_start_row = hex_visible_start / bitmap_width_pixels;
+                                                    let visible_end_row = hex_visible_end.saturating_sub(1) / bitmap_width_pixels;
+
+                                                    let top_px = visible_start_row as f32 * pixel_size;
+                                                    let height_rows = visible_end_row.saturating_sub(visible_start_row) + 1;
+                                                    let height_px = height_rows as f32 * pixel_size;
+                                                    let width_px = bitmap_width_pixels as f32 * pixel_size;
+
+                                                    let current_render_start = render_start;
 
                                                     div()
-                                                        .w(px(pixel_size))
-                                                        .h(px(pixel_size))
-                                                        .bg(color)
-                                                        .when(is_cursor, |d| d.border_1().border_color(rgb(0xff0000)))
-                                                }).collect::<Vec<_>>())
-                                        }).collect::<Vec<_>>())
-                                        // Viewport indicator overlay (thin green rectangle)
-                                        .child({
-                                            // Calculate visible range position in bitmap coordinates
-                                            let visible_start_row = hex_visible_start / bitmap_width_pixels;
-                                            let visible_end_row = hex_visible_end.saturating_sub(1) / bitmap_width_pixels;
-
-                                            // Convert to display coordinates (relative to bitmap_scroll_start)
-                                            let display_start_row = visible_start_row.saturating_sub(bitmap_scroll_start);
-                                            let display_end_row = visible_end_row.saturating_sub(bitmap_scroll_start);
-
-                                            // Check if visible range is within displayed area
-                                            let in_display = display_start_row < display_height || display_end_row < display_height;
-
-                                            let top_px = (display_start_row as f32 * pixel_size).max(0.0);
-                                            let height_rows = display_end_row.saturating_sub(display_start_row) + 1;
-                                            let height_px = (height_rows as f32 * pixel_size).min(display_height as f32 * pixel_size - top_px);
-                                            let width_px = bitmap_width_pixels as f32 * pixel_size;
-
-                                            let current_render_start = render_start;
-
+                                                        .id("bitmap-viewport-indicator")
+                                                        .absolute()
+                                                        .top(px(top_px))
+                                                        .left_0()
+                                                        .w(px(width_px))
+                                                        .h(px(height_px))
+                                                        .border_1()
+                                                        .border_color(rgb(bitmap_color_mode.indicator_color()))
+                                                        .cursor_grab()
+                                                        .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, event: &gpui::MouseDownEvent, _window, cx| {
+                                                            this.bitmap_drag_start_y = Some(event.position.y.into());
+                                                            this.bitmap_drag_start_row = Some(current_render_start);
+                                                            this.is_dragging = true;
+                                                            this.drag_pane = Some(EditPane::Bitmap);
+                                                            cx.notify();
+                                                        }))
+                                                })
+                                                })
+                                        )
+                                        .child(
+                                            // Scrollbar for bitmap
                                             div()
-                                                .id("bitmap-viewport-indicator")
-                                                .absolute()
-                                                .top(px(top_px))
-                                                .left_0()
-                                                .w(px(width_px))
-                                                .h(px(height_px))
-                                                .border_1()
-                                                .border_color(rgb(bitmap_color_mode.indicator_color()))
-                                                .cursor_grab()
-                                                .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, event: &gpui::MouseDownEvent, _window, cx| {
-                                                    this.bitmap_drag_start_y = Some(event.position.y.into());
-                                                    this.bitmap_drag_start_row = Some(current_render_start);
-                                                    this.is_dragging = true;
-                                                    this.drag_pane = Some(EditPane::Bitmap);
-                                                    cx.notify();
-                                                }))
-                                                .when(!in_display, |d| d.invisible())
-                                        })
+                                                .w(px(12.0))
+                                                .h_full()
+                                                .bg(rgb(0x2a2a2a))
+                                                .child(
+                                                    Scrollbar::vertical(&self.bitmap_scrollbar_state, &self.bitmap_scroll_handle)
+                                                        .scrollbar_show(ScrollbarShow::Always)
+                                                )
+                                        )
                                 )
                                 .child(
                                     // Position info
