@@ -78,6 +78,7 @@ A modern hex editor built with Rust and [gpui](https://www.gpui.rs/), featuring 
 - **TOML Configuration File**:
   - macOS: `~/Library/Application Support/rusthex/config.toml`
   - Linux: `~/.config/rusthex/config.toml`
+  - Windows: `%APPDATA%\rusthex\config.toml`
 - **Customizable Settings**:
   - Font family (default: Monaco)
   - Font size
