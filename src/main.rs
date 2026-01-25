@@ -1292,13 +1292,16 @@ impl Render for HexEditor {
                         let pixel_size = (bitmap_area_width / bitmap_width_pixels as f32).max(1.0).floor();
 
                         // Calculate canvas height for bitmap display area
+                        // Use viewport_height from scroll_handle bounds (same as hex view container height)
+                        let viewport_bounds = self.tab().scroll_handle.bounds();
+                        let bitmap_panel_height = f32::from(viewport_bounds.size.height);
+
                         // Subtract bitmap panel's internal elements from available height
                         let panel_overhead = self.cached_line_height_sm  // header
                             + self.cached_line_height_xs * 2.0           // controls hint + position info
                             + 8.0 * 2.0                                  // p_2 padding (top + bottom)
                             + 8.0 * 3.0;                                 // gap_2 (3 gaps between 4 children)
-                        let available_height = f32::from(content_height);
-                        let canvas_height = (available_height - panel_overhead).max(10.0 * pixel_size);
+                        let canvas_height = (bitmap_panel_height - panel_overhead).max(10.0 * pixel_size);
                         let display_height = ((canvas_height / pixel_size) as usize).min(bitmap_height);
 
                         // Calculate scroll position from scroll handle
@@ -1310,7 +1313,7 @@ impl Render for HexEditor {
                         container.child(
                             div()
                                 .w(px(bitmap_panel_width))
-                                .h_full()  // Fill available vertical space
+                                .h(px(bitmap_panel_height))
                                 .flex()
                                 .flex_col()
                                 .bg(rgb(0x252525))
