@@ -1207,6 +1207,10 @@ impl Render for HexEditor {
                                         let byte_idx = row_start + i;
                                         let has_data = byte_idx < document_len;
 
+                                        // Check if this byte is bookmarked
+                                        let is_bookmarked = has_data && has_bookmark && self.tab().bookmarks.contains_key(&byte_idx);
+                                        let bookmark_has_comment = is_bookmarked && self.tab().bookmarks.get(&byte_idx).is_some_and(|c| !c.is_empty());
+
                                         // Get byte data from cache or compute
                                         let (hex_str, is_cursor, is_selected, is_search_match, is_current_search) =
                                             if has_data {
@@ -1263,6 +1267,11 @@ impl Render for HexEditor {
                                             .when(!is_cursor && !is_current_search && !is_search_match && !is_selected, |div| {
                                                 div.text_color(rgb(0x00ff00))
                                             })
+                                            // Bookmark underline indicator
+                                            .when(is_bookmarked, |div| {
+                                                div.border_b_2()
+                                                    .border_color(if bookmark_has_comment { rgb(0x00ff88) } else { rgb(0x00bfff) })
+                                            })
                                             .child(hex_str)
                                     }))
                             )
@@ -1276,6 +1285,10 @@ impl Render for HexEditor {
                                         let display_char = decoded_chars.get(i).cloned().unwrap_or(DisplayChar::Invalid);
                                         let ascii_char = display_char.to_char();
                                         let is_continuation = display_char.is_continuation();
+
+                                        // Check if this byte is bookmarked
+                                        let is_bookmarked = has_bookmark && self.tab().bookmarks.contains_key(&byte_idx);
+                                        let bookmark_has_comment = is_bookmarked && self.tab().bookmarks.get(&byte_idx).is_some_and(|c| !c.is_empty());
 
                                         // Get cursor/selection state from cache
                                         let (is_cursor, is_selected, is_search_match, is_current_search) =
@@ -1326,6 +1339,11 @@ impl Render for HexEditor {
                                             // Normal characters in white
                                             .when(!is_cursor && !is_current_search && !is_search_match && !is_selected && !is_continuation, |div| {
                                                 div.text_color(rgb(0xffffff))
+                                            })
+                                            // Bookmark underline indicator
+                                            .when(is_bookmarked, |div| {
+                                                div.border_b_2()
+                                                    .border_color(if bookmark_has_comment { rgb(0x00ff88) } else { rgb(0x00bfff) })
                                             })
                                             .child(ascii_char.to_string())
                                     }))
