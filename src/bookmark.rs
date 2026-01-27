@@ -4,41 +4,61 @@
 //! - Toggle bookmark at current position
 //! - Navigate between bookmarks
 //! - Clear all bookmarks
+//! - Edit bookmark comments
 
 use crate::HexEditor;
 
 impl HexEditor {
-    /// Toggle bookmark at current cursor position
+    /// Toggle bookmark at current cursor position.
+    /// If no bookmark exists, add one and enter comment editing mode.
+    /// If a bookmark exists, remove it.
     pub fn toggle_bookmark(&mut self) {
         let pos = self.tab().cursor_position;
-        if self.tab().bookmarks.contains(&pos) {
+        if self.tab().bookmarks.contains_key(&pos) {
             self.tab_mut().bookmarks.remove(&pos);
             self.save_message = Some(format!("Bookmark removed at 0x{:08X}", pos));
         } else {
-            self.tab_mut().bookmarks.insert(pos);
-            self.save_message = Some(format!("Bookmark added at 0x{:08X}", pos));
+            self.tab_mut().bookmarks.insert(pos, String::new());
+            // Enter comment editing mode for the new bookmark
+            self.tab_mut().bookmark_comment_editing = true;
+            self.tab_mut().bookmark_comment_text = String::new();
+            self.tab_mut().bookmark_comment_position = pos;
+            self.save_message = Some(format!("Bookmark added at 0x{:08X} - enter comment", pos));
         }
     }
 
     /// Jump to next bookmark
     pub fn next_bookmark(&mut self) {
         let current = self.tab().cursor_position;
-        let bookmarks = &self.tab().bookmarks;
 
-        if bookmarks.is_empty() {
+        if self.tab().bookmarks.is_empty() {
             self.save_message = Some("No bookmarks set".to_string());
             return;
         }
 
-        // Find the first bookmark after current position
-        if let Some(&next) = bookmarks.range((current + 1)..).next() {
-            self.move_position(next);
-            self.save_message = Some(format!("Jumped to bookmark at 0x{:08X}", next));
+        // Extract position and comment before mutating self
+        let target = self.tab().bookmarks.range((current + 1)..).next()
+            .map(|(&pos, comment)| (pos, comment.clone()));
+        let wrapped = if target.is_none() {
+            self.tab().bookmarks.iter().next()
+                .map(|(&pos, comment)| (pos, comment.clone()))
         } else {
-            // Wrap around to first bookmark
-            if let Some(&first) = bookmarks.iter().next() {
-                self.move_position(first);
-                self.save_message = Some(format!("Jumped to bookmark at 0x{:08X} (wrapped)", first));
+            None
+        };
+
+        if let Some((pos, comment)) = target {
+            self.move_position(pos);
+            if comment.is_empty() {
+                self.save_message = Some(format!("Jumped to bookmark at 0x{:08X}", pos));
+            } else {
+                self.save_message = Some(format!("Jumped to bookmark at 0x{:08X}: {}", pos, comment));
+            }
+        } else if let Some((pos, comment)) = wrapped {
+            self.move_position(pos);
+            if comment.is_empty() {
+                self.save_message = Some(format!("Jumped to bookmark at 0x{:08X} (wrapped)", pos));
+            } else {
+                self.save_message = Some(format!("Jumped to bookmark at 0x{:08X}: {} (wrapped)", pos, comment));
             }
         }
     }
@@ -46,22 +66,35 @@ impl HexEditor {
     /// Jump to previous bookmark
     pub fn prev_bookmark(&mut self) {
         let current = self.tab().cursor_position;
-        let bookmarks = &self.tab().bookmarks;
 
-        if bookmarks.is_empty() {
+        if self.tab().bookmarks.is_empty() {
             self.save_message = Some("No bookmarks set".to_string());
             return;
         }
 
-        // Find the last bookmark before current position
-        if let Some(&prev) = bookmarks.range(..current).next_back() {
-            self.move_position(prev);
-            self.save_message = Some(format!("Jumped to bookmark at 0x{:08X}", prev));
+        // Extract position and comment before mutating self
+        let target = self.tab().bookmarks.range(..current).next_back()
+            .map(|(&pos, comment)| (pos, comment.clone()));
+        let wrapped = if target.is_none() {
+            self.tab().bookmarks.iter().next_back()
+                .map(|(&pos, comment)| (pos, comment.clone()))
         } else {
-            // Wrap around to last bookmark
-            if let Some(&last) = bookmarks.iter().next_back() {
-                self.move_position(last);
-                self.save_message = Some(format!("Jumped to bookmark at 0x{:08X} (wrapped)", last));
+            None
+        };
+
+        if let Some((pos, comment)) = target {
+            self.move_position(pos);
+            if comment.is_empty() {
+                self.save_message = Some(format!("Jumped to bookmark at 0x{:08X}", pos));
+            } else {
+                self.save_message = Some(format!("Jumped to bookmark at 0x{:08X}: {}", pos, comment));
+            }
+        } else if let Some((pos, comment)) = wrapped {
+            self.move_position(pos);
+            if comment.is_empty() {
+                self.save_message = Some(format!("Jumped to bookmark at 0x{:08X} (wrapped)", pos));
+            } else {
+                self.save_message = Some(format!("Jumped to bookmark at 0x{:08X}: {} (wrapped)", pos, comment));
             }
         }
     }
@@ -71,5 +104,41 @@ impl HexEditor {
         let count = self.tab().bookmarks.len();
         self.tab_mut().bookmarks.clear();
         self.save_message = Some(format!("Cleared {} bookmark(s)", count));
+    }
+
+    /// Enter comment editing mode for the bookmark at current cursor position
+    pub fn edit_bookmark_comment(&mut self) {
+        let pos = self.tab().cursor_position;
+        if let Some(comment) = self.tab().bookmarks.get(&pos).cloned() {
+            self.tab_mut().bookmark_comment_editing = true;
+            self.tab_mut().bookmark_comment_text = comment;
+            self.tab_mut().bookmark_comment_position = pos;
+            self.save_message = Some(format!("Editing bookmark comment at 0x{:08X}", pos));
+        } else {
+            self.save_message = Some("No bookmark at current position".to_string());
+        }
+    }
+
+    /// Confirm and save the bookmark comment
+    pub fn confirm_bookmark_comment(&mut self) {
+        let pos = self.tab().bookmark_comment_position;
+        let text = self.tab().bookmark_comment_text.clone();
+        if self.tab().bookmarks.contains_key(&pos) {
+            self.tab_mut().bookmarks.insert(pos, text.clone());
+            if text.is_empty() {
+                self.save_message = Some(format!("Bookmark comment cleared at 0x{:08X}", pos));
+            } else {
+                self.save_message = Some(format!("Bookmark comment saved at 0x{:08X}: {}", pos, text));
+            }
+        }
+        self.tab_mut().bookmark_comment_editing = false;
+        self.tab_mut().bookmark_comment_text.clear();
+    }
+
+    /// Cancel bookmark comment editing
+    pub fn cancel_bookmark_comment(&mut self) {
+        self.tab_mut().bookmark_comment_editing = false;
+        self.tab_mut().bookmark_comment_text.clear();
+        self.save_message = Some("Bookmark comment editing cancelled".to_string());
     }
 }

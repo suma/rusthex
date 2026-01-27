@@ -133,9 +133,14 @@ pub fn handle_key_event(
         }
     }
 
-    // Check for Escape (close compare mode, tab selection, search, etc.)
+    // Check for Escape (close compare mode, tab selection, bookmark comment, search, etc.)
     if event.keystroke.key == "escape" {
-        // Priority: compare selection dialog > compare mode > search
+        // Priority: bookmark comment editing > compare selection dialog > compare mode > search
+        if editor.tab().bookmark_comment_editing {
+            editor.cancel_bookmark_comment();
+            cx.notify();
+            return;
+        }
         if editor.compare_selection_visible {
             editor.compare_selection_visible = false;
             cx.notify();
@@ -231,12 +236,12 @@ pub fn handle_key_event(
         return;
     }
 
-    // Check for Ctrl+Shift+B or Cmd+Shift+B (clear all bookmarks)
+    // Check for Ctrl+Shift+B or Cmd+Shift+B (edit bookmark comment)
     if event.keystroke.key == "b"
         && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
         && event.keystroke.modifiers.shift
     {
-        editor.clear_bookmarks();
+        editor.edit_bookmark_comment();
         cx.notify();
         return;
     }
@@ -457,7 +462,10 @@ pub fn handle_key_event(
             cx.notify();
         }
         "backspace" => {
-            if editor.tab().search_visible {
+            if editor.tab().bookmark_comment_editing {
+                editor.tab_mut().bookmark_comment_text.pop();
+                cx.notify();
+            } else if editor.tab().search_visible {
                 editor.tab_mut().search_query.pop();
                 editor.perform_search();
                 if editor.tab().is_searching {
@@ -467,14 +475,20 @@ pub fn handle_key_event(
             }
         }
         "enter" => {
-            if editor.tab().search_visible {
+            if editor.tab().bookmark_comment_editing {
+                editor.confirm_bookmark_comment();
+                cx.notify();
+            } else if editor.tab().search_visible {
                 editor.next_search_result();
                 cx.notify();
             }
         }
         "space" => {
             // Handle space key explicitly (gpui reports it as "space", not " ")
-            if editor.tab().search_visible {
+            if editor.tab().bookmark_comment_editing {
+                editor.tab_mut().bookmark_comment_text.push(' ');
+                cx.notify();
+            } else if editor.tab().search_visible {
                 editor.tab_mut().search_query.push(' ');
                 editor.perform_search();
                 if editor.tab().is_searching {
@@ -518,7 +532,13 @@ pub fn handle_key_event(
                     };
                 }
 
-                if editor.tab().search_visible {
+                if editor.tab().bookmark_comment_editing {
+                    // Add character to bookmark comment
+                    if (c >= ' ' && c <= '~') || c.is_whitespace() {
+                        editor.tab_mut().bookmark_comment_text.push(c);
+                        cx.notify();
+                    }
+                } else if editor.tab().search_visible {
                     // Add character to search query
                     if (c >= ' ' && c <= '~') || c.is_whitespace() {
                         editor.tab_mut().search_query.push(c);

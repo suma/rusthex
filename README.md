@@ -54,11 +54,15 @@ A modern hex editor built with Rust and [gpui](https://www.gpui.rs/), featuring 
 
 ### Bookmarks
 - **Toggle Bookmark**: Ctrl+B to add/remove bookmark at cursor position
+- **Bookmark Comments**: Add optional comments to bookmarks
+  - Comment input bar appears when adding a bookmark
+  - Edit existing comments with Ctrl+Shift+B
+  - Comments displayed in status message when jumping to bookmarks
 - **Navigate Bookmarks**: F2 (next), Shift+F2 (previous) with wraparound
-- **Clear All**: Ctrl+Shift+B to remove all bookmarks
 - **Visual Indicators**:
-  - Cyan dot markers on scrollbar
-  - Cyan indicator in address column for bookmarked rows
+  - Cyan markers for bookmarks without comments
+  - Green markers for bookmarks with comments
+  - Scrollbar and address column indicators
 
 ### Compare Mode
 - **Side-by-side Comparison**: Compare two files in split view (Ctrl+K)
@@ -127,10 +131,10 @@ bytes_per_row = 16
 | Backspace | Delete character |
 | Esc | Close search / Cancel |
 | **Bookmarks** ||
-| Ctrl+B / Cmd+B | Toggle bookmark at cursor |
+| Ctrl+B / Cmd+B | Toggle bookmark at cursor (with comment input) |
 | F2 | Jump to next bookmark |
 | Shift+F2 | Jump to previous bookmark |
-| Ctrl+Shift+B / Cmd+Shift+B | Clear all bookmarks |
+| Ctrl+Shift+B / Cmd+Shift+B | Edit bookmark comment at cursor |
 | **Compare** ||
 | Ctrl+K / Cmd+K | Toggle compare mode |
 | **Data Inspector** ||

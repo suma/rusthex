@@ -188,7 +188,14 @@ impl HexEditor {
             0.0
         };
 
-        base_header + tab_bar + search_bar
+        // Bookmark comment bar (conditional): ~35px total
+        let bookmark_bar = if self.tab().bookmark_comment_editing {
+            self.cached_line_height_sm + 20.0
+        } else {
+            0.0
+        };
+
+        base_header + tab_bar + search_bar + bookmark_bar
     }
 
     /// Calculate status bar height based on cached font metrics
@@ -894,6 +901,46 @@ impl Render for HexEditor {
                         )
                 )
             })
+            // Bookmark comment editing bar
+            .when(self.tab().bookmark_comment_editing, |parent| {
+                let pos = self.tab().bookmark_comment_position;
+                let comment_text = self.tab().bookmark_comment_text.clone();
+
+                parent.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .py_2()
+                        .px_4()
+                        .bg(rgb(0x2a2a2a))
+                        .border_b_1()
+                        .border_color(rgb(0x404040))
+                        .child(
+                            div()
+                                .flex()
+                                .gap_4()
+                                .items_center()
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .text_color(rgb(0x00bfff))
+                                        .child(format!("0x{:08X}", pos))
+                                )
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .text_color(rgb(0xffffff))
+                                        .child(format!("Comment: {}", comment_text))
+                                )
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(rgb(0x808080))
+                                .child("Enter: save | Esc: cancel | Backspace: delete")
+                        )
+                )
+            })
             // Normal mode: single pane view (with optional bitmap panel)
             .when(!self.compare_mode, |parent| {
                 let bitmap_visible = self.bitmap_visible;
@@ -1114,6 +1161,9 @@ impl Render for HexEditor {
 
                         // Check if this row has any bookmarks
                         let has_bookmark = self.tab().bookmarks.range(row_start..row_end).next().is_some();
+                        // Check if any bookmark in this row has a comment
+                        let has_bookmark_comment = self.tab().bookmarks.range(row_start..row_end)
+                            .any(|(_, comment)| !comment.is_empty());
 
                         div()
                             .id(("hex-row", row))  // Stable ID for efficient diffing
@@ -1135,7 +1185,7 @@ impl Render for HexEditor {
                                                 .w(px(8.0))
                                                 .h(px(8.0))
                                                 .mr(px(4.0))
-                                                .bg(rgb(0x00bfff))
+                                                .bg(if has_bookmark_comment { rgb(0x00ff88) } else { rgb(0x00bfff) })
                                                 .rounded(px(4.0))
                                         )
                                     })
@@ -1346,10 +1396,11 @@ impl Render for HexEditor {
                                 if total_rows == 0 || viewport_height <= px(0.0) {
                                     Vec::new()
                                 } else {
-                                    self.tab().bookmarks.iter().map(|&bookmark_pos| {
+                                    self.tab().bookmarks.iter().map(|(&bookmark_pos, comment)| {
                                         let bookmark_row = bookmark_pos / self.bytes_per_row();
                                         let position_ratio = bookmark_row as f32 / total_rows as f32;
                                         let marker_position = viewport_height * position_ratio;
+                                        let marker_color = if comment.is_empty() { rgb(0x00bfff) } else { rgb(0x00ff88) };
 
                                         div()
                                             .absolute()
@@ -1357,7 +1408,7 @@ impl Render for HexEditor {
                                             .w(px(6.0))
                                             .h(px(6.0))
                                             .top(marker_position)
-                                            .bg(rgb(0x00bfff)) // Cyan/DeepSkyBlue for bookmarks
+                                            .bg(marker_color)
                                             .rounded(px(3.0))
                                             .opacity(0.9)
                                     }).collect::<Vec<_>>()
