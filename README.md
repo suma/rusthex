@@ -60,9 +60,9 @@ A modern hex editor built with Rust and [gpui](https://www.gpui.rs/), featuring 
   - Comments displayed in status message when jumping to bookmarks
 - **Navigate Bookmarks**: F2 (next), Shift+F2 (previous) with wraparound
 - **Visual Indicators**:
-  - Cyan markers for bookmarks without comments
-  - Green markers for bookmarks with comments
-  - Scrollbar and address column indicators
+  - Cyan markers for bookmarks without comments, green for bookmarks with comments
+  - Underline on bookmarked bytes in Hex and ASCII columns
+  - Scrollbar markers and address column dot indicators
 
 ### Compare Mode
 - **Side-by-side Comparison**: Compare two files in split view (Ctrl+K)
