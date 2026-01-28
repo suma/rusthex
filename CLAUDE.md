@@ -78,6 +78,28 @@ cargo fmt           # Format code
 cargo fmt -- --check # Check formatting without applying
 ```
 
+## 重要な実装ルール
+
+### 縦方向のUIコンポーネント追加時
+
+ヘッダー領域に新しいUIコンポーネント（検索バー、ブックマークバーなど）を追加する場合、**必ず**以下の対応が必要：
+
+1. `calculate_header_height()` 関数に新しいコンポーネントの高さを追加する
+2. マウスのY座標計算は `calculate_header_height()` を使用しているため、この関数を更新すれば自動的に反映される
+
+```rust
+// 例: 新しいバーを追加する場合
+let new_bar = if self.tab().new_bar_visible {
+    self.cached_line_height_sm + 20.0
+} else {
+    0.0
+};
+
+base_header + tab_bar + search_bar + bookmark_bar + new_bar
+```
+
+これを怠ると、マウスドラッグ選択時のY座標計算がずれる問題が発生する。
+
 ## Code Structure
 
 - `src/main.rs` - Entry point with main() function
