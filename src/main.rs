@@ -700,14 +700,6 @@ impl Render for HexEditor {
                             .text_color(rgb(0x808080))
                             .child("Ctrl+O: open | Ctrl+S: save | Ctrl+T: new tab | Ctrl+W: close | Ctrl+K: compare | Ctrl+Z/Y: undo/redo")
                     )
-                    .when(self.save_message.is_some(), |header| {
-                        header.child(
-                            div()
-                                .text_sm()
-                                .text_color(rgb(0x00ff00))
-                                .child(self.save_message.as_ref().unwrap().clone())
-                        )
-                    })
             )
             // Tab bar
             .when(self.tabs.len() > 1, |parent| {
