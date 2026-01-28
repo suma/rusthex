@@ -128,7 +128,7 @@ impl HexEditor {
             // Build match set and store results if search wasn't cancelled
             if let Some(mut results) = local_results {
                 // Limit results to prevent UI freeze during HashSet construction
-                const MAX_RESULTS: usize = 10_000;
+                const MAX_RESULTS: usize = 1_000;
                 let truncated = results.len() > MAX_RESULTS;
                 if truncated {
                     results.truncate(MAX_RESULTS);
