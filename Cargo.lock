@@ -4730,9 +4730,11 @@ dependencies = [
  "gpui",
  "gpui-component",
  "image",
+ "memchr",
  "memmap2",
  "serde",
  "smallvec",
+ "tempfile",
  "toml 0.8.23",
 ]
 

@@ -12,5 +12,9 @@ serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
 dirs = "5.0"
 encoding_rs = "0.8"
+memchr = "2.7"
 image = "0.25"
 smallvec = "1.15"
+
+[dev-dependencies]
+tempfile = "3"
