@@ -119,6 +119,116 @@ pub fn prev_width(current: usize) -> usize {
     DEFAULT_BITMAP_WIDTH
 }
 
+/// Parameters used to determine if bitmap cache is valid
+#[derive(Clone, PartialEq)]
+pub(crate) struct BitmapCacheParams {
+    pub scroll_start: usize,
+    pub display_height: usize,
+    pub bitmap_width: usize,
+    pub pixel_size: u32,
+    pub color_mode: BitmapColorMode,
+    pub cursor_position: usize,
+    pub doc_len: usize,
+}
+
+use crate::HexEditor;
+
+impl HexEditor {
+    /// Update bitmap image cache if parameters changed
+    pub(crate) fn update_bitmap_cache(&mut self) {
+        let doc_len = self.tab().document.len();
+        let bitmap_width_pixels = self.bitmap_width;
+        let bitmap_height = (doc_len + bitmap_width_pixels - 1) / bitmap_width_pixels;
+
+        // Calculate pixel size
+        let scrollbar_width = 12.0;
+        let bitmap_area_width = self.bitmap_panel_width - 16.0 - scrollbar_width - 4.0;
+        let pixel_size = (bitmap_area_width / bitmap_width_pixels as f32).max(1.0).floor();
+
+        // Calculate canvas and display height
+        let viewport_bounds = self.tab().scroll_handle.bounds();
+        let bitmap_panel_height = f32::from(viewport_bounds.size.height);
+        let panel_overhead = self.cached_line_height_sm
+            + self.cached_line_height_xs * 2.0
+            + 8.0 * 2.0
+            + 8.0 * 3.0;
+        let canvas_height = (bitmap_panel_height - panel_overhead).max(10.0 * pixel_size);
+        let display_height = ((canvas_height / pixel_size) as usize).min(bitmap_height);
+
+        // Calculate scroll position
+        let bitmap_scroll_offset = self.bitmap_scroll_handle.offset();
+        let bitmap_scroll_y: f32 = (-f32::from(bitmap_scroll_offset.y)).max(0.0);
+        let bitmap_scroll_start = (bitmap_scroll_y / pixel_size) as usize;
+        let bitmap_scroll_start = bitmap_scroll_start.min(bitmap_height.saturating_sub(display_height));
+
+        let cursor_pos = self.tab().cursor_position;
+
+        let current_params = BitmapCacheParams {
+            scroll_start: bitmap_scroll_start,
+            display_height,
+            bitmap_width: bitmap_width_pixels,
+            pixel_size: pixel_size as u32,
+            color_mode: self.bitmap_color_mode,
+            cursor_position: cursor_pos,
+            doc_len,
+        };
+
+        // Check if cache is valid
+        let cache_valid = self.cached_bitmap_params.as_ref()
+            .map(|p| *p == current_params)
+            .unwrap_or(false);
+
+        if !cache_valid {
+            // Create new bitmap image
+            let doc = &self.tab().document;
+            let new_image = create_bitmap_image(
+                |offset| doc.get_byte(offset),
+                doc_len,
+                bitmap_scroll_start,
+                display_height,
+                bitmap_width_pixels,
+                pixel_size,
+                self.bitmap_color_mode,
+                cursor_pos,
+            );
+            self.cached_bitmap_image = Some(new_image);
+            self.cached_bitmap_params = Some(current_params);
+        }
+    }
+
+    /// Toggle bitmap visualization
+    pub(crate) fn toggle_bitmap(&mut self) {
+        self.bitmap_visible = !self.bitmap_visible;
+        if self.bitmap_visible {
+            self.save_message = Some(format!(
+                "Bitmap: {} ({}px wide)",
+                self.bitmap_color_mode.label(),
+                self.bitmap_width
+            ));
+        } else {
+            self.save_message = Some("Bitmap view closed".to_string());
+        }
+    }
+
+    /// Cycle bitmap color mode
+    pub(crate) fn cycle_bitmap_color_mode(&mut self) {
+        self.bitmap_color_mode = self.bitmap_color_mode.next();
+        self.save_message = Some(format!("Bitmap mode: {}", self.bitmap_color_mode.label()));
+    }
+
+    /// Increase bitmap width
+    pub(crate) fn increase_bitmap_width(&mut self) {
+        self.bitmap_width = next_width(self.bitmap_width);
+        self.save_message = Some(format!("Bitmap width: {}px", self.bitmap_width));
+    }
+
+    /// Decrease bitmap width
+    pub(crate) fn decrease_bitmap_width(&mut self) {
+        self.bitmap_width = prev_width(self.bitmap_width);
+        self.save_message = Some(format!("Bitmap width: {}px", self.bitmap_width));
+    }
+}
+
 /// Create a RenderImage from document bytes for the visible region
 ///
 /// # Arguments
