@@ -6,7 +6,24 @@
 use gpui::{Context, KeyDownEvent, Window};
 use std::sync::atomic::Ordering;
 
-use crate::{HexEditor, SearchMode, EditPane};
+use crate::{EditPane, HexEditor, SearchMode};
+
+/// Check if Ctrl (Windows/Linux) or Cmd (macOS) modifier is held
+fn is_cmd(event: &KeyDownEvent) -> bool {
+    event.keystroke.modifiers.control || event.keystroke.modifiers.platform
+}
+
+/// Begin or continue selection if Shift is held, otherwise clear selection
+fn update_selection(editor: &mut HexEditor, shift: bool) {
+    if shift {
+        if editor.tab().selection_start.is_none() {
+            let pos = editor.tab().cursor_position;
+            editor.tab_mut().selection_start = Some(pos);
+        }
+    } else {
+        editor.clear_selection();
+    }
+}
 
 /// Handle all keyboard events for the hex editor
 ///
@@ -18,429 +35,187 @@ pub fn handle_key_event(
     window: &mut Window,
     cx: &mut Context<HexEditor>,
 ) {
-    // Check for Ctrl+T or Cmd+T (new tab)
-    if event.keystroke.key == "t"
-        && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
-    {
-        editor.new_tab();
-        cx.notify();
+    if handle_command_shortcuts(editor, event, window, cx) {
         return;
     }
-
-    // Check for Ctrl+W or Cmd+W (close tab)
-    if event.keystroke.key == "w"
-        && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
-    {
-        editor.close_tab();
-        cx.notify();
+    if handle_special_keys(editor, event, cx) {
         return;
     }
+    handle_navigation_and_input(editor, event, cx);
+}
 
-    // Check for Ctrl+Tab (next tab)
-    if event.keystroke.key == "tab"
-        && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
-        && !event.keystroke.modifiers.shift
-    {
-        editor.next_tab();
-        cx.notify();
-        return;
+/// Handle Ctrl/Cmd+key shortcuts
+///
+/// Returns true if the event was handled.
+fn handle_command_shortcuts(
+    editor: &mut HexEditor,
+    event: &KeyDownEvent,
+    window: &mut Window,
+    cx: &mut Context<HexEditor>,
+) -> bool {
+    if !is_cmd(event) {
+        return false;
     }
+    let shift = event.keystroke.modifiers.shift;
 
-    // Check for Ctrl+Shift+Tab (previous tab)
-    if event.keystroke.key == "tab"
-        && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
-        && event.keystroke.modifiers.shift
-    {
-        editor.prev_tab();
-        cx.notify();
-        return;
-    }
-
-    // Check for Ctrl+O or Cmd+O (open file)
-    if event.keystroke.key == "o"
-        && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
-    {
-        editor.open_file_dialog(cx);
-        return;
-    }
-
-    // Check for Ctrl+F or Cmd+F (toggle search)
-    if event.keystroke.key == "f"
-        && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
-    {
-        let visible = !editor.tab().search_visible;
-        editor.tab_mut().search_visible = visible;
-        if !visible {
-            editor.tab_mut().search_results.clear();
-            editor.tab_mut().current_search_index = None;
+    match (event.keystroke.key.as_str(), shift) {
+        ("t", _) => editor.new_tab(),
+        ("w", _) => { editor.close_tab(); }
+        ("tab", false) => editor.next_tab(),
+        ("tab", true) => editor.prev_tab(),
+        ("o", _) => {
+            editor.open_file_dialog(cx);
+            return true;
         }
-        cx.notify();
-        return;
-    }
-
-    // Check for Ctrl+I or Cmd+I (toggle data inspector)
-    if event.keystroke.key == "i"
-        && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
-    {
-        editor.toggle_inspector();
-        cx.notify();
-        return;
-    }
-
-    // Check for Ctrl+Shift+E or Cmd+Shift+E (cycle text encoding)
-    if event.keystroke.key == "e"
-        && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
-        && event.keystroke.modifiers.shift
-    {
-        editor.cycle_encoding();
-        cx.notify();
-        return;
-    }
-
-    // Check for Ctrl+E or Cmd+E (toggle endianness when inspector is visible)
-    if event.keystroke.key == "e"
-        && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
-        && !event.keystroke.modifiers.shift
-        && editor.inspector_visible
-    {
-        editor.toggle_inspector_endian();
-        cx.notify();
-        return;
-    }
-
-    // Check for Ctrl+K or Cmd+K (compare mode)
-    if event.keystroke.key == "k"
-        && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
-    {
-        if editor.compare_mode {
-            editor.exit_compare_mode();
-        } else {
-            editor.start_compare_mode();
+        ("s", true) => {
+            editor.save_as_dialog(cx);
+            return true;
         }
-        cx.notify();
-        return;
-    }
-
-    // Handle number keys for compare tab selection (1-9)
-    if editor.compare_selection_visible {
-        if let Some(num) = event.keystroke.key.chars().next().and_then(|c| c.to_digit(10)) {
-            if num >= 1 && num <= 9 {
-                let index = (num as usize) - 1;
-                editor.select_compare_tab(index);
-                cx.notify();
-                return;
+        ("s", false) => {
+            editor.save_with_confirmation(window, cx);
+            return true;
+        }
+        ("f", _) => {
+            let visible = !editor.tab().search_visible;
+            editor.tab_mut().search_visible = visible;
+            if !visible {
+                editor.tab_mut().search_results.clear();
+                editor.tab_mut().current_search_index = None;
             }
         }
-    }
-
-    // Check for Escape (close compare mode, tab selection, bookmark comment, search, etc.)
-    if event.keystroke.key == "escape" {
-        // Priority: bookmark comment editing > compare selection dialog > compare mode > search
-        if editor.tab().bookmark_comment_editing {
-            editor.cancel_bookmark_comment();
-            cx.notify();
-            return;
-        }
-        if editor.compare_selection_visible {
-            editor.compare_selection_visible = false;
-            cx.notify();
-            return;
-        }
-        if editor.compare_mode {
-            editor.exit_compare_mode();
-            cx.notify();
-            return;
-        }
-        if editor.tab().search_visible {
-            if editor.tab().is_searching {
-                // Cancel ongoing search
-                editor.tab().search_cancel_flag.store(true, Ordering::Relaxed);
-                editor.tab_mut().is_searching = false;
+        ("i", _) => editor.toggle_inspector(),
+        ("e", true) => editor.cycle_encoding(),
+        ("e", false) if editor.inspector_visible => editor.toggle_inspector_endian(),
+        ("k", _) => {
+            if editor.compare_mode {
+                editor.exit_compare_mode();
+            } else {
+                editor.start_compare_mode();
             }
-            editor.tab_mut().search_visible = false;
-            editor.tab_mut().search_results.clear();
-            editor.tab_mut().current_search_index = None;
-            cx.notify();
-            return;
         }
-    }
-
-    // Check for F2 (next bookmark)
-    if event.keystroke.key == "f2" && !event.keystroke.modifiers.shift {
-        editor.next_bookmark();
-        cx.notify();
-        return;
-    }
-
-    // Check for Shift+F2 (previous bookmark)
-    if event.keystroke.key == "f2" && event.keystroke.modifiers.shift {
-        editor.prev_bookmark();
-        cx.notify();
-        return;
-    }
-
-    // Check for F3 (next search result)
-    if event.keystroke.key == "f3" && !event.keystroke.modifiers.shift {
-        editor.next_search_result();
-        cx.notify();
-        return;
-    }
-
-    // Check for Shift+F3 (previous search result)
-    if event.keystroke.key == "f3" && event.keystroke.modifiers.shift {
-        editor.prev_search_result();
-        cx.notify();
-        return;
-    }
-
-    // Check for Ctrl+A or Cmd+A (select all)
-    if event.keystroke.key == "a"
-        && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
-        && !event.keystroke.modifiers.shift
-    {
-        if editor.tab().document.len() > 0 {
-            editor.tab_mut().selection_start = Some(0);
-            let end_pos = editor.tab().document.len().saturating_sub(1);
-            editor.tab_mut().cursor_position = end_pos;
-            editor.save_message = Some("Selected all".to_string());
-            cx.notify();
-        }
-        return;
-    }
-
-    // Check for Ctrl+Shift+S or Cmd+Shift+S (save as)
-    if event.keystroke.key == "s"
-        && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
-        && event.keystroke.modifiers.shift
-    {
-        editor.save_as_dialog(cx);
-        return;
-    }
-
-    // Check for Ctrl+S or Cmd+S (save with confirmation)
-    if event.keystroke.key == "s"
-        && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
-        && !event.keystroke.modifiers.shift
-    {
-        editor.save_with_confirmation(window, cx);
-        return;
-    }
-
-    // Check for Ctrl+B or Cmd+B (toggle bookmark)
-    if event.keystroke.key == "b"
-        && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
-        && !event.keystroke.modifiers.shift
-    {
-        editor.toggle_bookmark();
-        cx.notify();
-        return;
-    }
-
-    // Check for Ctrl+Shift+B or Cmd+Shift+B (edit bookmark comment)
-    if event.keystroke.key == "b"
-        && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
-        && event.keystroke.modifiers.shift
-    {
-        editor.edit_bookmark_comment();
-        cx.notify();
-        return;
-    }
-
-    // Check for Ctrl+M or Cmd+M (toggle bitmap view)
-    if event.keystroke.key == "m"
-        && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
-        && !event.keystroke.modifiers.shift
-    {
-        editor.toggle_bitmap();
-        cx.notify();
-        return;
-    }
-
-    // Bitmap view controls (when visible)
-    if editor.bitmap_visible {
-        // C key to cycle color mode
-        if event.keystroke.key == "c" && !event.keystroke.modifiers.control && !event.keystroke.modifiers.platform {
-            editor.cycle_bitmap_color_mode();
-            cx.notify();
-            return;
-        }
-        // + or = key to increase width
-        if event.keystroke.key == "=" || event.keystroke.key == "+" {
-            editor.increase_bitmap_width();
-            cx.notify();
-            return;
-        }
-        // - key to decrease width
-        if event.keystroke.key == "-" {
-            editor.decrease_bitmap_width();
-            cx.notify();
-            return;
-        }
-    }
-
-    // Check for Ctrl+Z or Cmd+Z (undo)
-    if event.keystroke.key == "z"
-        && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
-        && !event.keystroke.modifiers.shift
-    {
-        if editor.tab_mut().document.undo() {
-            editor.save_message = Some("Undo".to_string());
-            cx.notify();
-        }
-        return;
-    }
-
-    // Check for Ctrl+Y or Cmd+Y or Ctrl+Shift+Z (redo)
-    if (event.keystroke.key == "y"
-        && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform))
-        || (event.keystroke.key == "z"
-            && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
-            && event.keystroke.modifiers.shift)
-    {
-        if editor.tab_mut().document.redo() {
-            editor.save_message = Some("Redo".to_string());
-            cx.notify();
-        }
-        return;
-    }
-
-    // Default visible rows for page navigation (approximately one screen)
-    const PAGE_ROWS: usize = 20;
-
-    // Handle Ctrl+Home (go to file start)
-    if event.keystroke.key == "home"
-        && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
-    {
-        if event.keystroke.modifiers.shift {
-            if editor.tab().selection_start.is_none() {
-                let pos = editor.tab().cursor_position;
-                editor.tab_mut().selection_start = Some(pos);
+        ("a", false) => {
+            if editor.tab().document.len() > 0 {
+                editor.tab_mut().selection_start = Some(0);
+                let end_pos = editor.tab().document.len().saturating_sub(1);
+                editor.tab_mut().cursor_position = end_pos;
+                editor.save_message = Some("Selected all".to_string());
             }
-        } else {
-            editor.clear_selection();
         }
-        editor.move_cursor_file_start();
-        cx.notify();
-        return;
-    }
-
-    // Handle Ctrl+End (go to file end)
-    if event.keystroke.key == "end"
-        && (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
-    {
-        if event.keystroke.modifiers.shift {
-            if editor.tab().selection_start.is_none() {
-                let pos = editor.tab().cursor_position;
-                editor.tab_mut().selection_start = Some(pos);
+        ("b", false) => editor.toggle_bookmark(),
+        ("b", true) => editor.edit_bookmark_comment(),
+        ("m", false) => editor.toggle_bitmap(),
+        ("z", false) => {
+            if editor.tab_mut().document.undo() {
+                editor.save_message = Some("Undo".to_string());
             }
-        } else {
-            editor.clear_selection();
         }
-        editor.move_cursor_file_end();
-        cx.notify();
-        return;
+        ("z", true) | ("y", _) => {
+            if editor.tab_mut().document.redo() {
+                editor.save_message = Some("Redo".to_string());
+            }
+        }
+        ("home", _) => {
+            update_selection(editor, shift);
+            editor.move_cursor_file_start();
+        }
+        ("end", _) => {
+            update_selection(editor, shift);
+            editor.move_cursor_file_end();
+        }
+        _ => return false,
     }
 
-    // Handle navigation and other keys
+    cx.notify();
+    true
+}
+
+/// Handle special keys: Escape, F2, F3, compare number selection, bitmap controls
+///
+/// Returns true if the event was handled.
+fn handle_special_keys(
+    editor: &mut HexEditor,
+    event: &KeyDownEvent,
+    cx: &mut Context<HexEditor>,
+) -> bool {
+    let shift = event.keystroke.modifiers.shift;
+
     match event.keystroke.key.as_str() {
-        "pageup" => {
-            if event.keystroke.modifiers.shift {
-                if editor.tab().selection_start.is_none() {
-                    let pos = editor.tab().cursor_position;
-                    editor.tab_mut().selection_start = Some(pos);
+        "escape" => {
+            // Priority: bookmark comment editing > compare selection dialog > compare mode > search
+            if editor.tab().bookmark_comment_editing {
+                editor.cancel_bookmark_comment();
+            } else if editor.compare_selection_visible {
+                editor.compare_selection_visible = false;
+            } else if editor.compare_mode {
+                editor.exit_compare_mode();
+            } else if editor.tab().search_visible {
+                if editor.tab().is_searching {
+                    editor.tab().search_cancel_flag.store(true, Ordering::Relaxed);
+                    editor.tab_mut().is_searching = false;
                 }
+                editor.tab_mut().search_visible = false;
+                editor.tab_mut().search_results.clear();
+                editor.tab_mut().current_search_index = None;
             } else {
-                editor.clear_selection();
+                return false;
             }
-            editor.move_cursor_page_up(PAGE_ROWS);
-            cx.notify();
         }
-        "pagedown" => {
-            if event.keystroke.modifiers.shift {
-                if editor.tab().selection_start.is_none() {
-                    let pos = editor.tab().cursor_position;
-                    editor.tab_mut().selection_start = Some(pos);
+        "f2" if !shift => editor.next_bookmark(),
+        "f2" if shift => editor.prev_bookmark(),
+        "f3" if !shift => editor.next_search_result(),
+        "f3" if shift => editor.prev_search_result(),
+        key if editor.compare_selection_visible => {
+            if let Some(num) = key.chars().next().and_then(|c| c.to_digit(10)) {
+                if num >= 1 && num <= 9 {
+                    let index = (num as usize) - 1;
+                    editor.select_compare_tab(index);
+                } else {
+                    return false;
                 }
             } else {
-                editor.clear_selection();
+                return false;
             }
-            editor.move_cursor_page_down(PAGE_ROWS);
-            cx.notify();
         }
-        "home" => {
-            if event.keystroke.modifiers.shift {
-                if editor.tab().selection_start.is_none() {
-                    let pos = editor.tab().cursor_position;
-                    editor.tab_mut().selection_start = Some(pos);
-                }
-            } else {
-                editor.clear_selection();
+        key if editor.bitmap_visible => {
+            match key {
+                "c" if !is_cmd(event) => editor.cycle_bitmap_color_mode(),
+                "=" | "+" => editor.increase_bitmap_width(),
+                "-" => editor.decrease_bitmap_width(),
+                _ => return false,
             }
-            editor.move_cursor_home();
-            cx.notify();
         }
-        "end" => {
-            if event.keystroke.modifiers.shift {
-                if editor.tab().selection_start.is_none() {
-                    let pos = editor.tab().cursor_position;
-                    editor.tab_mut().selection_start = Some(pos);
-                }
-            } else {
-                editor.clear_selection();
-            }
-            editor.move_cursor_end();
-            cx.notify();
-        }
-        "up" => {
-            if event.keystroke.modifiers.shift {
-                // Start selection if not already selecting
-                if editor.tab().selection_start.is_none() {
-                    let pos = editor.tab().cursor_position;
-                    editor.tab_mut().selection_start = Some(pos);
-                }
-                editor.move_cursor_up();
-            } else {
-                editor.clear_selection();
-                editor.move_cursor_up();
-            }
-            cx.notify();
-        }
-        "down" => {
-            if event.keystroke.modifiers.shift {
-                if editor.tab().selection_start.is_none() {
-                    let pos = editor.tab().cursor_position;
-                    editor.tab_mut().selection_start = Some(pos);
-                }
-                editor.move_cursor_down();
-            } else {
-                editor.clear_selection();
-                editor.move_cursor_down();
-            }
-            cx.notify();
-        }
-        "left" => {
-            if event.keystroke.modifiers.shift {
-                if editor.tab().selection_start.is_none() {
-                    let pos = editor.tab().cursor_position;
-                    editor.tab_mut().selection_start = Some(pos);
-                }
-                editor.move_cursor_left();
-            } else {
-                editor.clear_selection();
-                editor.move_cursor_left();
-            }
-            cx.notify();
-        }
-        "right" => {
-            if event.keystroke.modifiers.shift {
-                if editor.tab().selection_start.is_none() {
-                    let pos = editor.tab().cursor_position;
-                    editor.tab_mut().selection_start = Some(pos);
-                }
-                editor.move_cursor_right();
-            } else {
-                editor.clear_selection();
-                editor.move_cursor_right();
+        _ => return false,
+    }
+
+    cx.notify();
+    true
+}
+
+/// Default visible rows for page navigation (approximately one screen)
+const PAGE_ROWS: usize = 20;
+
+/// Handle navigation keys and text input
+fn handle_navigation_and_input(
+    editor: &mut HexEditor,
+    event: &KeyDownEvent,
+    cx: &mut Context<HexEditor>,
+) {
+    let key = event.keystroke.key.as_str();
+    let shift = event.keystroke.modifiers.shift;
+
+    match key {
+        "up" | "down" | "left" | "right" | "pageup" | "pagedown" | "home" | "end" => {
+            update_selection(editor, shift);
+            match key {
+                "up" => editor.move_cursor_up(),
+                "down" => editor.move_cursor_down(),
+                "left" => editor.move_cursor_left(),
+                "right" => editor.move_cursor_right(),
+                "pageup" => editor.move_cursor_page_up(PAGE_ROWS),
+                "pagedown" => editor.move_cursor_page_down(PAGE_ROWS),
+                "home" => editor.move_cursor_home(),
+                "end" => editor.move_cursor_end(),
+                _ => unreachable!(),
             }
             cx.notify();
         }
@@ -503,7 +278,7 @@ pub fn handle_key_event(
                 let mut c = key.chars().next().unwrap();
 
                 // Handle Shift modifier for uppercase and symbols
-                if event.keystroke.modifiers.shift {
+                if shift {
                     c = match c {
                         'a'..='z' => c.to_ascii_uppercase(),
                         // Handle shifted number row symbols
