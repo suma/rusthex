@@ -249,9 +249,11 @@ impl Document {
         Ok(())
     }
 
-    /// Undo last edit
-    pub fn undo(&mut self) -> bool {
+    /// Undo last edit. Returns the offset of the undone edit.
+    pub fn undo(&mut self) -> Option<usize> {
         if let Some(edit) = self.undo_stack.pop() {
+            let offset = edit.offset;
+
             // Apply reverse edit
             self.overlay.insert(edit.offset, edit.old_value);
 
@@ -261,15 +263,17 @@ impl Document {
             // Update unsaved flag
             self.has_unsaved_changes = !self.undo_stack.is_empty() || !self.overlay.is_empty();
 
-            true
+            Some(offset)
         } else {
-            false
+            None
         }
     }
 
-    /// Redo previously undone edit
-    pub fn redo(&mut self) -> bool {
+    /// Redo previously undone edit. Returns the offset of the redone edit.
+    pub fn redo(&mut self) -> Option<usize> {
         if let Some(edit) = self.redo_stack.pop() {
+            let offset = edit.offset;
+
             // Apply edit
             self.overlay.insert(edit.offset, edit.new_value);
 
@@ -278,9 +282,9 @@ impl Document {
 
             self.has_unsaved_changes = true;
 
-            true
+            Some(offset)
         } else {
-            false
+            None
         }
     }
 

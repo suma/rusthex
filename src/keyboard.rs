@@ -105,12 +105,14 @@ fn handle_command_shortcuts(
         ("b", true) => editor.edit_bookmark_comment(),
         ("m", false) => editor.toggle_bitmap(),
         ("z", false) => {
-            if editor.tab_mut().document.undo() {
+            if let Some(offset) = editor.tab_mut().document.undo() {
+                editor.move_position(offset);
                 editor.save_message = Some("Undo".to_string());
             }
         }
         ("z", true) | ("y", _) => {
-            if editor.tab_mut().document.redo() {
+            if let Some(offset) = editor.tab_mut().document.redo() {
+                editor.move_position(offset);
                 editor.save_message = Some("Redo".to_string());
             }
         }
