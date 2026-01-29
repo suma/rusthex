@@ -216,7 +216,8 @@ cargo run -- path/to/file.bin
 ```
 rusthex/
 ├── src/
-│   ├── main.rs         # Main application, HexEditor struct, and render implementation
+│   ├── main.rs         # Main application, HexEditor struct, and Render trait
+│   ├── render.rs       # UI render helper methods (header, tabs, hex view, etc.)
 │   ├── document.rs     # Document model and file I/O
 │   ├── keyboard.rs     # Keyboard event handling
 │   ├── search.rs       # Search functionality with wildcard support
