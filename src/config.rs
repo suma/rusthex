@@ -35,10 +35,15 @@ pub struct DisplaySettings {
 
 impl Default for DisplaySettings {
     fn default() -> Self {
+        let font_name = if cfg!(target_os = "macos") {
+            "Monaco"
+        } else {
+            "Consolas"
+        };
         Self {
             bytes_per_row: 16,
             font_size: 12.0,
-            font_name: "Monaco".to_string(),
+            font_name: font_name.to_string(),
         }
     }
 }
