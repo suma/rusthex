@@ -35,6 +35,8 @@ mod tab;
 mod tabs;
 mod ui;
 
+use bitmap::BitmapState;
+use compare::CompareState;
 use config::Settings;
 use document::Document;
 use render_cache::{CacheState, RenderCache};
@@ -64,9 +66,7 @@ struct HexEditor {
     dragging_tab_index: Option<usize>,
     tab_drop_target: Option<usize>,
     // Compare mode state
-    compare_mode: bool,
-    compare_tab_index: Option<usize>,
-    compare_selection_visible: bool,
+    compare: CompareState,
     // Cached row height (calculated from font metrics in render)
     cached_row_height: f32,
     // Cached line heights for different text sizes (calculated from font metrics)
@@ -82,20 +82,7 @@ struct HexEditor {
     // Force close flag - when true, skip unsaved changes confirmation
     force_close: bool,
     // Bitmap visualization state
-    bitmap_visible: bool,
-    bitmap_width: usize,
-    bitmap_color_mode: bitmap::BitmapColorMode,
-    // Bitmap panel width (inline panel)
-    bitmap_panel_width: f32,
-    // Bitmap viewport indicator drag state
-    bitmap_drag_start_y: Option<f32>,
-    bitmap_drag_start_row: Option<usize>,
-    // Bitmap independent scroll
-    bitmap_scroll_handle: gpui::ScrollHandle,
-    bitmap_scrollbar_state: gpui_component::scroll::ScrollbarState,
-    // Bitmap image cache
-    cached_bitmap_image: Option<std::sync::Arc<gpui::RenderImage>>,
-    cached_bitmap_params: Option<bitmap::BitmapCacheParams>,
+    bitmap: BitmapState,
 }
 
 impl HexEditor {
@@ -118,9 +105,7 @@ impl HexEditor {
             inspector_endian,
             dragging_tab_index: None,
             tab_drop_target: None,
-            compare_mode: false,
-            compare_tab_index: None,
-            compare_selection_visible: false,
+            compare: CompareState::new(),
             cached_row_height: 24.0, // Default, will be updated in render()
             cached_line_height_xl: 24.0, // Default, will be updated in render()
             cached_line_height_sm: 17.0, // Default, will be updated in render()
@@ -129,16 +114,7 @@ impl HexEditor {
             encoding_dropdown_open: false,
             cached_char_width: 8.4, // Default (14 * 0.6), will be updated in render()
             force_close: false,
-            bitmap_visible: false,
-            bitmap_width: bitmap::DEFAULT_BITMAP_WIDTH,
-            bitmap_color_mode: bitmap::BitmapColorMode::default(),
-            bitmap_panel_width: 520.0,
-            bitmap_drag_start_y: None,
-            bitmap_drag_start_row: None,
-            bitmap_scroll_handle: gpui::ScrollHandle::new(),
-            bitmap_scrollbar_state: gpui_component::scroll::ScrollbarState::default(),
-            cached_bitmap_image: None,
-            cached_bitmap_params: None,
+            bitmap: BitmapState::new(),
         }
     }
 

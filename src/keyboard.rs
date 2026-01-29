@@ -87,7 +87,7 @@ fn handle_command_shortcuts(
         ("e", true) => editor.cycle_encoding(),
         ("e", false) if editor.inspector_visible => editor.toggle_inspector_endian(),
         ("k", _) => {
-            if editor.compare_mode {
+            if editor.compare.mode {
                 editor.exit_compare_mode();
             } else {
                 editor.start_compare_mode();
@@ -146,9 +146,9 @@ fn handle_special_keys(
             // Priority: bookmark comment editing > compare selection dialog > compare mode > search
             if editor.tab().bookmark_comment_editing {
                 editor.cancel_bookmark_comment();
-            } else if editor.compare_selection_visible {
-                editor.compare_selection_visible = false;
-            } else if editor.compare_mode {
+            } else if editor.compare.selection_visible {
+                editor.compare.selection_visible = false;
+            } else if editor.compare.mode {
                 editor.exit_compare_mode();
             } else if editor.tab().search_visible {
                 if editor.tab().is_searching {
@@ -166,7 +166,7 @@ fn handle_special_keys(
         "f2" if shift => editor.prev_bookmark(),
         "f3" if !shift => editor.next_search_result(),
         "f3" if shift => editor.prev_search_result(),
-        key if editor.compare_selection_visible => {
+        key if editor.compare.selection_visible => {
             if let Some(num) = key.chars().next().and_then(|c| c.to_digit(10)) {
                 if num >= 1 && num <= 9 {
                     let index = (num as usize) - 1;
@@ -178,7 +178,7 @@ fn handle_special_keys(
                 return false;
             }
         }
-        key if editor.bitmap_visible => {
+        key if editor.bitmap.visible => {
             match key {
                 "c" if !is_cmd(event) => editor.cycle_bitmap_color_mode(),
                 "=" | "+" => editor.increase_bitmap_width(),

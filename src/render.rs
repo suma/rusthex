@@ -300,10 +300,10 @@ impl HexEditor {
 
     /// Normal mode: hex/ASCII view with optional bitmap panel
     pub(crate) fn render_normal_mode(&self, cx: &mut gpui::Context<Self>, params: &RenderParams) -> impl IntoElement {
-        let bitmap_visible = self.bitmap_visible;
-        let bitmap_width_pixels = self.bitmap_width;
-        let bitmap_color_mode = self.bitmap_color_mode;
-        let bitmap_panel_width = self.bitmap_panel_width;
+        let bitmap_visible = self.bitmap.visible;
+        let bitmap_width_pixels = self.bitmap.width;
+        let bitmap_color_mode = self.bitmap.color_mode;
+        let bitmap_panel_width = self.bitmap.panel_width;
         let render_start = params.render_start;
         let render_end = params.render_end;
         let row_count = params.row_count;
@@ -361,8 +361,8 @@ impl HexEditor {
                                 if this.is_dragging && !event.dragging() {
                                     this.is_dragging = false;
                                     this.drag_pane = None;
-                                    this.bitmap_drag_start_y = None;
-                                    this.bitmap_drag_start_row = None;
+                                    this.bitmap.drag_start_y = None;
+                                    this.bitmap.drag_start_row = None;
                                     cx.notify();
                                     return;
                                 }
@@ -373,13 +373,13 @@ impl HexEditor {
 
                                 // Handle bitmap viewport indicator drag separately
                                 if this.drag_pane == Some(EditPane::Bitmap) {
-                                    if let (Some(start_y), Some(start_row)) = (this.bitmap_drag_start_y, this.bitmap_drag_start_row) {
+                                    if let (Some(start_y), Some(start_row)) = (this.bitmap.drag_start_y, this.bitmap.drag_start_row) {
                                         let mouse_y: f32 = event.position.y.into();
                                         let delta_y = mouse_y - start_y;
 
                                         // Convert pixel delta to bitmap rows
-                                        let bitmap_width = this.bitmap_width;
-                                        let bitmap_panel_width = this.bitmap_panel_width;
+                                        let bitmap_width = this.bitmap.width;
+                                        let bitmap_panel_width = this.bitmap.panel_width;
                                         let pixel_size = ((bitmap_panel_width - 20.0) / bitmap_width as f32).max(1.0).min(4.0);
                                         let delta_bitmap_rows = (delta_y / pixel_size) as isize;
 
@@ -824,7 +824,7 @@ impl HexEditor {
                 let display_height = ((canvas_height / pixel_size) as usize).min(bitmap_height);
 
                 // Calculate scroll position from scroll handle
-                let bitmap_scroll_offset = self.bitmap_scroll_handle.offset();
+                let bitmap_scroll_offset = self.bitmap.scroll_handle.offset();
                 let bitmap_scroll_y: f32 = (-f32::from(bitmap_scroll_offset.y)).max(0.0);
                 let bitmap_scroll_start = (bitmap_scroll_y / pixel_size) as usize;
                 let bitmap_scroll_start = bitmap_scroll_start.min(bitmap_height.saturating_sub(display_height));
@@ -882,10 +882,10 @@ impl HexEditor {
                                         .flex_1()
                                         .h_full()
                                         .overflow_y_scroll()
-                                        .track_scroll(&self.bitmap_scroll_handle)
+                                        .track_scroll(&self.bitmap.scroll_handle)
                                         .child({
                                             // Use cached bitmap image (updated in update_bitmap_cache)
-                                            let bitmap_image = self.cached_bitmap_image.clone()
+                                            let bitmap_image = self.bitmap.cached_image.clone()
                                                 .expect("Bitmap cache should be populated");
 
                                             // Virtual height container for scrolling
@@ -903,7 +903,7 @@ impl HexEditor {
                                                 .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, event: &gpui::MouseDownEvent, _window, cx| {
                                                     // Calculate byte offset from click position
                                                     // Get bitmap scroll container bounds to calculate relative position
-                                                    let container_bounds = this.bitmap_scroll_handle.bounds();
+                                                    let container_bounds = this.bitmap.scroll_handle.bounds();
                                                     let container_origin_x: f32 = container_bounds.origin.x.into();
                                                     let container_origin_y: f32 = container_bounds.origin.y.into();
 
@@ -912,7 +912,7 @@ impl HexEditor {
                                                     let click_y: f32 = f32::from(event.position.y) - container_origin_y;
 
                                                     // Account for bitmap scroll offset
-                                                    let scroll_offset_y: f32 = (-f32::from(this.bitmap_scroll_handle.offset().y)).max(0.0);
+                                                    let scroll_offset_y: f32 = (-f32::from(this.bitmap.scroll_handle.offset().y)).max(0.0);
                                                     let adjusted_y = click_y + scroll_offset_y;
 
                                                     let row = (adjusted_y / click_pixel_size) as usize;
@@ -980,8 +980,8 @@ impl HexEditor {
                                                 .border_color(rgb(bitmap_color_mode.indicator_color()))
                                                 .cursor_grab()
                                                 .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, event: &gpui::MouseDownEvent, _window, cx| {
-                                                    this.bitmap_drag_start_y = Some(event.position.y.into());
-                                                    this.bitmap_drag_start_row = Some(current_render_start);
+                                                    this.bitmap.drag_start_y = Some(event.position.y.into());
+                                                    this.bitmap.drag_start_row = Some(current_render_start);
                                                     this.is_dragging = true;
                                                     this.drag_pane = Some(EditPane::Bitmap);
                                                     cx.notify();
@@ -996,7 +996,7 @@ impl HexEditor {
                                         .h_full()
                                         .bg(rgb(0x2a2a2a))
                                         .child(
-                                            Scrollbar::vertical(&self.bitmap_scrollbar_state, &self.bitmap_scroll_handle)
+                                            Scrollbar::vertical(&self.bitmap.scrollbar_state, &self.bitmap.scroll_handle)
                                                 .scrollbar_show(ScrollbarShow::Always)
                                         )
                                 )
@@ -1018,7 +1018,7 @@ impl HexEditor {
 
     /// Compare mode: dual pane view with virtual scrolling
     pub(crate) fn render_compare_mode(&self, params: &RenderParams) -> impl IntoElement {
-        let compare_tab_idx = self.compare_tab_index.unwrap_or(0);
+        let compare_tab_idx = self.compare.tab_index.unwrap_or(0);
         let active_doc = &self.tabs[self.active_tab].document;
         let compare_doc = &self.tabs[compare_tab_idx].document;
         let active_name = self.tabs[self.active_tab].display_name();
@@ -1815,7 +1815,7 @@ impl Render for HexEditor {
         self.update_render_cache(render_start, render_end);
 
         // Update bitmap image cache if bitmap is visible
-        if self.bitmap_visible {
+        if self.bitmap.visible {
             self.update_bitmap_cache();
         }
 
@@ -1860,8 +1860,8 @@ impl Render for HexEditor {
                 if this.is_dragging {
                     this.is_dragging = false;
                     this.drag_pane = None;
-                    this.bitmap_drag_start_y = None;
-                    this.bitmap_drag_start_row = None;
+                    this.bitmap.drag_start_y = None;
+                    this.bitmap.drag_start_row = None;
                     cx.notify();
                 }
             }))
@@ -1870,21 +1870,21 @@ impl Render for HexEditor {
                 if this.is_dragging && !event.dragging() {
                     this.is_dragging = false;
                     this.drag_pane = None;
-                    this.bitmap_drag_start_y = None;
-                    this.bitmap_drag_start_row = None;
+                    this.bitmap.drag_start_y = None;
+                    this.bitmap.drag_start_row = None;
                     cx.notify();
                     return;
                 }
 
                 // Handle bitmap viewport indicator drag at root level
                 if this.drag_pane == Some(EditPane::Bitmap) && this.is_dragging {
-                    if let (Some(start_y), Some(start_row)) = (this.bitmap_drag_start_y, this.bitmap_drag_start_row) {
+                    if let (Some(start_y), Some(start_row)) = (this.bitmap.drag_start_y, this.bitmap.drag_start_row) {
                         let mouse_y: f32 = event.position.y.into();
                         let delta_y = mouse_y - start_y;
 
                         // Convert pixel delta to bitmap rows
-                        let bitmap_width = this.bitmap_width;
-                        let bitmap_panel_width = this.bitmap_panel_width;
+                        let bitmap_width = this.bitmap.width;
+                        let bitmap_panel_width = this.bitmap.panel_width;
                         let pixel_size = ((bitmap_panel_width - 20.0) / bitmap_width as f32).max(1.0).min(4.0);
                         let delta_bitmap_rows = (delta_y / pixel_size) as isize;
 
@@ -1933,17 +1933,17 @@ impl Render for HexEditor {
             .when(self.tab().bookmark_comment_editing, |parent| {
                 parent.child(self.render_bookmark_bar())
             })
-            .when(!self.compare_mode, |parent| {
+            .when(!self.compare.mode, |parent| {
                 parent.child(self.render_normal_mode(cx, &params))
             })
-            .when(self.compare_mode, |parent| {
+            .when(self.compare.mode, |parent| {
                 parent.child(self.render_compare_mode(&params))
             })
             .child(self.render_status_bar(cx, &params.font_name))
             .when(self.inspector_visible, |parent| {
                 parent.child(self.render_data_inspector(&params.font_name))
             })
-            .when(self.compare_selection_visible, |parent| {
+            .when(self.compare.selection_visible, |parent| {
                 parent.child(self.render_compare_dialog(cx))
             })
     }

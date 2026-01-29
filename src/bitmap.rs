@@ -9,6 +9,37 @@ use image::{ImageBuffer, Rgba, Frame, Delay};
 use smallvec::smallvec;
 use std::time::Duration;
 
+/// Bitmap visualization state for HexEditor
+pub(crate) struct BitmapState {
+    pub visible: bool,
+    pub width: usize,
+    pub color_mode: BitmapColorMode,
+    pub panel_width: f32,
+    pub drag_start_y: Option<f32>,
+    pub drag_start_row: Option<usize>,
+    pub scroll_handle: gpui::ScrollHandle,
+    pub scrollbar_state: gpui_component::scroll::ScrollbarState,
+    pub cached_image: Option<Arc<RenderImage>>,
+    pub cached_params: Option<BitmapCacheParams>,
+}
+
+impl BitmapState {
+    pub fn new() -> Self {
+        Self {
+            visible: false,
+            width: DEFAULT_BITMAP_WIDTH,
+            color_mode: BitmapColorMode::default(),
+            panel_width: 520.0,
+            drag_start_y: None,
+            drag_start_row: None,
+            scroll_handle: gpui::ScrollHandle::new(),
+            scrollbar_state: gpui_component::scroll::ScrollbarState::default(),
+            cached_image: None,
+            cached_params: None,
+        }
+    }
+}
+
 /// Color mode for bitmap visualization
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum BitmapColorMode {
@@ -137,12 +168,12 @@ impl HexEditor {
     /// Update bitmap image cache if parameters changed
     pub(crate) fn update_bitmap_cache(&mut self) {
         let doc_len = self.tab().document.len();
-        let bitmap_width_pixels = self.bitmap_width;
+        let bitmap_width_pixels = self.bitmap.width;
         let bitmap_height = (doc_len + bitmap_width_pixels - 1) / bitmap_width_pixels;
 
         // Calculate pixel size
         let scrollbar_width = 12.0;
-        let bitmap_area_width = self.bitmap_panel_width - 16.0 - scrollbar_width - 4.0;
+        let bitmap_area_width = self.bitmap.panel_width - 16.0 - scrollbar_width - 4.0;
         let pixel_size = (bitmap_area_width / bitmap_width_pixels as f32).max(1.0).floor();
 
         // Calculate canvas and display height
@@ -156,7 +187,7 @@ impl HexEditor {
         let display_height = ((canvas_height / pixel_size) as usize).min(bitmap_height);
 
         // Calculate scroll position
-        let bitmap_scroll_offset = self.bitmap_scroll_handle.offset();
+        let bitmap_scroll_offset = self.bitmap.scroll_handle.offset();
         let bitmap_scroll_y: f32 = (-f32::from(bitmap_scroll_offset.y)).max(0.0);
         let bitmap_scroll_start = (bitmap_scroll_y / pixel_size) as usize;
         let bitmap_scroll_start = bitmap_scroll_start.min(bitmap_height.saturating_sub(display_height));
@@ -168,13 +199,13 @@ impl HexEditor {
             display_height,
             bitmap_width: bitmap_width_pixels,
             pixel_size: pixel_size as u32,
-            color_mode: self.bitmap_color_mode,
+            color_mode: self.bitmap.color_mode,
             cursor_position: cursor_pos,
             doc_len,
         };
 
         // Check if cache is valid
-        let cache_valid = self.cached_bitmap_params.as_ref()
+        let cache_valid = self.bitmap.cached_params.as_ref()
             .map(|p| *p == current_params)
             .unwrap_or(false);
 
@@ -188,22 +219,22 @@ impl HexEditor {
                 display_height,
                 bitmap_width_pixels,
                 pixel_size,
-                self.bitmap_color_mode,
+                self.bitmap.color_mode,
                 cursor_pos,
             );
-            self.cached_bitmap_image = Some(new_image);
-            self.cached_bitmap_params = Some(current_params);
+            self.bitmap.cached_image = Some(new_image);
+            self.bitmap.cached_params = Some(current_params);
         }
     }
 
     /// Toggle bitmap visualization
     pub(crate) fn toggle_bitmap(&mut self) {
-        self.bitmap_visible = !self.bitmap_visible;
-        if self.bitmap_visible {
+        self.bitmap.visible = !self.bitmap.visible;
+        if self.bitmap.visible {
             self.save_message = Some(format!(
                 "Bitmap: {} ({}px wide)",
-                self.bitmap_color_mode.label(),
-                self.bitmap_width
+                self.bitmap.color_mode.label(),
+                self.bitmap.width
             ));
         } else {
             self.save_message = Some("Bitmap view closed".to_string());
@@ -212,20 +243,20 @@ impl HexEditor {
 
     /// Cycle bitmap color mode
     pub(crate) fn cycle_bitmap_color_mode(&mut self) {
-        self.bitmap_color_mode = self.bitmap_color_mode.next();
-        self.save_message = Some(format!("Bitmap mode: {}", self.bitmap_color_mode.label()));
+        self.bitmap.color_mode = self.bitmap.color_mode.next();
+        self.save_message = Some(format!("Bitmap mode: {}", self.bitmap.color_mode.label()));
     }
 
     /// Increase bitmap width
     pub(crate) fn increase_bitmap_width(&mut self) {
-        self.bitmap_width = next_width(self.bitmap_width);
-        self.save_message = Some(format!("Bitmap width: {}px", self.bitmap_width));
+        self.bitmap.width = next_width(self.bitmap.width);
+        self.save_message = Some(format!("Bitmap width: {}px", self.bitmap.width));
     }
 
     /// Decrease bitmap width
     pub(crate) fn decrease_bitmap_width(&mut self) {
-        self.bitmap_width = prev_width(self.bitmap_width);
-        self.save_message = Some(format!("Bitmap width: {}px", self.bitmap_width));
+        self.bitmap.width = prev_width(self.bitmap.width);
+        self.save_message = Some(format!("Bitmap width: {}px", self.bitmap.width));
     }
 }
 
