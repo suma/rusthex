@@ -1,0 +1,1732 @@
+use crate::encoding::{decode_for_display, DisplayChar};
+use crate::ui::{self, EditPane, HexNibble, TextEncoding};
+use crate::HexEditor;
+use crate::SearchMode;
+use gpui::{
+    div, img, px, rgb, rgba, prelude::*, Pixels, SharedString,
+};
+use gpui_component::scroll::{Scrollbar, ScrollbarShow};
+use std::sync::atomic::Ordering;
+
+/// Bundle of parameters computed in the render() preamble
+pub(crate) struct RenderParams {
+    pub font_name: String,
+    pub address_width: f32,
+    pub render_start: usize,
+    pub render_end: usize,
+    pub row_count: usize,
+    pub top_spacer_height: Pixels,
+    pub bottom_spacer_height: Pixels,
+    pub content_height: Pixels,
+    pub viewport_bounds: gpui::Bounds<Pixels>,
+}
+
+impl HexEditor {
+    /// Header area (title, file info, shortcut hints)
+    pub(crate) fn render_header(&self, title: &str) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_col()
+            .pb_4()
+            .border_b_1()
+            .border_color(rgb(0x404040))
+            .child(
+                div()
+                    .text_xl()
+                    .text_color(rgb(0xffffff))
+                    .child(format!("{}{}",
+                        title,
+                        if self.tab().document.has_unsaved_changes() { " *" } else { "" }
+                    ))
+            )
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(rgb(0x808080))
+                    .child(format!("{} bytes{}",
+                        self.tab().document.len(),
+                        if self.tab().document.has_unsaved_changes() { " (modified)" } else { "" }
+                    ))
+            )
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(rgb(0x808080))
+                    .child(format!("Edit Mode: {} | Tab: switch | Shift+Arrow: select | Ctrl+A: select all",
+                        match self.tab().edit_pane {
+                            EditPane::Hex => "HEX",
+                            EditPane::Ascii => "ASCII",
+                            EditPane::Bitmap => "HEX",
+                        }))
+            )
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(rgb(0x808080))
+                    .child("Ctrl+O: open | Ctrl+S: save | Ctrl+T: new tab | Ctrl+W: close | Ctrl+K: compare | Ctrl+Z/Y: undo/redo")
+            )
+    }
+
+    /// Tab bar (shown only when multiple tabs exist)
+    pub(crate) fn render_tab_bar(&self, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+        let dragging_tab = self.dragging_tab_index;
+        let drop_target = self.tab_drop_target;
+        div()
+            .flex()
+            .gap_1()
+            .py_1()
+            .px_2()
+            .bg(rgb(0x252525))
+            .border_b_1()
+            .border_color(rgb(0x404040))
+            .on_mouse_up(gpui::MouseButton::Left, cx.listener(|this, _event, _window, cx| {
+                // Complete the drag operation
+                if let (Some(from), Some(to)) = (this.dragging_tab_index, this.tab_drop_target) {
+                    if from != to {
+                        this.reorder_tab(from, to);
+                    }
+                }
+                this.dragging_tab_index = None;
+                this.tab_drop_target = None;
+                cx.notify();
+            }))
+            .children(
+                self.tabs.iter().enumerate().map(|(idx, tab)| {
+                    let is_active = idx == self.active_tab;
+                    let tab_name = tab.display_name();
+                    let is_being_dragged = dragging_tab == Some(idx);
+                    let is_drop_target = drop_target == Some(idx) && dragging_tab != Some(idx);
+                    div()
+                        .id(("tab", idx))
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .px_3()
+                        .py_1()
+                        .text_sm()
+                        .cursor_pointer()
+                        .rounded_t_md()
+                        // Drop target indicator (left border)
+                        .when(is_drop_target, |d| {
+                            d.border_l_2()
+                                .border_color(rgb(0x4a9eff))
+                        })
+                        // Dragging state (semi-transparent)
+                        .when(is_being_dragged, |d| {
+                            d.opacity(0.5)
+                        })
+                        .when(is_active && !is_being_dragged, |d| {
+                            d.bg(rgb(0x1e1e1e))
+                                .text_color(rgb(0xffffff))
+                                .border_t_1()
+                                .border_l_1()
+                                .border_r_1()
+                                .border_color(rgb(0x404040))
+                        })
+                        .when(!is_active && !is_being_dragged, |d| {
+                            d.bg(rgb(0x2a2a2a))
+                                .text_color(rgb(0x808080))
+                                .hover(|h| h.bg(rgb(0x333333)))
+                        })
+                        .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event, _window, cx| {
+                            this.dragging_tab_index = Some(idx);
+                            this.switch_to_tab(idx);
+                            cx.notify();
+                        }))
+                        .on_mouse_move(cx.listener(move |this, event: &gpui::MouseMoveEvent, _window, cx| {
+                            // Update drop target when dragging over tabs
+                            if this.dragging_tab_index.is_some() && event.dragging() {
+                                if this.tab_drop_target != Some(idx) {
+                                    this.tab_drop_target = Some(idx);
+                                    cx.notify();
+                                }
+                            }
+                        }))
+                        .child(tab_name)
+                        .child(
+                            // Close button
+                            div()
+                                .id(("tab-close", idx))
+                                .text_xs()
+                                .text_color(rgb(0x808080))
+                                .hover(|h| h.text_color(rgb(0xff6666)))
+                                .cursor_pointer()
+                                .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event: &gpui::MouseDownEvent, _window, cx| {
+                                    // Close this specific tab
+                                    if this.tabs.len() > 1 {
+                                        this.tabs.remove(idx);
+                                        if this.active_tab >= this.tabs.len() {
+                                            this.active_tab = this.tabs.len() - 1;
+                                        } else if this.active_tab > idx {
+                                            this.active_tab -= 1;
+                                        }
+                                    }
+                                    // Clear drag state
+                                    this.dragging_tab_index = None;
+                                    this.tab_drop_target = None;
+                                    cx.notify();
+                                }))
+                                .child("×")
+                        )
+                }).collect::<Vec<_>>()
+            )
+            .child(
+                // New tab button
+                div()
+                    .id("new-tab")
+                    .px_2()
+                    .py_1()
+                    .text_sm()
+                    .text_color(rgb(0x808080))
+                    .cursor_pointer()
+                    .hover(|h| h.text_color(rgb(0x00ff00)))
+                    .on_mouse_down(gpui::MouseButton::Left, cx.listener(|this, _event, _window, cx| {
+                        this.new_tab();
+                        cx.notify();
+                    }))
+                    .child("+")
+            )
+    }
+
+    /// Search bar
+    pub(crate) fn render_search_bar(&self) -> impl IntoElement {
+        let search_mode_label = match self.tab().search_mode {
+            SearchMode::Ascii => "ASCII",
+            SearchMode::Hex => "HEX",
+        };
+        let result_count = self.tab().search_results.len();
+        let current_pos = if let Some(idx) = self.tab().current_search_index {
+            idx + 1
+        } else {
+            0
+        };
+
+        div()
+            .flex()
+            .flex_col()
+            .py_2()
+            .px_4()
+            .bg(rgb(0x2a2a2a))
+            .border_b_1()
+            .border_color(rgb(0x404040))
+            .child(
+                div()
+                    .flex()
+                    .gap_4()
+                    .items_center()
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(rgb(0xffffff))
+                            .child(format!("Search ({}): {}", search_mode_label, self.tab().search_query))
+                    )
+                    .when(self.tab().is_searching, |d| {
+                        d.child(
+                            div()
+                                .text_sm()
+                                .text_color(rgb(0xffff00))
+                                .child("Searching...")
+                        )
+                    })
+                    .when(!self.tab().is_searching && result_count > 0, |d| {
+                        d.child(
+                            div()
+                                .text_sm()
+                                .text_color(if self.tab().search_truncated { rgb(0xffaa00) } else { rgb(0x00ff00) })
+                                .child(if self.tab().search_truncated {
+                                    format!("{} / {}+ matches (truncated)", current_pos, result_count)
+                                } else {
+                                    format!("{} / {} matches", current_pos, result_count)
+                                })
+                        )
+                    })
+                    .when(!self.tab().is_searching && result_count == 0 && !self.tab().search_query.is_empty(), |d| {
+                        d.child(
+                            div()
+                                .text_sm()
+                                .text_color(rgb(0xff0000))
+                                .child("No matches")
+                        )
+                    })
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(rgb(0x808080))
+                    .child("Type to search | Tab: switch mode | Enter/F3: next | Shift+F3: prev | Backspace: delete | Esc: close")
+            )
+    }
+
+    /// Bookmark comment editing bar
+    pub(crate) fn render_bookmark_bar(&self) -> impl IntoElement {
+        let pos = self.tab().bookmark_comment_position;
+        let comment_text = self.tab().bookmark_comment_text.clone();
+
+        div()
+            .flex()
+            .flex_col()
+            .py_2()
+            .px_4()
+            .bg(rgb(0x2a2a2a))
+            .border_b_1()
+            .border_color(rgb(0x404040))
+            .child(
+                div()
+                    .flex()
+                    .gap_4()
+                    .items_center()
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(rgb(0x00bfff))
+                            .child(format!("0x{:08X}", pos))
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(rgb(0xffffff))
+                            .child(format!("Comment: {}", comment_text))
+                    )
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(rgb(0x808080))
+                    .child("Enter: save | Esc: cancel | Backspace: delete")
+            )
+    }
+
+    /// Normal mode: hex/ASCII view with optional bitmap panel
+    pub(crate) fn render_normal_mode(&self, cx: &mut gpui::Context<Self>, params: &RenderParams) -> impl IntoElement {
+        let bitmap_visible = self.bitmap_visible;
+        let bitmap_width_pixels = self.bitmap_width;
+        let bitmap_color_mode = self.bitmap_color_mode;
+        let bitmap_panel_width = self.bitmap_panel_width;
+        let render_start = params.render_start;
+        let render_end = params.render_end;
+        let row_count = params.row_count;
+        let font_name = &params.font_name;
+        let address_width = params.address_width;
+        let top_spacer_height = params.top_spacer_height;
+        let bottom_spacer_height = params.bottom_spacer_height;
+        let viewport_bounds = params.viewport_bounds;
+
+        // Hex view visible range (for bitmap viewport indicator)
+        let hex_visible_start = render_start * self.bytes_per_row();
+        let hex_visible_end = render_end * self.bytes_per_row();
+
+        // Calculate minimum width for hex/ASCII content area
+        let char_width = self.cached_char_width;
+        let bytes_per_row = self.bytes_per_row();
+        let address_col_width = char_width * 8.0 + 16.0; // 8 chars + bookmark indicator + padding
+        let hex_column_width = bytes_per_row as f32 * char_width * 2.0
+            + (bytes_per_row - 1) as f32 * 4.0; // 2 chars per byte + gaps
+        let ascii_column_width = bytes_per_row as f32 * char_width + 8.0; // Dynamic based on char_width + padding
+        let gaps = 16.0 * 2.0; // gap_4 between columns
+        let scrollbar_area = 24.0 + 16.0; // pr(24) + scrollbar width + margin
+        let content_min_width = address_col_width + hex_column_width + ascii_column_width + gaps + scrollbar_area;
+
+        // Outer container for hex view + bitmap (horizontal layout)
+        div()
+            .flex()
+            .flex_1()
+            .pt_4()
+            .gap_2()
+            .overflow_hidden()
+            .child(
+                // Main hex/ASCII content area with scrollbar (priority over bitmap)
+                div()
+                    .flex()
+                    .flex_1()
+                    .flex_shrink_0() // Never shrink - ASCII view has priority
+                    .min_w(px(content_min_width)) // Calculated minimum width
+                    .relative()
+                    .overflow_hidden()
+                    .child(
+                        // Scrollable content
+                        div()
+                            .id("hex-content")
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .right_0()
+                            .bottom_0()
+                            .overflow_y_scroll()
+                            .track_scroll(&self.tab().scroll_handle)
+                            .pr(px(24.0))
+                            .on_mouse_move(cx.listener(|this, event: &gpui::MouseMoveEvent, _window, cx| {
+                                // Cancel drag if mouse button was released outside the window
+                                if this.is_dragging && !event.dragging() {
+                                    this.is_dragging = false;
+                                    this.drag_pane = None;
+                                    this.bitmap_drag_start_y = None;
+                                    this.bitmap_drag_start_row = None;
+                                    cx.notify();
+                                    return;
+                                }
+
+                                if !this.is_dragging || this.drag_pane.is_none() {
+                                    return;
+                                }
+
+                                // Handle bitmap viewport indicator drag separately
+                                if this.drag_pane == Some(EditPane::Bitmap) {
+                                    if let (Some(start_y), Some(start_row)) = (this.bitmap_drag_start_y, this.bitmap_drag_start_row) {
+                                        let mouse_y: f32 = event.position.y.into();
+                                        let delta_y = mouse_y - start_y;
+
+                                        // Convert pixel delta to bitmap rows
+                                        let bitmap_width = this.bitmap_width;
+                                        let bitmap_panel_width = this.bitmap_panel_width;
+                                        let pixel_size = ((bitmap_panel_width - 20.0) / bitmap_width as f32).max(1.0).min(4.0);
+                                        let delta_bitmap_rows = (delta_y / pixel_size) as isize;
+
+                                        // Convert bitmap rows to hex view rows
+                                        let bytes_per_row = this.bytes_per_row();
+                                        let delta_hex_rows = delta_bitmap_rows * bitmap_width as isize / bytes_per_row as isize;
+
+                                        // Calculate new scroll position
+                                        let new_row = if delta_hex_rows >= 0 {
+                                            start_row.saturating_add(delta_hex_rows as usize)
+                                        } else {
+                                            start_row.saturating_sub((-delta_hex_rows) as usize)
+                                        };
+
+                                        // Calculate scroll offset and apply
+                                        let doc_len = this.tab().document.len();
+                                        let total_rows = (doc_len + bytes_per_row - 1) / bytes_per_row;
+                                        let row_height = this.row_height();
+                                        let visible_rows = this.content_view_rows;
+
+                                        let new_y_offset = ui::calculate_scroll_offset(
+                                            new_row,
+                                            visible_rows,
+                                            total_rows,
+                                            row_height,
+                                        );
+                                        let current_offset = this.tab().scroll_handle.offset();
+                                        let new_offset = gpui::Point::new(current_offset.x, new_y_offset);
+                                        this.tab_mut().scroll_handle.set_offset(new_offset);
+                                        this.tab_mut().scroll_offset = new_y_offset;
+                                        cx.notify();
+                                    }
+                                    return;
+                                }
+
+                                // Get current values from this (not captured snapshots)
+                                let bytes_per_row = this.bytes_per_row();
+                                let doc_len = this.tab().document.len();
+                                let scroll_offset_f32: f32 = (-f32::from(this.tab().scroll_offset)).max(0.0);
+
+                                // Use cached values calculated from font metrics in render()
+                                let row_height = this.cached_row_height;
+                                let char_width = this.cached_char_width;
+                                // Hex byte: 2 chars + gap_1 (4px)
+                                let hex_byte_width = char_width * 2.0 + 4.0;
+
+                                // Calculate row from Y position
+                                // event.position is in window coordinates
+                                let mouse_y: f32 = event.position.y.into();
+
+                                // Content area offset: outer padding + header height + content top padding + first row offset
+                                let outer_padding = 16.0; // p_4
+                                let content_top_padding = 16.0; // pt_4
+                                let content_top = outer_padding + this.calculate_header_height() + content_top_padding + row_height;
+                                let relative_y = mouse_y - content_top + scroll_offset_f32;
+
+                                let row = if relative_y < 0.0 {
+                                    0
+                                } else {
+                                    (relative_y / row_height) as usize
+                                };
+
+                                let row_start = row * bytes_per_row;
+
+                                // Calculate byte in row from X position
+                                // Window coordinates: outer padding (16) + Address (80) + gap_4 (16) = 112px for hex start
+                                let mouse_x: f32 = event.position.x.into();
+                                let hex_start = 112.0; // 16 + 80 + 16
+                                let gap = 16.0; // gap_4
+                                let gap_1 = 4.0; // gap_1 between hex bytes
+                                let byte_in_row = match this.drag_pane {
+                                    Some(EditPane::Hex) => {
+                                        if mouse_x < hex_start {
+                                            0
+                                        } else {
+                                            ((mouse_x - hex_start) / hex_byte_width) as usize
+                                        }
+                                    }
+                                    Some(EditPane::Ascii) => {
+                                        // Hex column: each byte is 2 chars, with gap_1 between bytes (not after last)
+                                        let hex_column_width = bytes_per_row as f32 * char_width * 2.0
+                                            + (bytes_per_row - 1) as f32 * gap_1;
+                                        let ascii_start = hex_start + hex_column_width + gap;
+                                        if mouse_x < ascii_start {
+                                            0
+                                        } else {
+                                            // ASCII column: each character is char_width, no gaps
+                                            ((mouse_x - ascii_start) / char_width) as usize
+                                        }
+                                    }
+                                    Some(EditPane::Bitmap) => 0, // Bitmap drag handled separately above
+                                    None => 0,
+                                };
+
+                                let byte_in_row = byte_in_row.min(bytes_per_row - 1);
+                                let new_cursor = (row_start + byte_in_row).min(doc_len.saturating_sub(1));
+
+                                if this.tab().cursor_position != new_cursor {
+                                    this.tab_mut().cursor_position = new_cursor;
+                                    this.ensure_cursor_visible_by_row();
+                                    cx.notify();
+                                }
+                            }))
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .font_family(font_name)
+                                    .text_size(px(self.settings.display.font_size))
+                                    // Top spacer for virtual scrolling
+                                    .when(render_start > 0, |parent| {
+                                        parent.child(
+                                            div().h(top_spacer_height)
+                                        )
+                                    })
+                                    // Render only visible rows using cached data
+                                    .children((render_start..render_end).map(|row| {
+                        // Get cached row data (always available after update_render_cache)
+                        let row_data = self.tab().render_cache.get_row(row).cloned();
+                        let edit_pane = self.tab().edit_pane;
+                        let bytes_per_row = self.bytes_per_row();
+                        let row_start = row * bytes_per_row;
+                        let document_len = self.tab().document.len();
+
+                        // Use cached data if available, otherwise compute inline
+                        let (address, is_cursor_row) = match &row_data {
+                            Some(data) => (data.address.clone(), data.is_cursor_row),
+                            None => {
+                                let addr = ui::format_address(row_start);
+                                let cursor_row = self.tab().cursor_position / bytes_per_row;
+                                (addr, row == cursor_row)
+                            }
+                        };
+
+                        // Calculate end for this row
+                        let row_end = (row_start + bytes_per_row).min(document_len);
+
+                        // Decode bytes for ASCII column display based on current encoding
+                        let row_bytes: Vec<u8> = (row_start..row_end)
+                            .filter_map(|i| self.tab().document.get_byte(i))
+                            .collect();
+                        let decoded_chars = decode_for_display(&row_bytes, self.text_encoding);
+
+                        // Check if this row has any bookmarks
+                        let has_bookmark = self.tab().bookmarks.range(row_start..row_end).next().is_some();
+                        // Check if any bookmark in this row has a comment
+                        let has_bookmark_comment = self.tab().bookmarks.range(row_start..row_end)
+                            .any(|(_, comment)| !comment.is_empty());
+
+                        div()
+                            .id(("hex-row", row))  // Stable ID for efficient diffing
+                            .flex()
+                            .flex_shrink_0()
+                            .whitespace_nowrap()
+                            .gap_4()
+                            .mb_1()
+                            .child(
+                                // Address column - highlight cursor row, show bookmark indicator
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .w(px(address_width))
+                                    .flex_shrink_0()
+                                    .when(has_bookmark, |d| {
+                                        d.child(
+                                            div()
+                                                .w(px(8.0))
+                                                .h(px(8.0))
+                                                .mr(px(4.0))
+                                                .bg(if has_bookmark_comment { rgb(0x00ff88) } else { rgb(0x00bfff) })
+                                                .rounded(px(4.0))
+                                        )
+                                    })
+                                    .when(!has_bookmark, |d| {
+                                        d.child(div().w(px(12.0))) // Spacer to align addresses
+                                    })
+                                    .child(
+                                        div()
+                                            .text_color(if is_cursor_row { rgb(0x4a9eff) } else { rgb(0x808080) })
+                                            .child(address)
+                                    )
+                            )
+                            .child(
+                                // Hex column - always render bytes_per_row slots for consistent width
+                                div()
+                                    .flex()
+                                    .gap_1()
+                                    .children((0..bytes_per_row).map(|i| {
+                                        let byte_idx = row_start + i;
+                                        let has_data = byte_idx < document_len;
+
+                                        // Check if this byte is bookmarked
+                                        let is_bookmarked = has_data && has_bookmark && self.tab().bookmarks.contains_key(&byte_idx);
+                                        let bookmark_has_comment = is_bookmarked && self.tab().bookmarks.get(&byte_idx).is_some_and(|c| !c.is_empty());
+
+                                        // Get byte data from cache or compute
+                                        let (hex_str, is_cursor, is_selected, is_search_match, is_current_search) =
+                                            if has_data {
+                                                match &row_data {
+                                                    Some(data) if i < data.bytes.len() => {
+                                                        let b = &data.bytes[i];
+                                                        (format!("{:02X}", b.value), b.is_cursor, b.is_selected, b.is_search_match, b.is_current_search)
+                                                    }
+                                                    _ => {
+                                                        // Fallback: compute inline (shouldn't happen if cache is properly updated)
+                                                        let byte = self.tab().document.get_byte(byte_idx).unwrap_or(0);
+                                                        (format!("{:02X}", byte), false, false, false, false)
+                                                    }
+                                                }
+                                            } else {
+                                                // Empty slot - use spaces to maintain width
+                                                ("  ".to_string(), false, false, false, false)
+                                            };
+
+                                        div()
+                                            .id(("hex-byte", row_start * 100 + i))  // Unique ID even for empty slots
+                                            .when(has_data, |div| {
+                                                div.on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event: &gpui::MouseDownEvent, _window, cx| {
+                                                    this.tab_mut().cursor_position = byte_idx;
+                                                    this.tab_mut().selection_start = Some(byte_idx);
+                                                    this.is_dragging = true;
+                                                    this.drag_pane = Some(EditPane::Hex);
+                                                    this.tab_mut().edit_pane = EditPane::Hex;
+                                                    this.tab_mut().hex_nibble = HexNibble::High;
+                                                    this.ensure_cursor_visible_by_row();
+                                                    cx.notify();
+                                                }))
+                                            })
+                                            .when(is_cursor && edit_pane == EditPane::Hex, |div| {
+                                                div.bg(rgb(0x4a9eff))
+                                                    .text_color(rgb(0x000000))
+                                            })
+                                            .when(is_cursor && edit_pane == EditPane::Ascii, |div| {
+                                                div.bg(rgb(0x333333))
+                                                    .text_color(rgb(0x00ff00))
+                                            })
+                                            .when(!is_cursor && is_current_search, |div| {
+                                                div.bg(rgb(0xff8c00))
+                                                    .text_color(rgb(0x000000))
+                                            })
+                                            .when(!is_cursor && !is_current_search && is_search_match, |div| {
+                                                div.bg(rgb(0xffff00))
+                                                    .text_color(rgb(0x000000))
+                                            })
+                                            .when(!is_cursor && !is_current_search && !is_search_match && is_selected, |div| {
+                                                div.bg(rgb(0x505050))
+                                                    .text_color(rgb(0xffffff))
+                                            })
+                                            .when(!is_cursor && !is_current_search && !is_search_match && !is_selected, |div| {
+                                                div.text_color(rgb(0x00ff00))
+                                            })
+                                            // Bookmark underline indicator
+                                            .when(is_bookmarked, |div| {
+                                                div.border_b_2()
+                                                    .border_color(if bookmark_has_comment { rgb(0x00ff88) } else { rgb(0x00bfff) })
+                                            })
+                                            .child(hex_str)
+                                    }))
+                            )
+                            .child(
+                                // ASCII column - each byte separately (using cached data + encoding)
+                                div()
+                                    .flex()
+                                    .w(px(self.cached_char_width * bytes_per_row as f32))
+                                    .children((row_start..row_end).enumerate().map(|(i, byte_idx)| {
+                                        // Get display character from decoded data
+                                        let display_char = decoded_chars.get(i).cloned().unwrap_or(DisplayChar::Invalid);
+                                        let ascii_char = display_char.to_char();
+                                        let is_continuation = display_char.is_continuation();
+
+                                        // Check if this byte is bookmarked
+                                        let is_bookmarked = has_bookmark && self.tab().bookmarks.contains_key(&byte_idx);
+                                        let bookmark_has_comment = is_bookmarked && self.tab().bookmarks.get(&byte_idx).is_some_and(|c| !c.is_empty());
+
+                                        // Get cursor/selection state from cache
+                                        let (is_cursor, is_selected, is_search_match, is_current_search) =
+                                            match &row_data {
+                                                Some(data) if i < data.bytes.len() => {
+                                                    let b = &data.bytes[i];
+                                                    (b.is_cursor, b.is_selected, b.is_search_match, b.is_current_search)
+                                                }
+                                                _ => (false, false, false, false)
+                                            };
+
+                                        div()
+                                            .id(("ascii-byte", byte_idx))  // Stable ID for efficient diffing
+                                            .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event: &gpui::MouseDownEvent, _window, cx| {
+                                                this.tab_mut().cursor_position = byte_idx;
+                                                this.tab_mut().selection_start = Some(byte_idx);
+                                                this.is_dragging = true;
+                                                this.drag_pane = Some(EditPane::Ascii);
+                                                this.tab_mut().edit_pane = EditPane::Ascii;
+                                                this.tab_mut().hex_nibble = HexNibble::High;
+                                                this.ensure_cursor_visible_by_row();
+                                                cx.notify();
+                                            }))
+                                            .when(is_cursor && edit_pane == EditPane::Ascii, |div| {
+                                                div.bg(rgb(0xff8c00))
+                                                    .text_color(rgb(0x000000))
+                                            })
+                                            .when(is_cursor && edit_pane == EditPane::Hex, |div| {
+                                                div.bg(rgb(0x333333))
+                                                    .text_color(rgb(0xffffff))
+                                            })
+                                            .when(!is_cursor && is_current_search, |div| {
+                                                div.bg(rgb(0xff8c00))
+                                                    .text_color(rgb(0x000000))
+                                            })
+                                            .when(!is_cursor && !is_current_search && is_search_match, |div| {
+                                                div.bg(rgb(0xffff00))
+                                                    .text_color(rgb(0x000000))
+                                            })
+                                            .when(!is_cursor && !is_current_search && !is_search_match && is_selected, |div| {
+                                                div.bg(rgb(0x505050))
+                                                    .text_color(rgb(0xffffff))
+                                            })
+                                            // Continuation bytes shown in dim color
+                                            .when(!is_cursor && !is_current_search && !is_search_match && !is_selected && is_continuation, |div| {
+                                                div.text_color(rgb(0x606060))
+                                            })
+                                            // Normal characters in white
+                                            .when(!is_cursor && !is_current_search && !is_search_match && !is_selected && !is_continuation, |div| {
+                                                div.text_color(rgb(0xffffff))
+                                            })
+                                            // Bookmark underline indicator
+                                            .when(is_bookmarked, |div| {
+                                                div.border_b_2()
+                                                    .border_color(if bookmark_has_comment { rgb(0x00ff88) } else { rgb(0x00bfff) })
+                                            })
+                                            .child(ascii_char.to_string())
+                                    }))
+                            )
+                    }))
+                                    // Bottom spacer for virtual scrolling
+                                    .when(render_end < row_count, |parent| {
+                                        parent.child(
+                                            div().h(bottom_spacer_height)
+                                        )
+                                    })
+                            )
+                    )
+                    .child(
+                        // Scrollbar with visible background and search markers
+                        div()
+                            .absolute()
+                            .top_0()
+                            .right_0()
+                            .bottom_0()
+                            .w(px(12.0))
+                            .bg(rgb(0x2a2a2a))
+                            .child(
+                                Scrollbar::vertical(&self.tab().scrollbar_state, &self.tab().scroll_handle)
+                                    .scrollbar_show(ScrollbarShow::Always)
+                            )
+                            // Add search result markers on scrollbar
+                            .children({
+                                let total_rows = ui::row_count(self.tab().document.len(), self.bytes_per_row());
+                                let viewport_height = viewport_bounds.size.height;
+
+                                if total_rows == 0 || viewport_height <= px(0.0) {
+                                    Vec::new()
+                                } else {
+                                    self.tab().search_results.iter().map(|&result_pos| {
+                                        let result_row = result_pos / self.bytes_per_row();
+                                        let position_ratio = result_row as f32 / total_rows as f32;
+
+                                        // Calculate position in pixels relative to viewport height
+                                        // Use viewport height as approximation for scrollbar height
+                                        let marker_position = viewport_height * position_ratio;
+
+                                        // Check if this is the current search result
+                                        let is_current = self.tab().current_search_index
+                                            .map(|idx| self.tab().search_results[idx] == result_pos)
+                                            .unwrap_or(false);
+
+                                        div()
+                                            .absolute()
+                                            .left(px(0.0))
+                                            .w(px(12.0))
+                                            .h(px(3.0))
+                                            .top(marker_position)
+                                            .bg(if is_current {
+                                                rgb(0xff8c00) // Orange for current result
+                                            } else {
+                                                rgb(0xffff00) // Yellow for other results
+                                            })
+                                            .opacity(0.8)
+                                    }).collect::<Vec<_>>()
+                                }
+                            })
+                            // Add bookmark markers on scrollbar
+                            .children({
+                                let total_rows = ui::row_count(self.tab().document.len(), self.bytes_per_row());
+                                let viewport_height = viewport_bounds.size.height;
+
+                                if total_rows == 0 || viewport_height <= px(0.0) {
+                                    Vec::new()
+                                } else {
+                                    self.tab().bookmarks.iter().map(|(&bookmark_pos, comment)| {
+                                        let bookmark_row = bookmark_pos / self.bytes_per_row();
+                                        let position_ratio = bookmark_row as f32 / total_rows as f32;
+                                        let marker_position = viewport_height * position_ratio;
+                                        let marker_color = if comment.is_empty() { rgb(0x00bfff) } else { rgb(0x00ff88) };
+
+                                        div()
+                                            .absolute()
+                                            .left(px(0.0))
+                                            .w(px(6.0))
+                                            .h(px(6.0))
+                                            .top(marker_position)
+                                            .bg(marker_color)
+                                            .rounded(px(3.0))
+                                            .opacity(0.9)
+                                    }).collect::<Vec<_>>()
+                                }
+                            })
+                    )
+            ) // End of main hex/ASCII content area
+            // Bitmap panel (when visible)
+            .when(bitmap_visible, |container| {
+                let doc_len = self.tab().document.len();
+                let bitmap_height = (doc_len + bitmap_width_pixels - 1) / bitmap_width_pixels;
+
+                // Calculate pixel size based on panel width
+                // Account for scrollbar (12px) and gaps (8px padding + 4px gap)
+                let scrollbar_width = 12.0;
+                let bitmap_area_width = bitmap_panel_width - 16.0 - scrollbar_width - 4.0; // p_2 padding + gap
+                // Use floor to ensure consistent integer pixel size across all calculations
+                let pixel_size = (bitmap_area_width / bitmap_width_pixels as f32).max(1.0).floor();
+
+                // Calculate canvas height for bitmap display area
+                // Use viewport_height from scroll_handle bounds (same as hex view container height)
+                let viewport_bounds = self.tab().scroll_handle.bounds();
+                let bitmap_panel_height = f32::from(viewport_bounds.size.height);
+
+                // Subtract bitmap panel's internal elements from available height
+                let panel_overhead = self.cached_line_height_sm  // header
+                    + self.cached_line_height_xs * 2.0           // controls hint + position info
+                    + 8.0 * 2.0                                  // p_2 padding (top + bottom)
+                    + 8.0 * 3.0;                                 // gap_2 (3 gaps between 4 children)
+                let canvas_height = (bitmap_panel_height - panel_overhead).max(10.0 * pixel_size);
+                let display_height = ((canvas_height / pixel_size) as usize).min(bitmap_height);
+
+                // Calculate scroll position from scroll handle
+                let bitmap_scroll_offset = self.bitmap_scroll_handle.offset();
+                let bitmap_scroll_y: f32 = (-f32::from(bitmap_scroll_offset.y)).max(0.0);
+                let bitmap_scroll_start = (bitmap_scroll_y / pixel_size) as usize;
+                let bitmap_scroll_start = bitmap_scroll_start.min(bitmap_height.saturating_sub(display_height));
+
+                container.child(
+                    div()
+                        .w(px(bitmap_panel_width))
+                        .h(px(bitmap_panel_height))
+                        .flex()
+                        .flex_col()
+                        .bg(rgb(0x252525))
+                        .border_l_1()
+                        .border_color(rgb(0x404040))
+                        .p_2()
+                        .gap_2()
+                        .overflow_hidden()
+                        .child(
+                            // Header
+                            div()
+                                .flex()
+                                .justify_between()
+                                .items_center()
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .text_color(rgb(0x4a9eff))
+                                        .child(format!("Bitmap ({})", bitmap_color_mode.label()))
+                                )
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .text_color(rgb(0x808080))
+                                        .child(format!("{}x{}", bitmap_width_pixels, bitmap_height))
+                                )
+                        )
+                        .child(
+                            // Controls hint
+                            div()
+                                .text_xs()
+                                .text_color(rgb(0x606060))
+                                .child("C: color | +/-: width | Ctrl+M: close")
+                        )
+                        .child(
+                            // Bitmap canvas with scrollbar (horizontal layout)
+                            div()
+                                .flex()
+                                .flex_1()
+                                .gap_1()
+                                .h(px(canvas_height))
+                                .child(
+                                    // Scrollable bitmap canvas
+                                    div()
+                                        .id("bitmap-scroll-container")
+                                        .relative()
+                                        .flex_1()
+                                        .h_full()
+                                        .overflow_y_scroll()
+                                        .track_scroll(&self.bitmap_scroll_handle)
+                                        .child({
+                                            // Use cached bitmap image (updated in update_bitmap_cache)
+                                            let bitmap_image = self.cached_bitmap_image.clone()
+                                                .expect("Bitmap cache should be populated");
+
+                                            // Virtual height container for scrolling
+                                            // Capture values for click handler
+                                            let click_bitmap_width = bitmap_width_pixels;
+                                            let click_pixel_size = pixel_size;
+                                            let click_doc_len = doc_len;
+
+                                            div()
+                                                .id("bitmap-click-area")
+                                                .relative()
+                                                .w_full()
+                                                .h(px(bitmap_height as f32 * pixel_size))
+                                                .cursor_pointer()
+                                                .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, event: &gpui::MouseDownEvent, _window, cx| {
+                                                    // Calculate byte offset from click position
+                                                    // Get bitmap scroll container bounds to calculate relative position
+                                                    let container_bounds = this.bitmap_scroll_handle.bounds();
+                                                    let container_origin_x: f32 = container_bounds.origin.x.into();
+                                                    let container_origin_y: f32 = container_bounds.origin.y.into();
+
+                                                    // Calculate position relative to scroll container
+                                                    let click_x: f32 = f32::from(event.position.x) - container_origin_x;
+                                                    let click_y: f32 = f32::from(event.position.y) - container_origin_y;
+
+                                                    // Account for bitmap scroll offset
+                                                    let scroll_offset_y: f32 = (-f32::from(this.bitmap_scroll_handle.offset().y)).max(0.0);
+                                                    let adjusted_y = click_y + scroll_offset_y;
+
+                                                    let row = (adjusted_y / click_pixel_size) as usize;
+                                                    let col = ((click_x / click_pixel_size).max(0.0) as usize).min(click_bitmap_width.saturating_sub(1));
+                                                    let byte_offset = row * click_bitmap_width + col;
+                                                    let byte_offset = byte_offset.min(click_doc_len.saturating_sub(1));
+
+                                                    // Move cursor to clicked position and clear selection
+                                                    this.tab_mut().cursor_position = byte_offset;
+                                                    this.tab_mut().hex_nibble = ui::HexNibble::High;
+                                                    this.tab_mut().selection_start = None;
+
+                                                    // Scroll hex view to show cursor
+                                                    let bytes_per_row = this.bytes_per_row();
+                                                    let cursor_row = byte_offset / bytes_per_row;
+                                                    let row_height = this.row_height();
+                                                    let visible_rows = this.content_view_rows;
+                                                    let doc_len = this.tab().document.len();
+                                                    let total_rows = (doc_len + bytes_per_row - 1) / bytes_per_row;
+
+                                                    // Center the cursor row in view
+                                                    let target_row = cursor_row.saturating_sub(visible_rows / 2);
+                                                    let new_y_offset = ui::calculate_scroll_offset(
+                                                        target_row,
+                                                        visible_rows,
+                                                        total_rows,
+                                                        row_height,
+                                                    );
+                                                    let current_offset = this.tab().scroll_handle.offset();
+                                                    let new_offset = gpui::Point::new(current_offset.x, new_y_offset);
+                                                    this.tab_mut().scroll_handle.set_offset(new_offset);
+                                                    this.tab_mut().scroll_offset = new_y_offset;
+
+                                                    cx.notify();
+                                                }))
+                                                .child(
+                                                    // Bitmap image (positioned at scroll offset)
+                                                    div()
+                                                        .absolute()
+                                                        .top(px(bitmap_scroll_start as f32 * pixel_size))
+                                                        .left_0()
+                                                        .child(img(bitmap_image))
+                                                )
+                                                // Viewport indicator overlay (thin rectangle)
+                                                .child({
+                                            // Calculate visible range position in bitmap coordinates
+                                            let visible_start_row = hex_visible_start / bitmap_width_pixels;
+                                            let visible_end_row = hex_visible_end.saturating_sub(1) / bitmap_width_pixels;
+
+                                            let top_px = visible_start_row as f32 * pixel_size;
+                                            let height_rows = visible_end_row.saturating_sub(visible_start_row) + 1;
+                                            let height_px = height_rows as f32 * pixel_size;
+                                            let width_px = bitmap_width_pixels as f32 * pixel_size;
+
+                                            let current_render_start = render_start;
+
+                                            div()
+                                                .id("bitmap-viewport-indicator")
+                                                .absolute()
+                                                .top(px(top_px))
+                                                .left_0()
+                                                .w(px(width_px))
+                                                .h(px(height_px))
+                                                .border_1()
+                                                .border_color(rgb(bitmap_color_mode.indicator_color()))
+                                                .cursor_grab()
+                                                .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, event: &gpui::MouseDownEvent, _window, cx| {
+                                                    this.bitmap_drag_start_y = Some(event.position.y.into());
+                                                    this.bitmap_drag_start_row = Some(current_render_start);
+                                                    this.is_dragging = true;
+                                                    this.drag_pane = Some(EditPane::Bitmap);
+                                                    cx.notify();
+                                                }))
+                                            })
+                                        })
+                                )
+                                .child(
+                                    // Scrollbar for bitmap
+                                    div()
+                                        .w(px(12.0))
+                                        .h_full()
+                                        .bg(rgb(0x2a2a2a))
+                                        .child(
+                                            Scrollbar::vertical(&self.bitmap_scrollbar_state, &self.bitmap_scroll_handle)
+                                                .scrollbar_show(ScrollbarShow::Always)
+                                        )
+                                )
+                        )
+                        .child(
+                            // Position info
+                            div()
+                                .text_xs()
+                                .text_color(rgb(0x808080))
+                                .child(format!("Cursor: row {}, col {} (0x{:08X})",
+                                    self.tab().cursor_position / bitmap_width_pixels,
+                                    self.tab().cursor_position % bitmap_width_pixels,
+                                    self.tab().cursor_position
+                                ))
+                        )
+                )
+            })
+    }
+
+    /// Compare mode: dual pane view with virtual scrolling
+    pub(crate) fn render_compare_mode(&self, params: &RenderParams) -> impl IntoElement {
+        let compare_tab_idx = self.compare_tab_index.unwrap_or(0);
+        let active_doc = &self.tabs[self.active_tab].document;
+        let compare_doc = &self.tabs[compare_tab_idx].document;
+        let active_name = self.tabs[self.active_tab].display_name();
+        let compare_name = self.tabs[compare_tab_idx].display_name();
+        let max_len = active_doc.len().max(compare_doc.len());
+        let compare_row_count = ui::row_count(max_len, self.bytes_per_row());
+
+        // Calculate visible range specifically for compare mode using compare_row_count
+        let compare_visible_range = ui::calculate_visible_range(
+            self.tab().scroll_offset,
+            params.content_height,
+            compare_row_count,
+            self.row_height(),
+        );
+        let compare_render_start = compare_visible_range.render_start;
+        let compare_render_end = compare_visible_range.render_end;
+
+        let (compare_top_spacer, compare_bottom_spacer) = ui::calculate_spacer_heights(
+            compare_render_start,
+            compare_render_end,
+            compare_row_count,
+            self.row_height(),
+        );
+
+        let font_size = self.settings.display.font_size;
+        let font_name = &params.font_name;
+        let address_width = params.address_width;
+
+        div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .pt_4()
+            .overflow_hidden()
+            // Header row with pane labels
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .pb_2()
+                    .child(
+                        div()
+                            .flex_1()
+                            .text_sm()
+                            .text_color(rgb(0x4a9eff))
+                            .child(format!("Left: {}", active_name))
+                    )
+                    .child(
+                        div()
+                            .w(px(2.0))
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .text_sm()
+                            .text_color(rgb(0xff8c00))
+                            .child(format!("Right: {}", compare_name))
+                    )
+            )
+            // Synchronized scrolling container with virtual scrolling
+            .child({
+                let cursor_pos = self.tab().cursor_position;
+                div()
+                    .id("compare-scroll")
+                    .flex_1()
+                    .overflow_y_scroll()
+                    .track_scroll(&self.tab().scroll_handle)
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            // Top spacer for virtual scrolling
+                            .when(compare_render_start > 0, |d| d.child(div().h(compare_top_spacer)))
+                            // Row container
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .children((compare_render_start..compare_render_end).map(|row| {
+                                        let start = row * self.bytes_per_row();
+                                        let address = ui::format_address(start);
+                                        let cursor_row = cursor_pos / self.bytes_per_row();
+                                        let is_cursor_row = row == cursor_row;
+
+                                        div()
+                                            .flex()
+                                            .flex_shrink_0()
+                                            .whitespace_nowrap()
+                                            .gap_2()
+                                            .mb_1()
+                                            // Address column
+                                            .child(
+                                                div()
+                                                    .w(px(address_width))
+                                                    .flex_shrink_0()
+                                                    .text_color(if is_cursor_row { rgb(0x4a9eff) } else { rgb(0x808080) })
+                                                    .font_family(font_name)
+                                                    .text_size(px(font_size))
+                                                    .child(address.clone())
+                                            )
+                                            // Left pane hex bytes
+                                            .child(
+                                                div()
+                                                    .flex()
+                                                    .gap_1()
+                                                    .flex_1()
+                                                    .font_family(font_name)
+                                                    .text_size(px(font_size))
+                                                    .children((start..(start + self.bytes_per_row()).min(active_doc.len())).map(|byte_idx| {
+                                                        let byte = active_doc.get_byte(byte_idx).unwrap_or(0);
+                                                        let compare_byte = compare_doc.get_byte(byte_idx);
+                                                        let is_diff = compare_byte.map(|b| b != byte).unwrap_or(true);
+                                                        let is_cursor = byte_idx == cursor_pos;
+                                                        div()
+                                                            .when(is_cursor, |d| d.bg(rgb(0x4a9eff)).text_color(rgb(0x000000)))
+                                                            .when(!is_cursor, |d| d.text_color(if is_diff { rgb(0xff6666) } else { rgb(0x00ff00) }))
+                                                            .child(format!("{:02X}", byte))
+                                                    }).collect::<Vec<_>>())
+                                            )
+                                            // Separator
+                                            .child(
+                                                div()
+                                                    .w(px(2.0))
+                                                    .bg(rgb(0x4a9eff))
+                                            )
+                                            // Right pane hex bytes
+                                            .child(
+                                                div()
+                                                    .flex()
+                                                    .gap_1()
+                                                    .flex_1()
+                                                    .font_family(font_name)
+                                                    .text_size(px(font_size))
+                                                    .children((start..(start + self.bytes_per_row()).min(compare_doc.len())).map(|byte_idx| {
+                                                        let byte = compare_doc.get_byte(byte_idx).unwrap_or(0);
+                                                        let active_byte = active_doc.get_byte(byte_idx);
+                                                        let is_diff = active_byte.map(|b| b != byte).unwrap_or(true);
+                                                        let is_cursor = byte_idx == cursor_pos;
+                                                        div()
+                                                            .when(is_cursor, |d| d.bg(rgb(0xff8c00)).text_color(rgb(0x000000)))
+                                                            .when(!is_cursor, |d| d.text_color(if is_diff { rgb(0xff6666) } else { rgb(0x00ff00) }))
+                                                            .child(format!("{:02X}", byte))
+                                                    }).collect::<Vec<_>>())
+                                            )
+                                    }).collect::<Vec<_>>())
+                            )
+                            // Bottom spacer for virtual scrolling
+                            .when(compare_render_end < compare_row_count, |d| d.child(div().h(compare_bottom_spacer)))
+                    )
+            })
+    }
+
+    /// Status bar (cursor position, byte value, selection, search status, etc.)
+    pub(crate) fn render_status_bar(&self, cx: &mut gpui::Context<Self>, font_name: &String) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_col()
+            .py_1()
+            .px_4()
+            .bg(rgb(0x252525))
+            .border_t_1()
+            .border_color(rgb(0x404040))
+            .text_sm()
+            .font_family(font_name)
+            // First line: cursor position, byte value, selection
+            .child(
+                div()
+                    .flex()
+                    .gap_4()
+                    .py_1()
+                    .child(
+                        // Cursor position
+                        div()
+                            .flex()
+                            .gap_2()
+                            .text_color(rgb(0x808080))
+                            .child("Offset:")
+                            .child(
+                                div()
+                                    .text_color(rgb(0x00ff00))
+                                    .child(ui::format_address(self.tab().cursor_position))
+                            )
+                    )
+                    .child(
+                        // Current byte value (if valid position)
+                        div()
+                            .flex()
+                            .gap_2()
+                            .text_color(rgb(0x808080))
+                            .when_some(self.tab().document.get_byte(self.tab().cursor_position), |el, byte| {
+                                el.child("Value:")
+                                    .child(
+                                        div()
+                                            .text_color(rgb(0x4a9eff))
+                                            .child(ui::format_byte_hex(byte))
+                                    )
+                                    .child(
+                                        div()
+                                            .text_color(rgb(0xffffff))
+                                            .child(format!("({})", ui::format_byte_dec(byte)))
+                                    )
+                                    .child(
+                                        div()
+                                            .text_color(rgb(0xff8c00))
+                                            .child(ui::format_byte_bin(byte))
+                                    )
+                            })
+                    )
+                    .when(self.tab().selection_start.is_some(), |el| {
+                        // Selection info
+                        let (start, end) = self.selection_range().unwrap();
+                        let selection_size = end - start + 1;
+                        el.child(
+                            div()
+                                .flex()
+                                .gap_2()
+                                .text_color(rgb(0x808080))
+                                .child("Selection:")
+                                .child(
+                                    div()
+                                        .text_color(rgb(0xffff00))
+                                        .child(format!("{} bytes", selection_size))
+                                )
+                        )
+                    })
+                    .child(
+                        // Text encoding dropdown selector
+                        div()
+                            .relative()
+                            .flex()
+                            .gap_1()
+                            .items_center()
+                            .child(
+                                div()
+                                    .text_color(rgb(0x808080))
+                                    .child("Enc:")
+                            )
+                            .child(
+                                // Dropdown button
+                                div()
+                                    .id("encoding-dropdown-button")
+                                    .px_2()
+                                    .rounded_sm()
+                                    .cursor_pointer()
+                                    .bg(rgb(0x333333))
+                                    .text_color(rgb(0xffffff))
+                                    .hover(|h| h.bg(rgb(0x444444)))
+                                    .on_mouse_down(gpui::MouseButton::Left, cx.listener(|this, _event: &gpui::MouseDownEvent, _window, cx| {
+                                        this.encoding_dropdown_open = !this.encoding_dropdown_open;
+                                        cx.notify();
+                                    }))
+                                    .child(format!("{} \u{25BC}", self.text_encoding.label()))
+                            )
+                            // Dropdown menu (shown when open)
+                            .when(self.encoding_dropdown_open, |el| {
+                                el.child(
+                                    div()
+                                        .absolute()
+                                        .bottom(px(24.0))
+                                        .left_0()
+                                        .bg(rgb(0x2a2a2a))
+                                        .border_1()
+                                        .border_color(rgb(0x555555))
+                                        .rounded_md()
+                                        .shadow_lg()
+                                        .py_1()
+                                        .min_w(px(100.0))
+                                        .children(TextEncoding::all().iter().map(|enc| {
+                                            let is_selected = self.text_encoding == *enc;
+                                            let enc_copy = *enc;
+                                            div()
+                                                .id(SharedString::from(format!("enc-{}", enc.label())))
+                                                .px_3()
+                                                .py_1()
+                                                .cursor_pointer()
+                                                .bg(if is_selected { rgb(0x4a9eff) } else { rgb(0x2a2a2a) })
+                                                .text_color(if is_selected { rgb(0x000000) } else { rgb(0xcccccc) })
+                                                .hover(|h| h.bg(if is_selected { rgb(0x4a9eff) } else { rgb(0x3a3a3a) }))
+                                                .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event: &gpui::MouseDownEvent, _window, cx| {
+                                                    this.set_encoding(enc_copy);
+                                                    this.encoding_dropdown_open = false;
+                                                    cx.notify();
+                                                }))
+                                                .child(if is_selected {
+                                                    format!("\u{2713} {}", enc.label())
+                                                } else {
+                                                    format!("  {}", enc.label())
+                                                })
+                                        }))
+                                )
+                            })
+                    )
+                    .child(
+                        // File size (right aligned)
+                        div()
+                            .flex_1()
+                            .text_right()
+                            .text_color(rgb(0x808080))
+                            .child(format!("Size: {}", ui::format_file_size(self.tab().document.len())))
+                    )
+            )
+            // Second line: search status, messages
+            .child(
+                div()
+                    .flex()
+                    .gap_4()
+                    .py_1()
+                    .border_t_1()
+                    .border_color(rgb(0x333333))
+                    // Search status with progress
+                    .when(self.tab().is_searching, |el| {
+                        let current = self.tab().search_progress.load(Ordering::Relaxed);
+                        let total = self.tab().search_total;
+                        let percent = if total > 0 {
+                            (current as f64 / total as f64 * 100.0) as usize
+                        } else {
+                            0
+                        };
+                        el.child(
+                            div()
+                                .flex()
+                                .gap_2()
+                                .text_color(rgb(0xffff00))
+                                .child("Searching...")
+                                .child(
+                                    div()
+                                        .text_color(rgb(0x808080))
+                                        .child(format!("\"{}\"", self.tab().search_query))
+                                )
+                                .child(
+                                    div()
+                                        .text_color(rgb(0x4a9eff))
+                                        .child(format!("{}/{} ({}%)",
+                                            ui::format_file_size(current),
+                                            ui::format_file_size(total),
+                                            percent
+                                        ))
+                                )
+                        )
+                    })
+                    // Search results info (when not searching)
+                    .when(!self.tab().is_searching && self.tab().search_visible && !self.tab().search_query.is_empty(), |el| {
+                        let result_count = self.tab().search_results.len();
+                        let current_pos = self.tab().current_search_index.map(|i| i + 1).unwrap_or(0);
+                        let mode_str = match self.tab().search_mode {
+                            SearchMode::Ascii => "ASCII",
+                            SearchMode::Hex => "Hex",
+                        };
+                        el.child(
+                            div()
+                                .flex()
+                                .gap_2()
+                                .child(
+                                    div()
+                                        .text_color(rgb(0x808080))
+                                        .child(format!("Search ({}):", mode_str))
+                                )
+                                .child(
+                                    div()
+                                        .text_color(rgb(0x4a9eff))
+                                        .child(format!("\"{}\"", self.tab().search_query))
+                                )
+                                .child(
+                                    div()
+                                        .text_color(if result_count > 0 { rgb(0x00ff00) } else { rgb(0xff6666) })
+                                        .child(if result_count > 0 {
+                                            if self.tab().search_truncated {
+                                                format!("{}/{}+ matches (truncated)", current_pos, result_count)
+                                            } else {
+                                                format!("{}/{} matches", current_pos, result_count)
+                                            }
+                                        } else {
+                                            "No matches".to_string()
+                                        })
+                                )
+                        )
+                    })
+                    // Save/status messages
+                    .when_some(self.save_message.clone(), |el, msg| {
+                        el.child(
+                            div()
+                                .text_color(rgb(0x00ff00))
+                                .child(msg)
+                        )
+                    })
+                    // Default message when nothing else to show
+                    .when(!self.tab().is_searching && !self.tab().search_visible && self.save_message.is_none(), |el| {
+                        el.child(
+                            div()
+                                .text_color(rgb(0x606060))
+                                .child("Ready")
+                        )
+                    })
+            )
+    }
+
+    /// Data Inspector panel
+    pub(crate) fn render_data_inspector(&self, font_name: &String) -> impl IntoElement {
+        let endian_label = match self.inspector_endian {
+            crate::Endian::Little => "LE",
+            crate::Endian::Big => "BE",
+        };
+
+        // Get inspector values
+        let values = ui::DataInspectorValues::from_bytes(
+            |pos| self.tab().document.get_byte(pos),
+            self.tab().cursor_position,
+            self.tab().document.len(),
+            self.inspector_endian,
+        );
+
+        div()
+            .flex()
+            .flex_col()
+            .py_2()
+            .px_4()
+            .bg(rgb(0x1a1a1a))
+            .border_t_1()
+            .border_color(rgb(0x404040))
+            .text_sm()
+            .font_family(font_name)
+            // Header row
+            .child(
+                div()
+                    .flex()
+                    .justify_between()
+                    .pb_1()
+                    .mb_1()
+                    .border_b_1()
+                    .border_color(rgb(0x333333))
+                    .child(
+                        div()
+                            .flex()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .text_color(rgb(0x4a9eff))
+                                    .child("Data Inspector")
+                            )
+                            .child(
+                                div()
+                                    .text_color(rgb(0x808080))
+                                    .child(format!("@ 0x{:08X}", self.tab().cursor_position))
+                            )
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .text_color(rgb(0x808080))
+                                    .child("Endian:")
+                            )
+                            .child(
+                                div()
+                                    .text_color(rgb(0xff8c00))
+                                    .child(endian_label)
+                            )
+                            .child(
+                                div()
+                                    .text_color(rgb(0x606060))
+                                    .child("(Ctrl+E)")
+                            )
+                    )
+            )
+            // Values grid
+            .when_some(values, |el, vals| {
+                el.child(
+                    div()
+                        .flex()
+                        .gap_8()
+                        // Integer column
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_1()
+                                // 8-bit values
+                                .child(
+                                    div()
+                                        .flex()
+                                        .gap_2()
+                                        .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("Int8:"))
+                                        .child(div().w(px(100.0)).text_right().text_color(rgb(0x00ff00)).child(format!("{}", vals.int8)))
+                                )
+                                .child(
+                                    div()
+                                        .flex()
+                                        .gap_2()
+                                        .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("UInt8:"))
+                                        .child(div().w(px(100.0)).text_right().text_color(rgb(0x00ff00)).child(format!("{}", vals.uint8)))
+                                )
+                                // 16-bit values
+                                .when_some(vals.int16, |el, v| {
+                                    el.child(
+                                        div()
+                                            .flex()
+                                            .gap_2()
+                                            .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("Int16:"))
+                                            .child(div().w(px(100.0)).text_right().text_color(rgb(0x00ff00)).child(format!("{}", v)))
+                                    )
+                                })
+                                .when_some(vals.uint16, |el, v| {
+                                    el.child(
+                                        div()
+                                            .flex()
+                                            .gap_2()
+                                            .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("UInt16:"))
+                                            .child(div().w(px(100.0)).text_right().text_color(rgb(0x00ff00)).child(format!("{}", v)))
+                                    )
+                                })
+                                // 32-bit values
+                                .when_some(vals.int32, |el, v| {
+                                    el.child(
+                                        div()
+                                            .flex()
+                                            .gap_2()
+                                            .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("Int32:"))
+                                            .child(div().w(px(100.0)).text_right().text_color(rgb(0x00ff00)).child(format!("{}", v)))
+                                    )
+                                })
+                                .when_some(vals.uint32, |el, v| {
+                                    el.child(
+                                        div()
+                                            .flex()
+                                            .gap_2()
+                                            .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("UInt32:"))
+                                            .child(div().w(px(100.0)).text_right().text_color(rgb(0x00ff00)).child(format!("{}", v)))
+                                    )
+                                })
+                        )
+                        // 64-bit and float column
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_1()
+                                // 64-bit values
+                                .when_some(vals.int64, |el, v| {
+                                    el.child(
+                                        div()
+                                            .flex()
+                                            .gap_2()
+                                            .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("Int64:"))
+                                            .child(div().w(px(180.0)).text_right().text_color(rgb(0x00ff00)).child(format!("{}", v)))
+                                    )
+                                })
+                                .when_some(vals.uint64, |el, v| {
+                                    el.child(
+                                        div()
+                                            .flex()
+                                            .gap_2()
+                                            .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("UInt64:"))
+                                            .child(div().w(px(180.0)).text_right().text_color(rgb(0x00ff00)).child(format!("{}", v)))
+                                    )
+                                })
+                                // Float values
+                                .when_some(vals.float32, |el, v| {
+                                    let display = if v.is_nan() || v.is_infinite() {
+                                        format!("{}", v)
+                                    } else {
+                                        format!("{:.6}", v)
+                                    };
+                                    el.child(
+                                        div()
+                                            .flex()
+                                            .gap_2()
+                                            .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("Float32:"))
+                                            .child(div().w(px(180.0)).text_right().text_color(rgb(0xffff00)).child(display))
+                                    )
+                                })
+                                .when_some(vals.float64, |el, v| {
+                                    let display = if v.is_nan() || v.is_infinite() {
+                                        format!("{}", v)
+                                    } else {
+                                        format!("{:.10}", v)
+                                    };
+                                    el.child(
+                                        div()
+                                            .flex()
+                                            .gap_2()
+                                            .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("Float64:"))
+                                            .child(div().w(px(180.0)).text_right().text_color(rgb(0xffff00)).child(display))
+                                    )
+                                })
+                        )
+                        // Hex column
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .flex()
+                                        .gap_2()
+                                        .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("Hex8:"))
+                                        .child(div().text_color(rgb(0x4a9eff)).child(format!("0x{:02X}", vals.uint8)))
+                                )
+                                .when_some(vals.uint16, |el, v| {
+                                    el.child(
+                                        div()
+                                            .flex()
+                                            .gap_2()
+                                            .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("Hex16:"))
+                                            .child(div().text_color(rgb(0x4a9eff)).child(format!("0x{:04X}", v)))
+                                    )
+                                })
+                                .when_some(vals.uint32, |el, v| {
+                                    el.child(
+                                        div()
+                                            .flex()
+                                            .gap_2()
+                                            .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("Hex32:"))
+                                            .child(div().text_color(rgb(0x4a9eff)).child(format!("0x{:08X}", v)))
+                                    )
+                                })
+                                .when_some(vals.uint64, |el, v| {
+                                    el.child(
+                                        div()
+                                            .flex()
+                                            .gap_2()
+                                            .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("Hex64:"))
+                                            .child(div().text_color(rgb(0x4a9eff)).child(format!("0x{:016X}", v)))
+                                    )
+                                })
+                        )
+                )
+            })
+            // No data message
+            .when(self.tab().document.len() == 0, |el| {
+                el.child(
+                    div()
+                        .text_color(rgb(0x808080))
+                        .child("No data available")
+                )
+            })
+    }
+
+    /// Compare tab selection dialog (modal overlay)
+    pub(crate) fn render_compare_dialog(&self, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+        let tabs_info: Vec<(usize, String)> = self.tabs.iter().enumerate()
+            .filter(|(idx, _)| *idx != self.active_tab)
+            .map(|(idx, tab)| (idx, tab.display_name()))
+            .collect();
+
+        div()
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .bg(rgba(0x00000080))
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                div()
+                    .bg(rgb(0x2a2a2a))
+                    .border_1()
+                    .border_color(rgb(0x4a9eff))
+                    .rounded_md()
+                    .p_4()
+                    .min_w(px(300.0))
+                    .flex()
+                    .flex_col()
+                    .gap_3()
+                    .child(
+                        div()
+                            .text_lg()
+                            .text_color(rgb(0x4a9eff))
+                            .child("Select tab to compare")
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(rgb(0x808080))
+                            .child("Press 1-9 or click to select | Esc: cancel")
+                    )
+                    .children(
+                        tabs_info.into_iter().map(|(idx, name)| {
+                            let display_num = if idx < self.active_tab { idx + 1 } else { idx };
+                            div()
+                                .id(("compare-tab", idx))
+                                .flex()
+                                .gap_2()
+                                .px_3()
+                                .py_2()
+                                .rounded_md()
+                                .cursor_pointer()
+                                .bg(rgb(0x333333))
+                                .hover(|h| h.bg(rgb(0x4a9eff)))
+                                .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event, _window, cx| {
+                                    this.select_compare_tab(idx);
+                                    cx.notify();
+                                }))
+                                .child(
+                                    div()
+                                        .text_color(rgb(0xff8c00))
+                                        .w(px(20.0))
+                                        .child(format!("{}", display_num))
+                                )
+                                .child(
+                                    div()
+                                        .text_color(rgb(0xffffff))
+                                        .child(name)
+                                )
+                        }).collect::<Vec<_>>()
+                    )
+            )
+    }
+}
