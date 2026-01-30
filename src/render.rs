@@ -356,133 +356,6 @@ impl HexEditor {
                             .overflow_y_scroll()
                             .track_scroll(&self.tab().scroll_handle)
                             .pr(px(24.0))
-                            .on_mouse_move(cx.listener(|this, event: &gpui::MouseMoveEvent, _window, cx| {
-                                // Cancel drag if mouse button was released outside the window
-                                if this.is_dragging && !event.dragging() {
-                                    this.is_dragging = false;
-                                    this.drag_pane = None;
-                                    this.bitmap.drag_start_y = None;
-                                    this.bitmap.drag_start_row = None;
-                                    cx.notify();
-                                    return;
-                                }
-
-                                if !this.is_dragging || this.drag_pane.is_none() {
-                                    return;
-                                }
-
-                                // Handle bitmap viewport indicator drag separately
-                                if this.drag_pane == Some(EditPane::Bitmap) {
-                                    if let (Some(start_y), Some(start_row)) = (this.bitmap.drag_start_y, this.bitmap.drag_start_row) {
-                                        let mouse_y: f32 = event.position.y.into();
-                                        let delta_y = mouse_y - start_y;
-
-                                        // Convert pixel delta to bitmap rows
-                                        let bitmap_width = this.bitmap.width;
-                                        let bitmap_panel_width = this.bitmap.panel_width;
-                                        let pixel_size = ((bitmap_panel_width - 20.0) / bitmap_width as f32).max(1.0).min(4.0);
-                                        let delta_bitmap_rows = (delta_y / pixel_size) as isize;
-
-                                        // Convert bitmap rows to hex view rows
-                                        let bytes_per_row = this.bytes_per_row();
-                                        let delta_hex_rows = delta_bitmap_rows * bitmap_width as isize / bytes_per_row as isize;
-
-                                        // Calculate new scroll position
-                                        let new_row = if delta_hex_rows >= 0 {
-                                            start_row.saturating_add(delta_hex_rows as usize)
-                                        } else {
-                                            start_row.saturating_sub((-delta_hex_rows) as usize)
-                                        };
-
-                                        // Calculate scroll offset and apply
-                                        let doc_len = this.tab().document.len();
-                                        let total_rows = (doc_len + bytes_per_row - 1) / bytes_per_row;
-                                        let row_height = this.row_height();
-                                        let visible_rows = this.content_view_rows;
-
-                                        let new_y_offset = ui::calculate_scroll_offset(
-                                            new_row,
-                                            visible_rows,
-                                            total_rows,
-                                            row_height,
-                                        );
-                                        let current_offset = this.tab().scroll_handle.offset();
-                                        let new_offset = gpui::Point::new(current_offset.x, new_y_offset);
-                                        this.tab_mut().scroll_handle.set_offset(new_offset);
-                                        this.tab_mut().scroll_offset = new_y_offset;
-                                        cx.notify();
-                                    }
-                                    return;
-                                }
-
-                                // Get current values from this (not captured snapshots)
-                                let bytes_per_row = this.bytes_per_row();
-                                let doc_len = this.tab().document.len();
-                                let scroll_offset_f32: f32 = (-f32::from(this.tab().scroll_offset)).max(0.0);
-
-                                // Use cached values calculated from font metrics in render()
-                                let row_height = this.cached_row_height;
-                                let char_width = this.cached_char_width;
-                                // Hex byte: 2 chars + gap_1 (4px)
-                                let hex_byte_width = char_width * 2.0 + 4.0;
-
-                                // Calculate row from Y position
-                                // event.position is in window coordinates
-                                let mouse_y: f32 = event.position.y.into();
-
-                                // Content area offset: outer padding + header height + content top padding + first row offset
-                                let outer_padding = 16.0; // p_4
-                                let content_top_padding = 16.0; // pt_4
-                                let content_top = outer_padding + this.calculate_header_height() + content_top_padding + row_height;
-                                let relative_y = mouse_y - content_top + scroll_offset_f32;
-
-                                let row = if relative_y < 0.0 {
-                                    0
-                                } else {
-                                    (relative_y / row_height) as usize
-                                };
-
-                                let row_start = row * bytes_per_row;
-
-                                // Calculate byte in row from X position
-                                // Window coordinates: outer padding (16) + Address (80) + gap_4 (16) = 112px for hex start
-                                let mouse_x: f32 = event.position.x.into();
-                                let hex_start = 112.0; // 16 + 80 + 16
-                                let gap = 16.0; // gap_4
-                                let gap_1 = 4.0; // gap_1 between hex bytes
-                                let byte_in_row = match this.drag_pane {
-                                    Some(EditPane::Hex) => {
-                                        if mouse_x < hex_start {
-                                            0
-                                        } else {
-                                            ((mouse_x - hex_start) / hex_byte_width) as usize
-                                        }
-                                    }
-                                    Some(EditPane::Ascii) => {
-                                        // Hex column: each byte is 2 chars, with gap_1 between bytes (not after last)
-                                        let hex_column_width = bytes_per_row as f32 * char_width * 2.0
-                                            + (bytes_per_row - 1) as f32 * gap_1;
-                                        let ascii_start = hex_start + hex_column_width + gap;
-                                        if mouse_x < ascii_start {
-                                            0
-                                        } else {
-                                            // ASCII column: each character is char_width, no gaps
-                                            ((mouse_x - ascii_start) / char_width) as usize
-                                        }
-                                    }
-                                    Some(EditPane::Bitmap) => 0, // Bitmap drag handled separately above
-                                    None => 0,
-                                };
-
-                                let byte_in_row = byte_in_row.min(bytes_per_row - 1);
-                                let new_cursor = (row_start + byte_in_row).min(doc_len.saturating_sub(1));
-
-                                if this.tab().cursor_position != new_cursor {
-                                    this.tab_mut().cursor_position = new_cursor;
-                                    this.ensure_cursor_visible_by_row();
-                                    cx.notify();
-                                }
-                            }))
                             .child(
                                 div()
                                     .flex()
@@ -1746,12 +1619,15 @@ impl Render for HexEditor {
         let font_id = window.text_system().resolve_font(&font);
         let font_name = self.settings.display.font_name.clone();
 
+        // gpui's default line_height is phi (golden ratio) * font_size.
+        // All height estimates must use this to match the actual rendered layout.
+        const PHI: f32 = 1.618034;
+
         // Main content font (configurable size)
         let font_size = px(self.settings.display.font_size);
         let ascent = window.text_system().ascent(font_id, font_size);
-        let descent = window.text_system().descent(font_id, font_size);
-        // Row height = line height + mb_1 margin (4px)
-        self.cached_row_height = f32::from(ascent) + f32::from(descent).abs() + 4.0;
+        // Row height = phi-based line height + mb_1 margin (4px)
+        self.cached_row_height = (self.settings.display.font_size * PHI).round() + 4.0;
         // Monospace character width from em_advance (fallback to ascent * 0.6 if unavailable)
         self.cached_char_width = match window.text_system().em_advance(font_id, font_size) {
             Ok(advance) => f32::from(advance),
@@ -1761,23 +1637,14 @@ impl Render for HexEditor {
         // Address column width: 8 characters for "00000000" format
         let address_width = self.cached_char_width * 8.0;
 
-        // text_xl (20px) for header title
-        let xl_size = px(20.0);
-        let xl_ascent = window.text_system().ascent(font_id, xl_size);
-        let xl_descent = window.text_system().descent(font_id, xl_size);
-        self.cached_line_height_xl = f32::from(xl_ascent) + f32::from(xl_descent).abs();
+        // text_xl (rems(1.25) = 20px at default rem 16px)
+        self.cached_line_height_xl = (20.0 * PHI).round();
 
-        // text_sm (14px) for status bar and info lines
-        let sm_size = px(14.0);
-        let sm_ascent = window.text_system().ascent(font_id, sm_size);
-        let sm_descent = window.text_system().descent(font_id, sm_size);
-        self.cached_line_height_sm = f32::from(sm_ascent) + f32::from(sm_descent).abs();
+        // text_sm (rems(0.875) = 14px at default rem 16px)
+        self.cached_line_height_sm = (14.0 * PHI).round();
 
-        // text_xs (12px) for small hints and labels
-        let xs_size = px(12.0);
-        let xs_ascent = window.text_system().ascent(font_id, xs_size);
-        let xs_descent = window.text_system().descent(font_id, xs_size);
-        self.cached_line_height_xs = f32::from(xs_ascent) + f32::from(xs_descent).abs();
+        // text_xs (rems(0.75) = 12px at default rem 16px)
+        self.cached_line_height_xs = (12.0 * PHI).round();
 
         // Update search results if search completed
         if self.update_search_results() {
@@ -1791,13 +1658,11 @@ impl Render for HexEditor {
         self.tab_mut().scroll_offset = scroll_position.y;
 
         // Phase 2: Calculate visible range based on viewport
+        // scroll_handle.bounds() returns the hex-content div's layout bounds,
+        // which already represents the content area (excluding header and status bar)
         let viewport_bounds = self.tab().scroll_handle.bounds();
         let viewport_height = viewport_bounds.size.height;
-
-        // Calculate actual content area height by subtracting header and status bar
-        // Uses dynamically calculated heights based on font metrics
-        let non_content_height = self.calculate_non_content_height();
-        let content_height = px((f32::from(viewport_height) - non_content_height).max(20.0));
+        let content_height = viewport_height.max(px(20.0));
 
         let visible_range = ui::calculate_visible_range(
             self.tab().scroll_offset,
@@ -1915,6 +1780,76 @@ impl Render for HexEditor {
                         let new_offset = gpui::Point::new(current_offset.x, new_y_offset);
                         this.tab_mut().scroll_handle.set_offset(new_offset);
                         this.tab_mut().scroll_offset = new_y_offset;
+                        cx.notify();
+                    }
+                }
+
+                // Handle hex/ASCII drag selection at root level
+                // Root-level handler ensures events fire even when mouse moves outside hex-content div
+                if (this.drag_pane == Some(EditPane::Hex) || this.drag_pane == Some(EditPane::Ascii)) && this.is_dragging {
+                    let bytes_per_row = this.bytes_per_row();
+                    let doc_len = this.tab().document.len();
+                    if doc_len == 0 { return; }
+                    let scroll_offset_f32: f32 = (-f32::from(this.tab().scroll_offset)).max(0.0);
+
+                    let row_height = this.cached_row_height;
+                    let char_width = this.cached_char_width;
+                    // Hex byte: 2 chars + gap_1 (4px)
+                    let hex_byte_width = char_width * 2.0 + 4.0;
+
+                    // Calculate row from Y position
+                    // event.position is in window coordinates
+                    let mouse_y: f32 = event.position.y.into();
+
+                    // Content area offset: outer padding + header height + content top padding
+                    let outer_padding = 16.0; // p_4
+                    let content_top_padding = 16.0; // pt_4
+                    let content_top = outer_padding + this.calculate_header_height() + content_top_padding;
+                    let relative_y = mouse_y - content_top + scroll_offset_f32;
+
+                    let row = if relative_y < 0.0 {
+                        0
+                    } else {
+                        (relative_y / row_height) as usize
+                    };
+
+                    let row_start = row * bytes_per_row;
+
+                    // Calculate byte in row from X position
+                    // Window coordinates: outer padding (16) + Address (80) + gap_4 (16) = 112px for hex start
+                    let mouse_x: f32 = event.position.x.into();
+                    let hex_start = 112.0; // 16 + 80 + 16
+                    let gap = 16.0; // gap_4
+                    let gap_1 = 4.0; // gap_1 between hex bytes
+                    let byte_in_row = match this.drag_pane {
+                        Some(EditPane::Hex) => {
+                            if mouse_x < hex_start {
+                                0
+                            } else {
+                                ((mouse_x - hex_start) / hex_byte_width) as usize
+                            }
+                        }
+                        Some(EditPane::Ascii) => {
+                            // Hex column: each byte is 2 chars, with gap_1 between bytes (not after last)
+                            let hex_column_width = bytes_per_row as f32 * char_width * 2.0
+                                + (bytes_per_row - 1) as f32 * gap_1;
+                            let ascii_start = hex_start + hex_column_width + gap;
+                            if mouse_x < ascii_start {
+                                0
+                            } else {
+                                // ASCII column: each character is char_width, no gaps
+                                ((mouse_x - ascii_start) / char_width) as usize
+                            }
+                        }
+                        _ => 0,
+                    };
+
+                    let byte_in_row = byte_in_row.min(bytes_per_row - 1);
+                    let new_cursor = (row_start + byte_in_row).min(doc_len.saturating_sub(1));
+
+                    if this.tab().cursor_position != new_cursor {
+                        this.tab_mut().cursor_position = new_cursor;
+                        this.ensure_cursor_visible_by_row();
                         cx.notify();
                     }
                 }

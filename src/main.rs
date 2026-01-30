@@ -106,10 +106,10 @@ impl HexEditor {
             dragging_tab_index: None,
             tab_drop_target: None,
             compare: CompareState::new(),
-            cached_row_height: 24.0, // Default, will be updated in render()
-            cached_line_height_xl: 24.0, // Default, will be updated in render()
-            cached_line_height_sm: 17.0, // Default, will be updated in render()
-            cached_line_height_xs: 15.0, // Default, will be updated in render()
+            cached_row_height: 30.0, // Default (16 * phi + 4), will be updated in render()
+            cached_line_height_xl: 32.0, // Default (20 * phi), will be updated in render()
+            cached_line_height_sm: 23.0, // Default (14 * phi), will be updated in render()
+            cached_line_height_xs: 19.0, // Default (12 * phi), will be updated in render()
             text_encoding: TextEncoding::default(),
             encoding_dropdown_open: false,
             cached_char_width: 8.4, // Default (14 * 0.6), will be updated in render()
@@ -128,30 +128,29 @@ impl HexEditor {
         self.cached_row_height as f64
     }
 
-    /// Calculate header height based on cached font metrics
+    /// Calculate header height based on phi-based line heights matching gpui's actual rendering.
     /// Header content + Tab bar (conditional) + Search bar (conditional)
     fn calculate_header_height(&self) -> f32 {
         // Header div: text_xl + 3 * text_sm + pb_4(16) + border_b_1(1)
-        // Using minimal estimates for line heights
         let base_header = self.cached_line_height_xl + 3.0 * self.cached_line_height_sm + 17.0;
 
-        // Tab bar (conditional): ~30px total
+        // Tab bar: py_1(4+4) + text_sm + py_1(4+4) + border_b_1(1) = sm + 17
         let tab_bar = if self.tabs.len() > 1 {
-            self.cached_line_height_sm + 12.0
+            self.cached_line_height_sm + 17.0
         } else {
             0.0
         };
 
-        // Search bar (conditional): ~35px total
+        // Search bar: py_2(8+8) + text_sm + text_xs + border_b_1(1) = sm + xs + 17
         let search_bar = if self.tab().search_visible {
-            self.cached_line_height_sm + 20.0
+            self.cached_line_height_sm + self.cached_line_height_xs + 17.0
         } else {
             0.0
         };
 
-        // Bookmark comment bar (conditional): ~35px total
+        // Bookmark bar: py_2(8+8) + text_sm + text_xs + border_b_1(1) = sm + xs + 17
         let bookmark_bar = if self.tab().bookmark_comment_editing {
-            self.cached_line_height_sm + 20.0
+            self.cached_line_height_sm + self.cached_line_height_xs + 17.0
         } else {
             0.0
         };
@@ -159,10 +158,10 @@ impl HexEditor {
         base_header + tab_bar + search_bar + bookmark_bar
     }
 
-    /// Calculate status bar height based on cached font metrics
+    /// Calculate status bar height based on phi-based line heights.
     fn calculate_status_bar_height(&self) -> f32 {
-        // Two lines of text_sm with minimal padding: ~45px total
-        2.0 * self.cached_line_height_sm + 20.0
+        // py_1(4+4) + border_t_1(1) + row1(sm + py_1(8)) + row2(sm + py_1(8) + border_t_1(1))
+        2.0 * self.cached_line_height_sm + 26.0
     }
 
     /// Calculate total non-content height (header + status bar)
