@@ -1816,9 +1816,10 @@ impl Render for HexEditor {
                     let row_start = row * bytes_per_row;
 
                     // Calculate byte in row from X position
-                    // Window coordinates: outer padding (16) + Address (80) + gap_4 (16) = 112px for hex start
                     let mouse_x: f32 = event.position.x.into();
-                    let hex_start = 112.0; // 16 + 80 + 16
+                    // hex column starts after: outer_padding + address_column + gap_4
+                    let address_width = char_width * 8.0;
+                    let hex_start = outer_padding + address_width + 16.0;
                     let gap = 16.0; // gap_4
                     let gap_1 = 4.0; // gap_1 between hex bytes
                     let byte_in_row = match this.drag_pane {

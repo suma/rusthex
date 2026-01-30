@@ -106,10 +106,10 @@ impl HexEditor {
             dragging_tab_index: None,
             tab_drop_target: None,
             compare: CompareState::new(),
-            cached_row_height: 30.0, // Default (16 * phi + 4), will be updated in render()
-            cached_line_height_xl: 32.0, // Default (20 * phi), will be updated in render()
-            cached_line_height_sm: 23.0, // Default (14 * phi), will be updated in render()
-            cached_line_height_xs: 19.0, // Default (12 * phi), will be updated in render()
+            cached_row_height: 23.0, // Default (12 * phi + 4), will be updated in render()
+            cached_line_height_xl: 32.0, // Default (20 * phi = 32), will be updated in render()
+            cached_line_height_sm: 23.0, // Default (14 * phi = 23), will be updated in render()
+            cached_line_height_xs: 19.0, // Default (12 * phi = 19), will be updated in render()
             text_encoding: TextEncoding::default(),
             encoding_dropdown_open: false,
             cached_char_width: 8.4, // Default (14 * 0.6), will be updated in render()
@@ -156,20 +156,6 @@ impl HexEditor {
         };
 
         base_header + tab_bar + search_bar + bookmark_bar
-    }
-
-    /// Calculate status bar height based on phi-based line heights.
-    fn calculate_status_bar_height(&self) -> f32 {
-        // py_1(4+4) + border_t_1(1) + row1(sm + py_1(8)) + row2(sm + py_1(8) + border_t_1(1))
-        2.0 * self.cached_line_height_sm + 26.0
-    }
-
-    /// Calculate total non-content height (header + status bar)
-    fn calculate_non_content_height(&self) -> f32 {
-        let calculated = self.calculate_header_height() + self.calculate_status_bar_height();
-        // Debug: print calculated value
-        // eprintln!("non_content_height: {}, header: {}, status: {}", calculated, self.calculate_header_height(), self.calculate_status_bar_height());
-        calculated
     }
 
     /// Get current active tab
