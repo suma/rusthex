@@ -145,6 +145,10 @@ let content_height = viewport_height.max(px(20.0));
 let content_height = px((viewport_height - non_content_height).max(20.0));
 ```
 
+### ソースコード中のコメントとgitコミットメッセージは英語で記述する
+
+ソースコード内のコメント（`//` や `/* */`）およびgitのコミットメッセージは**英語**で記述すること。CLAUDE.mdの説明文やユーザーとの会話は日本語のままでよい。
+
 ### ドラッグハンドラの座標計算にハードコード値を使わない
 
 ドラッグ時のX/Y座標計算では、フォントメトリクスに依存する値（アドレスカラム幅、行高さ等）をハードコードせず、`cached_char_width` や `cached_row_height` などのキャッシュ値を使用すること。
