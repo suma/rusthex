@@ -4,7 +4,7 @@ use crate::ui::{self, EditMode, EditPane, HexNibble, TextEncoding};
 use crate::HexEditor;
 use crate::SearchMode;
 use gpui::{
-    div, img, px, rgb, rgba, prelude::*, ExternalPaths, Font, FontFeatures, FontStyle, FontWeight,
+    div, img, px, rgb, prelude::*, ExternalPaths, Font, FontFeatures, FontStyle, FontWeight,
     Pixels, SharedString, Window,
 };
 use gpui_component::scroll::{Scrollbar, ScrollbarShow};
@@ -26,16 +26,17 @@ pub(crate) struct RenderParams {
 impl HexEditor {
     /// Header area (title, file info, shortcut hints)
     pub(crate) fn render_header(&self, title: &str) -> impl IntoElement {
+        let t = &self.theme;
         div()
             .flex()
             .flex_col()
             .pb_4()
             .border_b_1()
-            .border_color(rgb(0x404040))
+            .border_color(t.border_primary)
             .child(
                 div()
                     .text_xl()
-                    .text_color(rgb(0xffffff))
+                    .text_color(t.text_primary)
                     .child(format!("{}{}",
                         title,
                         if self.tab().document.has_unsaved_changes() { " *" } else { "" }
@@ -44,7 +45,7 @@ impl HexEditor {
             .child(
                 div()
                     .text_sm()
-                    .text_color(rgb(0x808080))
+                    .text_color(t.text_muted)
                     .child(format!("{} bytes{}",
                         self.tab().document.len(),
                         if self.tab().document.has_unsaved_changes() { " (modified)" } else { "" }
@@ -53,7 +54,7 @@ impl HexEditor {
             .child(
                 div()
                     .text_sm()
-                    .text_color(rgb(0x808080))
+                    .text_color(t.text_muted)
                     .child(format!("Edit Mode: {} | Tab: switch | Shift+Arrow: select | Ctrl+A: select all",
                         match self.tab().edit_pane {
                             EditPane::Hex => "HEX",
@@ -64,23 +65,33 @@ impl HexEditor {
             .child(
                 div()
                     .text_sm()
-                    .text_color(rgb(0x808080))
+                    .text_color(t.text_muted)
                     .child("Ctrl+O: open | Ctrl+S: save | Ctrl+T: new tab | Ctrl+W: close | Ctrl+K: compare | Ctrl+Z/Y: undo/redo")
             )
     }
 
     /// Tab bar (shown only when multiple tabs exist)
     pub(crate) fn render_tab_bar(&self, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+        let t = &self.theme;
         let dragging_tab = self.dragging_tab_index;
         let drop_target = self.tab_drop_target;
+        let accent_primary = t.accent_primary;
+        let bg_primary = t.bg_primary;
+        let text_primary = t.text_primary;
+        let border_primary = t.border_primary;
+        let bg_elevated = t.bg_elevated;
+        let text_muted = t.text_muted;
+        let bg_hover = t.bg_hover;
+        let text_diff = t.text_diff;
+        let accent_success = t.accent_success;
         div()
             .flex()
             .gap_1()
             .py_1()
             .px_2()
-            .bg(rgb(0x252525))
+            .bg(t.bg_surface)
             .border_b_1()
-            .border_color(rgb(0x404040))
+            .border_color(t.border_primary)
             .on_mouse_up(gpui::MouseButton::Left, cx.listener(|this, _event, _window, cx| {
                 // Complete the drag operation
                 if let (Some(from), Some(to)) = (this.dragging_tab_index, this.tab_drop_target) {
@@ -111,24 +122,24 @@ impl HexEditor {
                         // Drop target indicator (left border)
                         .when(is_drop_target, |d| {
                             d.border_l_2()
-                                .border_color(rgb(0x4a9eff))
+                                .border_color(accent_primary)
                         })
                         // Dragging state (semi-transparent)
                         .when(is_being_dragged, |d| {
                             d.opacity(0.5)
                         })
                         .when(is_active && !is_being_dragged, |d| {
-                            d.bg(rgb(0x1e1e1e))
-                                .text_color(rgb(0xffffff))
+                            d.bg(bg_primary)
+                                .text_color(text_primary)
                                 .border_t_1()
                                 .border_l_1()
                                 .border_r_1()
-                                .border_color(rgb(0x404040))
+                                .border_color(border_primary)
                         })
                         .when(!is_active && !is_being_dragged, |d| {
-                            d.bg(rgb(0x2a2a2a))
-                                .text_color(rgb(0x808080))
-                                .hover(|h| h.bg(rgb(0x333333)))
+                            d.bg(bg_elevated)
+                                .text_color(text_muted)
+                                .hover(|h| h.bg(bg_hover))
                         })
                         .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event, _window, cx| {
                             this.dragging_tab_index = Some(idx);
@@ -150,8 +161,8 @@ impl HexEditor {
                             div()
                                 .id(("tab-close", idx))
                                 .text_xs()
-                                .text_color(rgb(0x808080))
-                                .hover(|h| h.text_color(rgb(0xff6666)))
+                                .text_color(text_muted)
+                                .hover(|h| h.text_color(text_diff))
                                 .cursor_pointer()
                                 .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event: &gpui::MouseDownEvent, _window, cx| {
                                     // Close this specific tab
@@ -179,9 +190,9 @@ impl HexEditor {
                     .px_2()
                     .py_1()
                     .text_sm()
-                    .text_color(rgb(0x808080))
+                    .text_color(t.text_muted)
                     .cursor_pointer()
-                    .hover(|h| h.text_color(rgb(0x00ff00)))
+                    .hover(|h| h.text_color(accent_success))
                     .on_mouse_down(gpui::MouseButton::Left, cx.listener(|this, _event, _window, cx| {
                         this.new_tab();
                         cx.notify();
@@ -192,6 +203,7 @@ impl HexEditor {
 
     /// Search bar
     pub(crate) fn render_search_bar(&self) -> impl IntoElement {
+        let t = &self.theme;
         let search_mode_label = match self.tab().search_mode {
             SearchMode::Ascii => "ASCII",
             SearchMode::Hex => "HEX",
@@ -203,14 +215,17 @@ impl HexEditor {
             0
         };
 
+        let warning_secondary = t.text_warning_secondary;
+        let accent_success = t.accent_success;
+
         div()
             .flex()
             .flex_col()
             .py_2()
             .px_4()
-            .bg(rgb(0x2a2a2a))
+            .bg(t.bg_elevated)
             .border_b_1()
-            .border_color(rgb(0x404040))
+            .border_color(t.border_primary)
             .child(
                 div()
                     .flex()
@@ -219,14 +234,14 @@ impl HexEditor {
                     .child(
                         div()
                             .text_sm()
-                            .text_color(rgb(0xffffff))
+                            .text_color(t.text_primary)
                             .child(format!("Search ({}): {}", search_mode_label, self.tab().search_query))
                     )
                     .when(self.tab().is_searching, |d| {
                         d.child(
                             div()
                                 .text_sm()
-                                .text_color(rgb(0xffff00))
+                                .text_color(t.text_warning)
                                 .child("Searching...")
                         )
                     })
@@ -234,7 +249,7 @@ impl HexEditor {
                         d.child(
                             div()
                                 .text_sm()
-                                .text_color(if self.tab().search_truncated { rgb(0xffaa00) } else { rgb(0x00ff00) })
+                                .text_color(if self.tab().search_truncated { warning_secondary } else { accent_success })
                                 .child(if self.tab().search_truncated {
                                     format!("{} / {}+ matches (truncated)", current_pos, result_count)
                                 } else {
@@ -246,7 +261,7 @@ impl HexEditor {
                         d.child(
                             div()
                                 .text_sm()
-                                .text_color(rgb(0xff0000))
+                                .text_color(t.text_error)
                                 .child("No matches")
                         )
                     })
@@ -254,13 +269,14 @@ impl HexEditor {
             .child(
                 div()
                     .text_xs()
-                    .text_color(rgb(0x808080))
+                    .text_color(t.text_muted)
                     .child("Type to search | Tab: switch mode | Enter/F3: next | Shift+F3: prev | Backspace: delete | Esc: close")
             )
     }
 
     /// Bookmark comment editing bar
     pub(crate) fn render_bookmark_bar(&self) -> impl IntoElement {
+        let t = &self.theme;
         let pos = self.tab().bookmark_comment_position;
         let comment_text = self.tab().bookmark_comment_text.clone();
 
@@ -269,9 +285,9 @@ impl HexEditor {
             .flex_col()
             .py_2()
             .px_4()
-            .bg(rgb(0x2a2a2a))
+            .bg(t.bg_elevated)
             .border_b_1()
-            .border_color(rgb(0x404040))
+            .border_color(t.border_primary)
             .child(
                 div()
                     .flex()
@@ -280,26 +296,45 @@ impl HexEditor {
                     .child(
                         div()
                             .text_sm()
-                            .text_color(rgb(0x00bfff))
+                            .text_color(t.bookmark_plain)
                             .child(format!("0x{:08X}", pos))
                     )
                     .child(
                         div()
                             .text_sm()
-                            .text_color(rgb(0xffffff))
+                            .text_color(t.text_primary)
                             .child(format!("Comment: {}", comment_text))
                     )
             )
             .child(
                 div()
                     .text_xs()
-                    .text_color(rgb(0x808080))
+                    .text_color(t.text_muted)
                     .child("Enter: save | Esc: cancel | Backspace: delete")
             )
     }
 
     /// Normal mode: hex/ASCII view with optional bitmap panel
     pub(crate) fn render_normal_mode(&self, cx: &mut gpui::Context<Self>, params: &RenderParams) -> impl IntoElement {
+        let t = &self.theme;
+        // Capture theme colors for closures
+        let t_bookmark_comment = t.bookmark_comment;
+        let t_bookmark_plain = t.bookmark_plain;
+        let t_accent_primary = t.accent_primary;
+        let t_text_muted = t.text_muted;
+        let t_text_on_accent = t.text_on_accent;
+        let t_bg_hover = t.bg_hover;
+        let t_accent_success = t.accent_success;
+        let t_search_current_bg = t.search_current_bg;
+        let t_search_match_bg = t.search_match_bg;
+        let t_bg_selection = t.bg_selection;
+        let t_text_primary = t.text_primary;
+        let t_accent_secondary = t.accent_secondary;
+        let t_text_dim = t.text_dim;
+        let t_bg_elevated = t.bg_elevated;
+        let t_bg_surface = t.bg_surface;
+        let t_border_primary = t.border_primary;
+
         let bitmap_visible = self.bitmap.visible;
         let bitmap_width_pixels = self.bitmap.width;
         let bitmap_color_mode = self.bitmap.color_mode;
@@ -422,7 +457,7 @@ impl HexEditor {
                                                 .w(px(8.0))
                                                 .h(px(8.0))
                                                 .mr(px(4.0))
-                                                .bg(if has_bookmark_comment { rgb(0x00ff88) } else { rgb(0x00bfff) })
+                                                .bg(if has_bookmark_comment { t_bookmark_comment } else { t_bookmark_plain })
                                                 .rounded(px(4.0))
                                         )
                                     })
@@ -431,7 +466,7 @@ impl HexEditor {
                                     })
                                     .child(
                                         div()
-                                            .text_color(if is_cursor_row { rgb(0x4a9eff) } else { rgb(0x808080) })
+                                            .text_color(if is_cursor_row { t_accent_primary } else { t_text_muted })
                                             .child(address)
                                     )
                             )
@@ -484,32 +519,32 @@ impl HexEditor {
                                                 }))
                                             })
                                             .when(is_cursor && edit_pane == EditPane::Hex, |div| {
-                                                div.bg(rgb(0x4a9eff))
-                                                    .text_color(rgb(0x000000))
+                                                div.bg(t_accent_primary)
+                                                    .text_color(t_text_on_accent)
                                             })
                                             .when(is_cursor && edit_pane == EditPane::Ascii, |div| {
-                                                div.bg(rgb(0x333333))
-                                                    .text_color(rgb(0x00ff00))
+                                                div.bg(t_bg_hover)
+                                                    .text_color(t_accent_success)
                                             })
                                             .when(!is_cursor && is_current_search, |div| {
-                                                div.bg(rgb(0xff8c00))
-                                                    .text_color(rgb(0x000000))
+                                                div.bg(t_search_current_bg)
+                                                    .text_color(t_text_on_accent)
                                             })
                                             .when(!is_cursor && !is_current_search && is_search_match, |div| {
-                                                div.bg(rgb(0xffff00))
-                                                    .text_color(rgb(0x000000))
+                                                div.bg(t_search_match_bg)
+                                                    .text_color(t_text_on_accent)
                                             })
                                             .when(!is_cursor && !is_current_search && !is_search_match && is_selected, |div| {
-                                                div.bg(rgb(0x505050))
-                                                    .text_color(rgb(0xffffff))
+                                                div.bg(t_bg_selection)
+                                                    .text_color(t_text_primary)
                                             })
                                             .when(!is_cursor && !is_current_search && !is_search_match && !is_selected, |div| {
-                                                div.text_color(rgb(0x00ff00))
+                                                div.text_color(t_accent_success)
                                             })
                                             // Bookmark underline indicator
                                             .when(is_bookmarked, |div| {
                                                 div.border_b_2()
-                                                    .border_color(if bookmark_has_comment { rgb(0x00ff88) } else { rgb(0x00bfff) })
+                                                    .border_color(if bookmark_has_comment { t_bookmark_comment } else { t_bookmark_plain })
                                             })
                                             .child(hex_str)
                                     }))
@@ -552,37 +587,37 @@ impl HexEditor {
                                                 cx.notify();
                                             }))
                                             .when(is_cursor && edit_pane == EditPane::Ascii, |div| {
-                                                div.bg(rgb(0xff8c00))
-                                                    .text_color(rgb(0x000000))
+                                                div.bg(t_accent_secondary)
+                                                    .text_color(t_text_on_accent)
                                             })
                                             .when(is_cursor && edit_pane == EditPane::Hex, |div| {
-                                                div.bg(rgb(0x333333))
-                                                    .text_color(rgb(0xffffff))
+                                                div.bg(t_bg_hover)
+                                                    .text_color(t_text_primary)
                                             })
                                             .when(!is_cursor && is_current_search, |div| {
-                                                div.bg(rgb(0xff8c00))
-                                                    .text_color(rgb(0x000000))
+                                                div.bg(t_search_current_bg)
+                                                    .text_color(t_text_on_accent)
                                             })
                                             .when(!is_cursor && !is_current_search && is_search_match, |div| {
-                                                div.bg(rgb(0xffff00))
-                                                    .text_color(rgb(0x000000))
+                                                div.bg(t_search_match_bg)
+                                                    .text_color(t_text_on_accent)
                                             })
                                             .when(!is_cursor && !is_current_search && !is_search_match && is_selected, |div| {
-                                                div.bg(rgb(0x505050))
-                                                    .text_color(rgb(0xffffff))
+                                                div.bg(t_bg_selection)
+                                                    .text_color(t_text_primary)
                                             })
                                             // Continuation bytes shown in dim color
                                             .when(!is_cursor && !is_current_search && !is_search_match && !is_selected && is_continuation, |div| {
-                                                div.text_color(rgb(0x606060))
+                                                div.text_color(t_text_dim)
                                             })
-                                            // Normal characters in white
+                                            // Normal characters
                                             .when(!is_cursor && !is_current_search && !is_search_match && !is_selected && !is_continuation, |div| {
-                                                div.text_color(rgb(0xffffff))
+                                                div.text_color(t_text_primary)
                                             })
                                             // Bookmark underline indicator
                                             .when(is_bookmarked, |div| {
                                                 div.border_b_2()
-                                                    .border_color(if bookmark_has_comment { rgb(0x00ff88) } else { rgb(0x00bfff) })
+                                                    .border_color(if bookmark_has_comment { t_bookmark_comment } else { t_bookmark_plain })
                                             })
                                             .child(ascii_char.to_string())
                                     }))
@@ -594,9 +629,9 @@ impl HexEditor {
                                             && self.tab().cursor_position < row_start + bytes_per_row,
                                         |el| {
                                             let cursor_el = if edit_pane == EditPane::Ascii {
-                                                div().bg(rgb(0xff8c00)).text_color(rgb(0x000000)).child(" ")
+                                                div().bg(t_accent_secondary).text_color(t_text_on_accent).child(" ")
                                             } else {
-                                                div().bg(rgb(0x333333)).text_color(rgb(0xffffff)).child(" ")
+                                                div().bg(t_bg_hover).text_color(t_text_primary).child(" ")
                                             };
                                             el.child(cursor_el)
                                         }
@@ -619,7 +654,7 @@ impl HexEditor {
                             .right_0()
                             .bottom_0()
                             .w(px(12.0))
-                            .bg(rgb(0x2a2a2a))
+                            .bg(t_bg_elevated)
                             .child(
                                 Scrollbar::vertical(&self.tab().scrollbar_state, &self.tab().scroll_handle)
                                     .scrollbar_show(ScrollbarShow::Always)
@@ -652,9 +687,9 @@ impl HexEditor {
                                             .h(px(3.0))
                                             .top(marker_position)
                                             .bg(if is_current {
-                                                rgb(0xff8c00) // Orange for current result
+                                                t_search_current_bg
                                             } else {
-                                                rgb(0xffff00) // Yellow for other results
+                                                t_search_match_bg
                                             })
                                             .opacity(0.8)
                                     }).collect::<Vec<_>>()
@@ -672,7 +707,7 @@ impl HexEditor {
                                         let bookmark_row = bookmark_pos / self.bytes_per_row();
                                         let position_ratio = bookmark_row as f32 / total_rows as f32;
                                         let marker_position = viewport_height * position_ratio;
-                                        let marker_color = if comment.is_empty() { rgb(0x00bfff) } else { rgb(0x00ff88) };
+                                        let marker_color = if comment.is_empty() { t_bookmark_plain } else { t_bookmark_comment };
 
                                         div()
                                             .absolute()
@@ -725,9 +760,9 @@ impl HexEditor {
                         .h(px(bitmap_panel_height))
                         .flex()
                         .flex_col()
-                        .bg(rgb(0x252525))
+                        .bg(t_bg_surface)
                         .border_l_1()
-                        .border_color(rgb(0x404040))
+                        .border_color(t_border_primary)
                         .p_2()
                         .gap_2()
                         .overflow_hidden()
@@ -740,13 +775,13 @@ impl HexEditor {
                                 .child(
                                     div()
                                         .text_sm()
-                                        .text_color(rgb(0x4a9eff))
+                                        .text_color(t_accent_primary)
                                         .child(format!("Bitmap ({})", bitmap_color_mode.label()))
                                 )
                                 .child(
                                     div()
                                         .text_sm()
-                                        .text_color(rgb(0x808080))
+                                        .text_color(t_text_muted)
                                         .child(format!("{}x{}", bitmap_width_pixels, bitmap_height))
                                 )
                         )
@@ -754,7 +789,7 @@ impl HexEditor {
                             // Controls hint
                             div()
                                 .text_xs()
-                                .text_color(rgb(0x606060))
+                                .text_color(t_text_dim)
                                 .child("C: color | +/-: width | Ctrl+M: close")
                         )
                         .child(
@@ -884,7 +919,7 @@ impl HexEditor {
                                     div()
                                         .w(px(12.0))
                                         .h_full()
-                                        .bg(rgb(0x2a2a2a))
+                                        .bg(t_bg_elevated)
                                         .child(
                                             Scrollbar::vertical(&self.bitmap.scrollbar_state, &self.bitmap.scroll_handle)
                                                 .scrollbar_show(ScrollbarShow::Always)
@@ -895,7 +930,7 @@ impl HexEditor {
                             // Position info
                             div()
                                 .text_xs()
-                                .text_color(rgb(0x808080))
+                                .text_color(t_text_muted)
                                 .child(format!("Cursor: row {}, col {} (0x{:08X})",
                                     self.tab().cursor_position / bitmap_width_pixels,
                                     self.tab().cursor_position % bitmap_width_pixels,
@@ -908,6 +943,16 @@ impl HexEditor {
 
     /// Compare mode: dual pane view with virtual scrolling
     pub(crate) fn render_compare_mode(&self, params: &RenderParams) -> impl IntoElement {
+        let t = &self.theme;
+        let t_compare_left = t.compare_left;
+        let t_compare_right = t.compare_right;
+        let t_compare_separator = t.compare_separator;
+        let t_accent_primary = t.accent_primary;
+        let t_text_muted = t.text_muted;
+        let t_text_on_accent = t.text_on_accent;
+        let t_text_diff = t.text_diff;
+        let t_accent_success = t.accent_success;
+
         let compare_tab_idx = self.compare.tab_index.unwrap_or(0);
         let active_doc = &self.tabs[self.active_tab].document;
         let compare_doc = &self.tabs[compare_tab_idx].document;
@@ -953,7 +998,7 @@ impl HexEditor {
                         div()
                             .flex_1()
                             .text_sm()
-                            .text_color(rgb(0x4a9eff))
+                            .text_color(t.compare_left)
                             .child(format!("Left: {}", active_name))
                     )
                     .child(
@@ -964,7 +1009,7 @@ impl HexEditor {
                         div()
                             .flex_1()
                             .text_sm()
-                            .text_color(rgb(0xff8c00))
+                            .text_color(t.compare_right)
                             .child(format!("Right: {}", compare_name))
                     )
             )
@@ -1004,7 +1049,7 @@ impl HexEditor {
                                                 div()
                                                     .w(px(address_width))
                                                     .flex_shrink_0()
-                                                    .text_color(if is_cursor_row { rgb(0x4a9eff) } else { rgb(0x808080) })
+                                                    .text_color(if is_cursor_row { t_accent_primary } else { t_text_muted })
                                                     .font_family(font_name)
                                                     .text_size(px(font_size))
                                                     .child(address.clone())
@@ -1023,8 +1068,8 @@ impl HexEditor {
                                                         let is_diff = compare_byte.map(|b| b != byte).unwrap_or(true);
                                                         let is_cursor = byte_idx == cursor_pos;
                                                         div()
-                                                            .when(is_cursor, |d| d.bg(rgb(0x4a9eff)).text_color(rgb(0x000000)))
-                                                            .when(!is_cursor, |d| d.text_color(if is_diff { rgb(0xff6666) } else { rgb(0x00ff00) }))
+                                                            .when(is_cursor, |d| d.bg(t_compare_left).text_color(t_text_on_accent))
+                                                            .when(!is_cursor, |d| d.text_color(if is_diff { t_text_diff } else { t_accent_success }))
                                                             .child(format!("{:02X}", byte))
                                                     }).collect::<Vec<_>>())
                                             )
@@ -1032,7 +1077,7 @@ impl HexEditor {
                                             .child(
                                                 div()
                                                     .w(px(2.0))
-                                                    .bg(rgb(0x4a9eff))
+                                                    .bg(t_compare_separator)
                                             )
                                             // Right pane hex bytes
                                             .child(
@@ -1048,8 +1093,8 @@ impl HexEditor {
                                                         let is_diff = active_byte.map(|b| b != byte).unwrap_or(true);
                                                         let is_cursor = byte_idx == cursor_pos;
                                                         div()
-                                                            .when(is_cursor, |d| d.bg(rgb(0xff8c00)).text_color(rgb(0x000000)))
-                                                            .when(!is_cursor, |d| d.text_color(if is_diff { rgb(0xff6666) } else { rgb(0x00ff00) }))
+                                                            .when(is_cursor, |d| d.bg(t_compare_right).text_color(t_text_on_accent))
+                                                            .when(!is_cursor, |d| d.text_color(if is_diff { t_text_diff } else { t_accent_success }))
                                                             .child(format!("{:02X}", byte))
                                                     }).collect::<Vec<_>>())
                                             )
@@ -1063,14 +1108,38 @@ impl HexEditor {
 
     /// Status bar (cursor position, byte value, selection, search status, etc.)
     pub(crate) fn render_status_bar(&self, cx: &mut gpui::Context<Self>, font_name: &String) -> impl IntoElement {
+        let t = &self.theme;
+        let t_accent_primary = t.accent_primary;
+        let t_text_on_accent = t.text_on_accent;
+        let t_bg_elevated = t.bg_elevated;
+        let t_bg_hover_tertiary = t.bg_hover_tertiary;
+        let t_bg_hover_secondary = t.bg_hover_secondary;
+        let t_text_secondary = t.text_secondary;
+        let t_text_muted = t.text_muted;
+        let t_border_dropdown = t.border_dropdown;
+        let t_accent_success = t.accent_success;
+        let t_text_diff = t.text_diff;
+        let t_text_warning = t.text_warning;
+
+        // Determine current theme name for display
+        use crate::theme::ThemeName;
+        let current_theme_name = ThemeName::all().iter()
+            .find(|name| {
+                let candidate = crate::theme::Theme::from_name(**name);
+                candidate.bg_primary == self.theme.bg_primary
+                    && candidate.accent_primary == self.theme.accent_primary
+            })
+            .copied()
+            .unwrap_or(ThemeName::Dark);
+
         div()
             .flex()
             .flex_col()
             .py_1()
             .px_4()
-            .bg(rgb(0x252525))
+            .bg(t.bg_surface)
             .border_t_1()
-            .border_color(rgb(0x404040))
+            .border_color(t.border_primary)
             .text_sm()
             .font_family(font_name)
             // First line: cursor position, byte value, selection
@@ -1083,8 +1152,8 @@ impl HexEditor {
                         // Edit mode indicator
                         div()
                             .text_color(match self.tab().edit_mode {
-                                EditMode::Overwrite => rgb(0xffffff),
-                                EditMode::Insert => rgb(0x00cccc),
+                                EditMode::Overwrite => t.text_primary,
+                                EditMode::Insert => t.text_insert_mode,
                             })
                             .child(match self.tab().edit_mode {
                                 EditMode::Overwrite => "OVR",
@@ -1096,11 +1165,11 @@ impl HexEditor {
                         div()
                             .flex()
                             .gap_2()
-                            .text_color(rgb(0x808080))
+                            .text_color(t.text_muted)
                             .child("Offset:")
                             .child(
                                 div()
-                                    .text_color(rgb(0x00ff00))
+                                    .text_color(t.accent_success)
                                     .child(ui::format_address(self.tab().cursor_position))
                             )
                     )
@@ -1109,22 +1178,22 @@ impl HexEditor {
                         div()
                             .flex()
                             .gap_2()
-                            .text_color(rgb(0x808080))
+                            .text_color(t.text_muted)
                             .when_some(self.tab().document.get_byte(self.tab().cursor_position), |el, byte| {
                                 el.child("Value:")
                                     .child(
                                         div()
-                                            .text_color(rgb(0x4a9eff))
+                                            .text_color(t.accent_primary)
                                             .child(ui::format_byte_hex(byte))
                                     )
                                     .child(
                                         div()
-                                            .text_color(rgb(0xffffff))
+                                            .text_color(t.text_primary)
                                             .child(format!("({})", ui::format_byte_dec(byte)))
                                     )
                                     .child(
                                         div()
-                                            .text_color(rgb(0xff8c00))
+                                            .text_color(t.accent_secondary)
                                             .child(ui::format_byte_bin(byte))
                                     )
                             })
@@ -1137,11 +1206,11 @@ impl HexEditor {
                             div()
                                 .flex()
                                 .gap_2()
-                                .text_color(rgb(0x808080))
+                                .text_color(t.text_muted)
                                 .child("Selection:")
                                 .child(
                                     div()
-                                        .text_color(rgb(0xffff00))
+                                        .text_color(t.text_warning)
                                         .child(format!("{} bytes", selection_size))
                                 )
                         )
@@ -1155,7 +1224,7 @@ impl HexEditor {
                             .items_center()
                             .child(
                                 div()
-                                    .text_color(rgb(0x808080))
+                                    .text_color(t.text_muted)
                                     .child("Enc:")
                             )
                             .child(
@@ -1165,11 +1234,12 @@ impl HexEditor {
                                     .px_2()
                                     .rounded_sm()
                                     .cursor_pointer()
-                                    .bg(rgb(0x333333))
-                                    .text_color(rgb(0xffffff))
-                                    .hover(|h| h.bg(rgb(0x444444)))
+                                    .bg(t.bg_hover)
+                                    .text_color(t.text_primary)
+                                    .hover(|h| h.bg(t_bg_hover_tertiary))
                                     .on_mouse_down(gpui::MouseButton::Left, cx.listener(|this, _event: &gpui::MouseDownEvent, _window, cx| {
                                         this.encoding_dropdown_open = !this.encoding_dropdown_open;
+                                        this.theme_dropdown_open = false;
                                         cx.notify();
                                     }))
                                     .child(format!("{} \u{25BC}", self.text_encoding.label()))
@@ -1181,9 +1251,9 @@ impl HexEditor {
                                         .absolute()
                                         .bottom(px(24.0))
                                         .left_0()
-                                        .bg(rgb(0x2a2a2a))
+                                        .bg(t_bg_elevated)
                                         .border_1()
-                                        .border_color(rgb(0x555555))
+                                        .border_color(t_border_dropdown)
                                         .rounded_md()
                                         .shadow_lg()
                                         .py_1()
@@ -1196,9 +1266,9 @@ impl HexEditor {
                                                 .px_3()
                                                 .py_1()
                                                 .cursor_pointer()
-                                                .bg(if is_selected { rgb(0x4a9eff) } else { rgb(0x2a2a2a) })
-                                                .text_color(if is_selected { rgb(0x000000) } else { rgb(0xcccccc) })
-                                                .hover(|h| h.bg(if is_selected { rgb(0x4a9eff) } else { rgb(0x3a3a3a) }))
+                                                .bg(if is_selected { t_accent_primary } else { t_bg_elevated })
+                                                .text_color(if is_selected { t_text_on_accent } else { t_text_secondary })
+                                                .hover(|h| h.bg(if is_selected { t_accent_primary } else { t_bg_hover_secondary }))
                                                 .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event: &gpui::MouseDownEvent, _window, cx| {
                                                     this.set_encoding(enc_copy);
                                                     this.encoding_dropdown_open = false;
@@ -1214,11 +1284,79 @@ impl HexEditor {
                             })
                     )
                     .child(
+                        // Theme dropdown selector
+                        div()
+                            .relative()
+                            .flex()
+                            .gap_1()
+                            .items_center()
+                            .child(
+                                div()
+                                    .text_color(t.text_muted)
+                                    .child("Theme:")
+                            )
+                            .child(
+                                // Dropdown button
+                                div()
+                                    .id("theme-dropdown-button")
+                                    .px_2()
+                                    .rounded_sm()
+                                    .cursor_pointer()
+                                    .bg(t.bg_hover)
+                                    .text_color(t.text_primary)
+                                    .hover(|h| h.bg(t_bg_hover_tertiary))
+                                    .on_mouse_down(gpui::MouseButton::Left, cx.listener(|this, _event: &gpui::MouseDownEvent, _window, cx| {
+                                        this.theme_dropdown_open = !this.theme_dropdown_open;
+                                        this.encoding_dropdown_open = false;
+                                        cx.notify();
+                                    }))
+                                    .child(format!("{} \u{25BC}", current_theme_name.label()))
+                            )
+                            // Dropdown menu (shown when open)
+                            .when(self.theme_dropdown_open, |el| {
+                                el.child(
+                                    div()
+                                        .absolute()
+                                        .bottom(px(24.0))
+                                        .left_0()
+                                        .bg(t_bg_elevated)
+                                        .border_1()
+                                        .border_color(t_border_dropdown)
+                                        .rounded_md()
+                                        .shadow_lg()
+                                        .py_1()
+                                        .min_w(px(100.0))
+                                        .children(ThemeName::all().iter().map(|name| {
+                                            let is_selected = *name == current_theme_name;
+                                            let name_copy = *name;
+                                            div()
+                                                .id(SharedString::from(format!("theme-{}", name.label())))
+                                                .px_3()
+                                                .py_1()
+                                                .cursor_pointer()
+                                                .bg(if is_selected { t_accent_primary } else { t_bg_elevated })
+                                                .text_color(if is_selected { t_text_on_accent } else { t_text_secondary })
+                                                .hover(|h| h.bg(if is_selected { t_accent_primary } else { t_bg_hover_secondary }))
+                                                .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event: &gpui::MouseDownEvent, _window, cx| {
+                                                    this.set_theme(name_copy);
+                                                    this.theme_dropdown_open = false;
+                                                    cx.notify();
+                                                }))
+                                                .child(if is_selected {
+                                                    format!("\u{2713} {}", name.label())
+                                                } else {
+                                                    format!("  {}", name.label())
+                                                })
+                                        }))
+                                )
+                            })
+                    )
+                    .child(
                         // File size (right aligned)
                         div()
                             .flex_1()
                             .text_right()
-                            .text_color(rgb(0x808080))
+                            .text_color(t.text_muted)
                             .child(format!("Size: {}", ui::format_file_size(self.tab().document.len())))
                     )
             )
@@ -1229,7 +1367,7 @@ impl HexEditor {
                     .gap_4()
                     .py_1()
                     .border_t_1()
-                    .border_color(rgb(0x333333))
+                    .border_color(t.border_secondary)
                     // Search status with progress
                     .when(self.tab().is_searching, |el| {
                         let current = self.tab().search_progress.load(Ordering::Relaxed);
@@ -1243,16 +1381,16 @@ impl HexEditor {
                             div()
                                 .flex()
                                 .gap_2()
-                                .text_color(rgb(0xffff00))
+                                .text_color(t_text_warning)
                                 .child("Searching...")
                                 .child(
                                     div()
-                                        .text_color(rgb(0x808080))
+                                        .text_color(t_text_muted)
                                         .child(format!("\"{}\"", self.tab().search_query))
                                 )
                                 .child(
                                     div()
-                                        .text_color(rgb(0x4a9eff))
+                                        .text_color(t_accent_primary)
                                         .child(format!("{}/{} ({}%)",
                                             ui::format_file_size(current),
                                             ui::format_file_size(total),
@@ -1275,17 +1413,17 @@ impl HexEditor {
                                 .gap_2()
                                 .child(
                                     div()
-                                        .text_color(rgb(0x808080))
+                                        .text_color(t_text_muted)
                                         .child(format!("Search ({}):", mode_str))
                                 )
                                 .child(
                                     div()
-                                        .text_color(rgb(0x4a9eff))
+                                        .text_color(t_accent_primary)
                                         .child(format!("\"{}\"", self.tab().search_query))
                                 )
                                 .child(
                                     div()
-                                        .text_color(if result_count > 0 { rgb(0x00ff00) } else { rgb(0xff6666) })
+                                        .text_color(if result_count > 0 { t_accent_success } else { t_text_diff })
                                         .child(if result_count > 0 {
                                             if self.tab().search_truncated {
                                                 format!("{}/{}+ matches (truncated)", current_pos, result_count)
@@ -1302,7 +1440,7 @@ impl HexEditor {
                     .when_some(self.save_message.clone(), |el, msg| {
                         el.child(
                             div()
-                                .text_color(rgb(0x00ff00))
+                                .text_color(t_accent_success)
                                 .child(msg)
                         )
                     })
@@ -1310,7 +1448,7 @@ impl HexEditor {
                     .when(!self.tab().is_searching && !self.tab().search_visible && self.save_message.is_none(), |el| {
                         el.child(
                             div()
-                                .text_color(rgb(0x606060))
+                                .text_color(t.text_dim)
                                 .child("Ready")
                         )
                     })
@@ -1319,6 +1457,7 @@ impl HexEditor {
 
     /// Data Inspector panel
     pub(crate) fn render_data_inspector(&self, font_name: &String) -> impl IntoElement {
+        let t = &self.theme;
         let endian_label = match self.inspector_endian {
             crate::Endian::Little => "LE",
             crate::Endian::Big => "BE",
@@ -1337,9 +1476,9 @@ impl HexEditor {
             .flex_col()
             .py_2()
             .px_4()
-            .bg(rgb(0x1a1a1a))
+            .bg(t.bg_secondary)
             .border_t_1()
-            .border_color(rgb(0x404040))
+            .border_color(t.border_primary)
             .text_sm()
             .font_family(font_name)
             // Header row
@@ -1350,19 +1489,19 @@ impl HexEditor {
                     .pb_1()
                     .mb_1()
                     .border_b_1()
-                    .border_color(rgb(0x333333))
+                    .border_color(t.border_secondary)
                     .child(
                         div()
                             .flex()
                             .gap_2()
                             .child(
                                 div()
-                                    .text_color(rgb(0x4a9eff))
+                                    .text_color(t.accent_primary)
                                     .child("Data Inspector")
                             )
                             .child(
                                 div()
-                                    .text_color(rgb(0x808080))
+                                    .text_color(t.text_muted)
                                     .child(format!("@ 0x{:08X}", self.tab().cursor_position))
                             )
                     )
@@ -1372,17 +1511,17 @@ impl HexEditor {
                             .gap_2()
                             .child(
                                 div()
-                                    .text_color(rgb(0x808080))
+                                    .text_color(t.text_muted)
                                     .child("Endian:")
                             )
                             .child(
                                 div()
-                                    .text_color(rgb(0xff8c00))
+                                    .text_color(t.accent_secondary)
                                     .child(endian_label)
                             )
                             .child(
                                 div()
-                                    .text_color(rgb(0x606060))
+                                    .text_color(t.text_dim)
                                     .child("(Ctrl+E)")
                             )
                     )
@@ -1404,15 +1543,15 @@ impl HexEditor {
                                     div()
                                         .flex()
                                         .gap_2()
-                                        .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("Int8:"))
-                                        .child(div().w(px(100.0)).text_right().text_color(rgb(0x00ff00)).child(format!("{}", vals.int8)))
+                                        .child(div().w(px(60.0)).text_color(t.text_muted).child("Int8:"))
+                                        .child(div().w(px(100.0)).text_right().text_color(t.accent_success).child(format!("{}", vals.int8)))
                                 )
                                 .child(
                                     div()
                                         .flex()
                                         .gap_2()
-                                        .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("UInt8:"))
-                                        .child(div().w(px(100.0)).text_right().text_color(rgb(0x00ff00)).child(format!("{}", vals.uint8)))
+                                        .child(div().w(px(60.0)).text_color(t.text_muted).child("UInt8:"))
+                                        .child(div().w(px(100.0)).text_right().text_color(t.accent_success).child(format!("{}", vals.uint8)))
                                 )
                                 // 16-bit values
                                 .when_some(vals.int16, |el, v| {
@@ -1420,8 +1559,8 @@ impl HexEditor {
                                         div()
                                             .flex()
                                             .gap_2()
-                                            .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("Int16:"))
-                                            .child(div().w(px(100.0)).text_right().text_color(rgb(0x00ff00)).child(format!("{}", v)))
+                                            .child(div().w(px(60.0)).text_color(t.text_muted).child("Int16:"))
+                                            .child(div().w(px(100.0)).text_right().text_color(t.accent_success).child(format!("{}", v)))
                                     )
                                 })
                                 .when_some(vals.uint16, |el, v| {
@@ -1429,8 +1568,8 @@ impl HexEditor {
                                         div()
                                             .flex()
                                             .gap_2()
-                                            .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("UInt16:"))
-                                            .child(div().w(px(100.0)).text_right().text_color(rgb(0x00ff00)).child(format!("{}", v)))
+                                            .child(div().w(px(60.0)).text_color(t.text_muted).child("UInt16:"))
+                                            .child(div().w(px(100.0)).text_right().text_color(t.accent_success).child(format!("{}", v)))
                                     )
                                 })
                                 // 32-bit values
@@ -1439,8 +1578,8 @@ impl HexEditor {
                                         div()
                                             .flex()
                                             .gap_2()
-                                            .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("Int32:"))
-                                            .child(div().w(px(100.0)).text_right().text_color(rgb(0x00ff00)).child(format!("{}", v)))
+                                            .child(div().w(px(60.0)).text_color(t.text_muted).child("Int32:"))
+                                            .child(div().w(px(100.0)).text_right().text_color(t.accent_success).child(format!("{}", v)))
                                     )
                                 })
                                 .when_some(vals.uint32, |el, v| {
@@ -1448,8 +1587,8 @@ impl HexEditor {
                                         div()
                                             .flex()
                                             .gap_2()
-                                            .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("UInt32:"))
-                                            .child(div().w(px(100.0)).text_right().text_color(rgb(0x00ff00)).child(format!("{}", v)))
+                                            .child(div().w(px(60.0)).text_color(t.text_muted).child("UInt32:"))
+                                            .child(div().w(px(100.0)).text_right().text_color(t.accent_success).child(format!("{}", v)))
                                     )
                                 })
                         )
@@ -1465,8 +1604,8 @@ impl HexEditor {
                                         div()
                                             .flex()
                                             .gap_2()
-                                            .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("Int64:"))
-                                            .child(div().w(px(180.0)).text_right().text_color(rgb(0x00ff00)).child(format!("{}", v)))
+                                            .child(div().w(px(60.0)).text_color(t.text_muted).child("Int64:"))
+                                            .child(div().w(px(180.0)).text_right().text_color(t.accent_success).child(format!("{}", v)))
                                     )
                                 })
                                 .when_some(vals.uint64, |el, v| {
@@ -1474,8 +1613,8 @@ impl HexEditor {
                                         div()
                                             .flex()
                                             .gap_2()
-                                            .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("UInt64:"))
-                                            .child(div().w(px(180.0)).text_right().text_color(rgb(0x00ff00)).child(format!("{}", v)))
+                                            .child(div().w(px(60.0)).text_color(t.text_muted).child("UInt64:"))
+                                            .child(div().w(px(180.0)).text_right().text_color(t.accent_success).child(format!("{}", v)))
                                     )
                                 })
                                 // Float values
@@ -1489,8 +1628,8 @@ impl HexEditor {
                                         div()
                                             .flex()
                                             .gap_2()
-                                            .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("Float32:"))
-                                            .child(div().w(px(180.0)).text_right().text_color(rgb(0xffff00)).child(display))
+                                            .child(div().w(px(60.0)).text_color(t.text_muted).child("Float32:"))
+                                            .child(div().w(px(180.0)).text_right().text_color(t.text_warning).child(display))
                                     )
                                 })
                                 .when_some(vals.float64, |el, v| {
@@ -1503,8 +1642,8 @@ impl HexEditor {
                                         div()
                                             .flex()
                                             .gap_2()
-                                            .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("Float64:"))
-                                            .child(div().w(px(180.0)).text_right().text_color(rgb(0xffff00)).child(display))
+                                            .child(div().w(px(60.0)).text_color(t.text_muted).child("Float64:"))
+                                            .child(div().w(px(180.0)).text_right().text_color(t.text_warning).child(display))
                                     )
                                 })
                         )
@@ -1518,16 +1657,16 @@ impl HexEditor {
                                     div()
                                         .flex()
                                         .gap_2()
-                                        .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("Hex8:"))
-                                        .child(div().text_color(rgb(0x4a9eff)).child(format!("0x{:02X}", vals.uint8)))
+                                        .child(div().w(px(60.0)).text_color(t.text_muted).child("Hex8:"))
+                                        .child(div().text_color(t.accent_primary).child(format!("0x{:02X}", vals.uint8)))
                                 )
                                 .when_some(vals.uint16, |el, v| {
                                     el.child(
                                         div()
                                             .flex()
                                             .gap_2()
-                                            .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("Hex16:"))
-                                            .child(div().text_color(rgb(0x4a9eff)).child(format!("0x{:04X}", v)))
+                                            .child(div().w(px(60.0)).text_color(t.text_muted).child("Hex16:"))
+                                            .child(div().text_color(t.accent_primary).child(format!("0x{:04X}", v)))
                                     )
                                 })
                                 .when_some(vals.uint32, |el, v| {
@@ -1535,8 +1674,8 @@ impl HexEditor {
                                         div()
                                             .flex()
                                             .gap_2()
-                                            .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("Hex32:"))
-                                            .child(div().text_color(rgb(0x4a9eff)).child(format!("0x{:08X}", v)))
+                                            .child(div().w(px(60.0)).text_color(t.text_muted).child("Hex32:"))
+                                            .child(div().text_color(t.accent_primary).child(format!("0x{:08X}", v)))
                                     )
                                 })
                                 .when_some(vals.uint64, |el, v| {
@@ -1544,8 +1683,8 @@ impl HexEditor {
                                         div()
                                             .flex()
                                             .gap_2()
-                                            .child(div().w(px(60.0)).text_color(rgb(0x808080)).child("Hex64:"))
-                                            .child(div().text_color(rgb(0x4a9eff)).child(format!("0x{:016X}", v)))
+                                            .child(div().w(px(60.0)).text_color(t.text_muted).child("Hex64:"))
+                                            .child(div().text_color(t.accent_primary).child(format!("0x{:016X}", v)))
                                     )
                                 })
                         )
@@ -1555,7 +1694,7 @@ impl HexEditor {
             .when(self.tab().document.len() == 0, |el| {
                 el.child(
                     div()
-                        .text_color(rgb(0x808080))
+                        .text_color(t.text_muted)
                         .child("No data available")
                 )
             })
@@ -1563,6 +1702,9 @@ impl HexEditor {
 
     /// Compare tab selection dialog (modal overlay)
     pub(crate) fn render_compare_dialog(&self, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+        let t = &self.theme;
+        let t_accent_primary = t.accent_primary;
+        let t_bg_hover = t.bg_hover;
         let tabs_info: Vec<(usize, String)> = self.tabs.iter().enumerate()
             .filter(|(idx, _)| *idx != self.active_tab)
             .map(|(idx, tab)| (idx, tab.display_name()))
@@ -1574,15 +1716,15 @@ impl HexEditor {
             .left_0()
             .right_0()
             .bottom_0()
-            .bg(rgba(0x00000080))
+            .bg(t.modal_overlay)
             .flex()
             .items_center()
             .justify_center()
             .child(
                 div()
-                    .bg(rgb(0x2a2a2a))
+                    .bg(t.bg_elevated)
                     .border_1()
-                    .border_color(rgb(0x4a9eff))
+                    .border_color(t.accent_primary)
                     .rounded_md()
                     .p_4()
                     .min_w(px(300.0))
@@ -1592,17 +1734,17 @@ impl HexEditor {
                     .child(
                         div()
                             .text_lg()
-                            .text_color(rgb(0x4a9eff))
+                            .text_color(t.accent_primary)
                             .child("Select tab to compare")
                     )
                     .child(
                         div()
                             .text_sm()
-                            .text_color(rgb(0x808080))
+                            .text_color(t.text_muted)
                             .child("Press 1-9 or click to select | Esc: cancel")
                     )
                     .children(
-                        tabs_info.into_iter().map(|(idx, name)| {
+                        tabs_info.into_iter().map(move |(idx, name)| {
                             let display_num = if idx < self.active_tab { idx + 1 } else { idx };
                             div()
                                 .id(("compare-tab", idx))
@@ -1612,21 +1754,21 @@ impl HexEditor {
                                 .py_2()
                                 .rounded_md()
                                 .cursor_pointer()
-                                .bg(rgb(0x333333))
-                                .hover(|h| h.bg(rgb(0x4a9eff)))
+                                .bg(t_bg_hover)
+                                .hover(|h| h.bg(t_accent_primary))
                                 .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event, _window, cx| {
                                     this.select_compare_tab(idx);
                                     cx.notify();
                                 }))
                                 .child(
                                     div()
-                                        .text_color(rgb(0xff8c00))
+                                        .text_color(t.accent_secondary)
                                         .w(px(20.0))
                                         .child(format!("{}", display_num))
                                 )
                                 .child(
                                     div()
-                                        .text_color(rgb(0xffffff))
+                                        .text_color(t.text_primary)
                                         .child(name)
                                 )
                         }).collect::<Vec<_>>()
@@ -1752,7 +1894,7 @@ impl Render for HexEditor {
         div()
             .flex()
             .flex_col()
-            .bg(rgb(0x1e1e1e))
+            .bg(self.theme.bg_primary)
             .size_full()
             .p_4()
             .track_focus(&self.focus_handle)

@@ -84,6 +84,11 @@ A modern hex editor built with Rust and [gpui](https://www.gpui.rs/), featuring 
 - **Width Adjustment**: +/- keys to change bitmap width (64, 128, 256, 512, 1024)
 - **Cursor Tracking**: Current position highlighted in bitmap view
 
+### Color Themes
+- **Built-in Themes**: Dark (default), Light, Monokai
+- **Switch Themes**: Click "Theme: Dark ▼" in status bar to select
+- **Config File**: Set default theme in `config.toml`
+
 ### Configuration
 - **TOML Configuration File**:
   - macOS: `~/Library/Application Support/rusthex/config.toml`
@@ -94,6 +99,7 @@ A modern hex editor built with Rust and [gpui](https://www.gpui.rs/), featuring 
   - Font size
   - Bytes per row (default: 16)
   - Default endianness for data inspector
+  - Color theme (default: dark)
 
 **Example config.toml:**
 ```toml
@@ -101,6 +107,15 @@ A modern hex editor built with Rust and [gpui](https://www.gpui.rs/), featuring 
 font_name = "Menlo"
 font_size = 14.0
 bytes_per_row = 16
+theme = "dark"        # "dark", "light", "monokai"
+
+[editor]
+default_endian = "Little"  # "Little" or "Big"
+max_undo_levels = 1000
+
+[window]
+width = 800
+height = 600
 ```
 
 ## Keyboard Shortcuts
@@ -241,7 +256,8 @@ rusthex/
 │   ├── config.rs       # Configuration file handling
 │   ├── compare.rs      # Compare mode functionality
 │   ├── render_cache.rs # Render optimization cache
-│   └── encoding.rs     # Text encoding support (ASCII, UTF-8, SJIS, etc.)
+│   ├── encoding.rs     # Text encoding support (ASCII, UTF-8, SJIS, etc.)
+│   └── theme.rs        # Color theme definitions (Dark, Light, Monokai)
 ├── Cargo.toml
 ├── LICENSE-MIT
 ├── LICENSE-APACHE
@@ -294,7 +310,7 @@ See [todo.md](todo.md) for detailed implementation status and planned features.
 ### Planned Features
 - [ ] Copy/paste support
 - [ ] Search & replace
-- [ ] Customizable themes
+- [x] Customizable themes (Dark, Light, Monokai)
 - [ ] Export (C array, Base64, Hex dump)
 - [x] Bitmap visualization (implemented)
 

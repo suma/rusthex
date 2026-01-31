@@ -31,6 +31,8 @@ pub struct DisplaySettings {
     pub font_size: f32,
     /// Font family name (e.g., "Monaco", "Menlo", "Consolas")
     pub font_name: String,
+    /// Color theme name ("dark", "light", "monokai")
+    pub theme: String,
 }
 
 impl Default for DisplaySettings {
@@ -44,6 +46,7 @@ impl Default for DisplaySettings {
             bytes_per_row: 16,
             font_size: 12.0,
             font_name: font_name.to_string(),
+            theme: "dark".to_string(),
         }
     }
 }
@@ -152,6 +155,11 @@ impl Settings {
         // Validate font_size (reasonable range: 8-32)
         if self.display.font_size < 8.0 || self.display.font_size > 32.0 {
             self.display.font_size = 12.0;
+        }
+
+        // Validate theme name
+        if !["dark", "light", "monokai"].contains(&self.display.theme.to_lowercase().as_str()) {
+            self.display.theme = "dark".to_string();
         }
 
         // Validate max_undo_levels (reasonable range: 10-10000)

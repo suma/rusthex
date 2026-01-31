@@ -33,6 +33,7 @@ mod render_cache;
 mod search;
 mod tab;
 mod tabs;
+mod theme;
 mod ui;
 
 use bitmap::BitmapState;
@@ -83,6 +84,10 @@ struct HexEditor {
     force_close: bool,
     // Bitmap visualization state
     bitmap: BitmapState,
+    // Color theme
+    theme: theme::Theme,
+    // Theme dropdown open state
+    theme_dropdown_open: bool,
 }
 
 impl HexEditor {
@@ -92,6 +97,8 @@ impl HexEditor {
             config::DefaultEndian::Little => Endian::Little,
             config::DefaultEndian::Big => Endian::Big,
         };
+        let theme_name = theme::ThemeName::from_str(&settings.display.theme);
+        let current_theme = theme::Theme::from_name(theme_name);
         Self {
             tabs: vec![EditorTab::new()],
             active_tab: 0,
@@ -115,6 +122,8 @@ impl HexEditor {
             cached_char_width: 8.4, // Default (14 * 0.6), will be updated in render()
             force_close: false,
             bitmap: BitmapState::new(),
+            theme: current_theme,
+            theme_dropdown_open: false,
         }
     }
 
@@ -180,6 +189,12 @@ impl HexEditor {
             self.text_encoding = encoding;
             self.invalidate_render_cache();
         }
+    }
+
+    /// Set color theme
+    fn set_theme(&mut self, name: theme::ThemeName) {
+        self.theme = theme::Theme::from_name(name);
+        self.invalidate_render_cache();
     }
 
     // Selection, file operations, cursor, and input methods are in separate modules:
