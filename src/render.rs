@@ -499,7 +499,7 @@ impl HexEditor {
                                                     }
                                                 }
                                             } else {
-                                                // Empty slot - Insert モード時はカーソルが doc_len にある場合表示
+                                                // Empty slot - show cursor at doc_len in Insert mode
                                                 let is_insert_cursor = byte_idx == self.tab().cursor_position
                                                     && self.tab().edit_mode == EditMode::Insert;
                                                 ("  ".to_string(), is_insert_cursor, false, false, false, false)
@@ -629,7 +629,7 @@ impl HexEditor {
                                             })
                                             .child(ascii_char.to_string())
                                     }))
-                                    // Insert モード時、カーソルが doc_len にあり、この行に属する場合にカーソルを表示
+                                    // In Insert mode, show cursor when it is at doc_len and belongs to this row
                                     .when(
                                         self.tab().edit_mode == EditMode::Insert
                                             && self.tab().cursor_position == document_len
@@ -1833,7 +1833,7 @@ impl Render for HexEditor {
         let row_count = {
             let base = ui::row_count(self.tab().document.len(), self.bytes_per_row());
             if self.tab().edit_mode == EditMode::Insert {
-                // Insert モード: カーソルが doc_len に達する場合、その行が存在する必要がある
+                // Insert mode: ensure the row exists when cursor reaches doc_len
                 let max_row = self.tab().document.len() / self.bytes_per_row();
                 base.max(max_row + 1)
             } else {

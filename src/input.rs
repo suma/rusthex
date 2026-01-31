@@ -21,10 +21,10 @@ impl HexEditor {
         let cursor_pos = self.tab().cursor_position;
 
         if self.tab().edit_mode == EditMode::Insert {
-            // Insert モード
+            // Insert mode
             match self.tab().hex_nibble {
                 HexNibble::High => {
-                    // High nibble: 新しいバイトを挿入
+                    // High nibble: insert a new byte
                     let byte = digit << 4;
                     if let Err(e) = self.tab_mut().document.insert_bytes(cursor_pos, &[byte]) {
                         eprintln!("Failed to insert byte: {}", e);
@@ -34,7 +34,7 @@ impl HexEditor {
                     self.tab_mut().hex_nibble = HexNibble::Low;
                 }
                 HexNibble::Low => {
-                    // Low nibble: 挿入したバイトの下位ニブルを更新
+                    // Low nibble: update the lower nibble of the inserted byte
                     if let Some(current_byte) = self.tab().document.get_byte(cursor_pos) {
                         let new_byte = (current_byte & 0xF0) | digit;
                         if let Err(e) = self.tab_mut().document.set_byte(cursor_pos, new_byte) {
@@ -47,7 +47,7 @@ impl HexEditor {
                 }
             }
         } else {
-            // Overwrite モード
+            // Overwrite mode
             if cursor_pos >= self.tab().document.len() {
                 return;
             }
@@ -88,7 +88,7 @@ impl HexEditor {
         let cursor_pos = self.tab().cursor_position;
 
         if self.tab().edit_mode == EditMode::Insert {
-            // Insert モード: バイトを挿入
+            // Insert mode: insert byte
             if let Err(e) = self.tab_mut().document.insert_bytes(cursor_pos, &[c as u8]) {
                 eprintln!("Failed to insert byte: {}", e);
                 return;
@@ -96,7 +96,7 @@ impl HexEditor {
             self.invalidate_render_cache();
             self.move_cursor_right();
         } else {
-            // Overwrite モード
+            // Overwrite mode
             if cursor_pos >= self.tab().document.len() {
                 return;
             }

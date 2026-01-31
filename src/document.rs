@@ -4,7 +4,7 @@ use std::fs::File;
 use std::path::PathBuf;
 
 /// Data source for background search operations
-/// Piece Table移行後は常にInMemoryを使用
+/// Always uses InMemory after Piece Table migration
 pub enum SearchDataSource {
     /// In-memory data (with all edits materialized)
     InMemory(Vec<u8>),

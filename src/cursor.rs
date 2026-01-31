@@ -17,7 +17,7 @@ impl HexEditor {
     pub fn get_relative_position(&self, relative_pos: i64) -> usize {
         let current_pos = self.tab().cursor_position;
         let doc_len = self.tab().document.len();
-        // Insert モードではドキュメント末尾の1つ先まで許容（末尾追加用）
+        // In Insert mode, allow one position past the end of the document (for appending)
         let max_pos = if self.tab().edit_mode == EditMode::Insert {
             doc_len
         } else {

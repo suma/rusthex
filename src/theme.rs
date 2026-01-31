@@ -1,6 +1,6 @@
 use gpui::{Hsla, rgb, rgba};
 
-/// テーマ名の列挙型
+/// Theme name enumeration
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ThemeName {
     Dark,
@@ -30,20 +30,20 @@ impl ThemeName {
     }
 }
 
-/// hex → Hsla 変換ヘルパー
+/// hex -> Hsla conversion helper
 fn color(hex: u32) -> Hsla {
     rgb(hex).into()
 }
 
-/// hex (RGBA) → Hsla 変換ヘルパー
+/// hex (RGBA) -> Hsla conversion helper
 fn color_a(hex: u32) -> Hsla {
     rgba(hex).into()
 }
 
-/// カラーテーマ構造体
+/// Color theme struct
 #[derive(Clone)]
 pub struct Theme {
-    // 背景系
+    // Backgrounds
     pub bg_primary: Hsla,
     pub bg_secondary: Hsla,
     pub bg_surface: Hsla,
@@ -53,45 +53,45 @@ pub struct Theme {
     pub bg_hover_tertiary: Hsla,
     pub bg_selection: Hsla,
 
-    // ボーダー系
+    // Borders
     pub border_primary: Hsla,
     pub border_secondary: Hsla,
     pub border_dropdown: Hsla,
 
-    // テキスト系
+    // Text
     pub text_primary: Hsla,
     pub text_secondary: Hsla,
     pub text_muted: Hsla,
     pub text_dim: Hsla,
     pub text_on_accent: Hsla,
 
-    // アクセント
+    // Accent
     pub accent_primary: Hsla,
     pub accent_secondary: Hsla,
     pub accent_success: Hsla,
 
-    // 検索
+    // Search
     pub search_current_bg: Hsla,
     pub search_match_bg: Hsla,
 
-    // 警告/エラー
+    // Warning / Error
     pub text_warning: Hsla,
     pub text_warning_secondary: Hsla,
     pub text_error: Hsla,
     pub text_diff: Hsla,
 
-    // 特殊
+    // Special
     pub text_modified: Hsla,
     pub text_insert_mode: Hsla,
     pub bookmark_plain: Hsla,
     pub bookmark_comment: Hsla,
 
-    // 比較モード
+    // Compare mode
     pub compare_left: Hsla,
     pub compare_right: Hsla,
     pub compare_separator: Hsla,
 
-    // モーダル
+    // Modal
     pub modal_overlay: Hsla,
 }
 
@@ -106,7 +106,7 @@ impl Theme {
 
     pub fn dark() -> Self {
         Self {
-            // 背景系
+            // Backgrounds
             bg_primary: color(0x1e1e1e),
             bg_secondary: color(0x1a1a1a),
             bg_surface: color(0x252525),
@@ -116,52 +116,52 @@ impl Theme {
             bg_hover_tertiary: color(0x444444),
             bg_selection: color(0x505050),
 
-            // ボーダー系
+            // Borders
             border_primary: color(0x404040),
             border_secondary: color(0x333333),
             border_dropdown: color(0x555555),
 
-            // テキスト系
+            // Text
             text_primary: color(0xffffff),
             text_secondary: color(0xcccccc),
             text_muted: color(0x808080),
             text_dim: color(0x606060),
             text_on_accent: color(0x000000),
 
-            // アクセント
+            // Accent
             accent_primary: color(0x4a9eff),
             accent_secondary: color(0xff8c00),
             accent_success: color(0x00ff00),
 
-            // 検索
+            // Search
             search_current_bg: color(0xff8c00),
             search_match_bg: color(0xffff00),
 
-            // 警告/エラー
+            // Warning / Error
             text_warning: color(0xffff00),
             text_warning_secondary: color(0xffaa00),
             text_error: color(0xff0000),
             text_diff: color(0xff6666),
 
-            // 特殊
+            // Special
             text_modified: color(0xff6b6b),
             text_insert_mode: color(0x00cccc),
             bookmark_plain: color(0x00bfff),
             bookmark_comment: color(0x00ff88),
 
-            // 比較モード
+            // Compare mode
             compare_left: color(0x4a9eff),
             compare_right: color(0xff8c00),
             compare_separator: color(0x4a9eff),
 
-            // モーダル
+            // Modal
             modal_overlay: color_a(0x00000080),
         }
     }
 
     pub fn light() -> Self {
         Self {
-            // 背景系
+            // Backgrounds
             bg_primary: color(0xffffff),
             bg_secondary: color(0xf5f5f5),
             bg_surface: color(0xf0f0f0),
@@ -171,52 +171,52 @@ impl Theme {
             bg_hover_tertiary: color(0xc8c8c8),
             bg_selection: color(0xb0c4de),
 
-            // ボーダー系
+            // Borders
             border_primary: color(0xcccccc),
             border_secondary: color(0xdddddd),
             border_dropdown: color(0xaaaaaa),
 
-            // テキスト系
+            // Text
             text_primary: color(0x1e1e1e),
             text_secondary: color(0x444444),
             text_muted: color(0x666666),
             text_dim: color(0x999999),
             text_on_accent: color(0xffffff),
 
-            // アクセント
+            // Accent
             accent_primary: color(0x0066cc),
             accent_secondary: color(0xcc6600),
             accent_success: color(0x008800),
 
-            // 検索
+            // Search
             search_current_bg: color(0xff9900),
             search_match_bg: color(0xffee00),
 
-            // 警告/エラー
+            // Warning / Error
             text_warning: color(0xcc8800),
             text_warning_secondary: color(0xcc6600),
             text_error: color(0xcc0000),
             text_diff: color(0xcc3333),
 
-            // 特殊
+            // Special
             text_modified: color(0xd32f2f),
             text_insert_mode: color(0x008888),
             bookmark_plain: color(0x0088cc),
             bookmark_comment: color(0x00aa44),
 
-            // 比較モード
+            // Compare mode
             compare_left: color(0x0066cc),
             compare_right: color(0xcc6600),
             compare_separator: color(0x0066cc),
 
-            // モーダル
+            // Modal
             modal_overlay: color_a(0x00000040),
         }
     }
 
     pub fn monokai() -> Self {
         Self {
-            // 背景系
+            // Backgrounds
             bg_primary: color(0x272822),
             bg_secondary: color(0x1e1f1a),
             bg_surface: color(0x2d2e27),
@@ -226,45 +226,45 @@ impl Theme {
             bg_hover_tertiary: color(0x626254),
             bg_selection: color(0x49483e),
 
-            // ボーダー系
+            // Borders
             border_primary: color(0x49483e),
             border_secondary: color(0x3e3d32),
             border_dropdown: color(0x75715e),
 
-            // テキスト系
+            // Text
             text_primary: color(0xf8f8f2),
             text_secondary: color(0xd0d0c8),
             text_muted: color(0x75715e),
             text_dim: color(0x5f5f50),
             text_on_accent: color(0x272822),
 
-            // アクセント
+            // Accent
             accent_primary: color(0x66d9ef),
             accent_secondary: color(0xfd971f),
             accent_success: color(0xa6e22e),
 
-            // 検索
+            // Search
             search_current_bg: color(0xfd971f),
             search_match_bg: color(0xe6db74),
 
-            // 警告/エラー
+            // Warning / Error
             text_warning: color(0xe6db74),
             text_warning_secondary: color(0xfd971f),
             text_error: color(0xf92672),
             text_diff: color(0xf92672),
 
-            // 特殊
+            // Special
             text_modified: color(0xf92672),
             text_insert_mode: color(0x66d9ef),
             bookmark_plain: color(0x66d9ef),
             bookmark_comment: color(0xa6e22e),
 
-            // 比較モード
+            // Compare mode
             compare_left: color(0x66d9ef),
             compare_right: color(0xfd971f),
             compare_separator: color(0x66d9ef),
 
-            // モーダル
+            // Modal
             modal_overlay: color_a(0x00000080),
         }
     }
