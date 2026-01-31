@@ -8,13 +8,10 @@
 //! - Efficient O(1) result lookup using HashSet
 //! - SIMD-accelerated search using memchr for exact patterns
 
-use std::collections::HashMap;
-use std::fs::File;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use memchr::memmem;
-use memmap2::Mmap;
 
 use crate::document::SearchDataSource;
 use crate::HexEditor;
@@ -109,19 +106,16 @@ impl HexEditor {
         let cancel_flag = Arc::clone(&self.tab().search_cancel_flag);
         let progress = Arc::clone(&self.tab().search_progress);
 
-        // Prepare search data source (fast - no large copy on UI thread)
+        // Prepare search data source (materializes document via to_vec())
         let data_source = self.tab().document.prepare_search_data();
         let pattern_len = pattern.len();
 
         // Spawn background search thread
         std::thread::spawn(move || {
-            // Execute search based on data source type
+            // Execute search
             let local_results = match data_source {
                 SearchDataSource::InMemory(data) => {
                     search_in_memory(&data, &pattern, &cancel_flag, &progress)
-                }
-                SearchDataSource::FilePath { path, overlay, len } => {
-                    search_in_file(&path, &overlay, len, &pattern, &cancel_flag, &progress)
                 }
             };
 
@@ -278,7 +272,7 @@ fn verify_pattern_at(data: &[u8], pos: usize, pattern: &[PatternByte]) -> bool {
     true
 }
 
-/// Search in memory data (for small in-memory files)
+/// Search in memory data
 /// Uses SIMD-accelerated search via memchr when possible
 fn search_in_memory(
     data: &[u8],
@@ -356,193 +350,6 @@ fn search_in_memory(
     }
 
     progress.store(data_len, Ordering::Relaxed);
-    Some(results)
-}
-
-/// Verify pattern match at position considering overlay modifications
-fn verify_pattern_at_with_overlay(
-    mmap: &[u8],
-    overlay: &HashMap<usize, u8>,
-    pos: usize,
-    pattern: &[PatternByte],
-    data_len: usize,
-) -> bool {
-    if pos + pattern.len() > data_len {
-        return false;
-    }
-    for (j, pat_byte) in pattern.iter().enumerate() {
-        let byte_pos = pos + j;
-        let byte = overlay.get(&byte_pos).copied().unwrap_or_else(|| mmap[byte_pos]);
-        if let PatternByte::Exact(expected) = pat_byte {
-            if byte != *expected {
-                return false;
-            }
-        }
-    }
-    true
-}
-
-/// Check if any position in range overlaps with overlay
-fn has_overlay_in_range(overlay: &HashMap<usize, u8>, start: usize, len: usize) -> bool {
-    for offset in 0..len {
-        if overlay.contains_key(&(start + offset)) {
-            return true;
-        }
-    }
-    false
-}
-
-/// Search in file using memory mapping (for large files)
-/// Uses SIMD-accelerated search via memchr when possible
-fn search_in_file(
-    path: &std::path::PathBuf,
-    overlay: &HashMap<usize, u8>,
-    data_len: usize,
-    pattern: &[PatternByte],
-    cancel_flag: &std::sync::atomic::AtomicBool,
-    progress: &std::sync::atomic::AtomicUsize,
-) -> Option<Vec<usize>> {
-    let file = match File::open(path) {
-        Ok(f) => f,
-        Err(_) => return Some(Vec::new()),
-    };
-
-    let mmap = match unsafe { Mmap::map(&file) } {
-        Ok(m) => m,
-        Err(_) => return Some(Vec::new()),
-    };
-
-    let pattern_len = pattern.len();
-
-    if pattern_len == 0 || data_len < pattern_len {
-        progress.store(data_len, Ordering::Relaxed);
-        return Some(Vec::new());
-    }
-
-    // Fast path: all exact bytes and no overlay - use SIMD search directly
-    if is_all_exact(pattern) && overlay.is_empty() {
-        let needle = pattern_to_bytes(pattern);
-        let finder = memmem::Finder::new(&needle);
-        let mut results = Vec::new();
-
-        for pos in finder.find_iter(&mmap[..data_len]) {
-            if results.len() % 1000 == 0 {
-                if cancel_flag.load(Ordering::Relaxed) {
-                    return None;
-                }
-                progress.store(pos, Ordering::Relaxed);
-            }
-            results.push(pos);
-        }
-
-        progress.store(data_len, Ordering::Relaxed);
-        return Some(results);
-    }
-
-    // With overlay or wildcards: use SIMD for candidates, then verify with overlay
-    if is_all_exact(pattern) || extract_exact_prefix(pattern).len() >= 2 {
-        let search_bytes = if is_all_exact(pattern) {
-            pattern_to_bytes(pattern)
-        } else {
-            extract_exact_prefix(pattern)
-        };
-
-        let finder = memmem::Finder::new(&search_bytes);
-        let mut results = Vec::new();
-
-        for pos in finder.find_iter(&mmap[..data_len]) {
-            if results.len() % 1000 == 0 {
-                if cancel_flag.load(Ordering::Relaxed) {
-                    return None;
-                }
-                progress.store(pos, Ordering::Relaxed);
-            }
-
-            // Re-verify considering overlay
-            if has_overlay_in_range(overlay, pos, pattern_len) {
-                // Has overlay modifications - verify with overlay
-                if verify_pattern_at_with_overlay(&mmap, overlay, pos, pattern, data_len) {
-                    results.push(pos);
-                }
-            } else if is_all_exact(pattern) {
-                // No overlay in range and all exact - already matched
-                results.push(pos);
-            } else {
-                // No overlay but has wildcards - verify pattern
-                if verify_pattern_at(&mmap[..data_len], pos, pattern) {
-                    results.push(pos);
-                }
-            }
-        }
-
-        // Also search in overlay regions that might match but weren't found in mmap
-        if !overlay.is_empty() {
-            let overlay_results =
-                search_overlay_regions(&mmap, overlay, data_len, pattern, cancel_flag, progress)?;
-            for pos in overlay_results {
-                if !results.contains(&pos) {
-                    results.push(pos);
-                }
-            }
-            results.sort_unstable();
-        }
-
-        progress.store(data_len, Ordering::Relaxed);
-        return Some(results);
-    }
-
-    // Fallback: naive search
-    let mut results = Vec::new();
-    for i in 0..=data_len.saturating_sub(pattern_len) {
-        if i % 10000 == 0 {
-            if cancel_flag.load(Ordering::Relaxed) {
-                return None;
-            }
-            progress.store(i, Ordering::Relaxed);
-        }
-
-        if verify_pattern_at_with_overlay(&mmap, overlay, i, pattern, data_len) {
-            results.push(i);
-        }
-    }
-
-    progress.store(data_len, Ordering::Relaxed);
-    Some(results)
-}
-
-/// Search regions affected by overlay modifications
-fn search_overlay_regions(
-    mmap: &[u8],
-    overlay: &HashMap<usize, u8>,
-    data_len: usize,
-    pattern: &[PatternByte],
-    cancel_flag: &std::sync::atomic::AtomicBool,
-    _progress: &std::sync::atomic::AtomicUsize,
-) -> Option<Vec<usize>> {
-    let pattern_len = pattern.len();
-    let mut results = Vec::new();
-
-    // For each overlay position, check if pattern could match starting near it
-    for &overlay_pos in overlay.keys() {
-        if cancel_flag.load(Ordering::Relaxed) {
-            return None;
-        }
-
-        // Check positions where this overlay byte could be part of a match
-        let start = overlay_pos.saturating_sub(pattern_len - 1);
-        let end = (overlay_pos + 1).min(data_len.saturating_sub(pattern_len - 1));
-
-        for pos in start..=end {
-            if pos + pattern_len <= data_len
-                && verify_pattern_at_with_overlay(mmap, overlay, pos, pattern, data_len)
-            {
-                results.push(pos);
-            }
-        }
-    }
-
-    results.sort_unstable();
-    results.dedup();
     Some(results)
 }
 
@@ -666,52 +473,6 @@ mod tests {
         let pat = exact(b"st");
         assert!(verify_pattern_at(data, 2, &pat));
         assert!(!verify_pattern_at(data, 3, &pat)); // Would overflow
-    }
-
-    // =========================================
-    // Tests for has_overlay_in_range
-    // =========================================
-
-    #[test]
-    fn test_has_overlay_in_range_yes() {
-        let mut overlay = HashMap::new();
-        overlay.insert(5, 0x00);
-        assert!(has_overlay_in_range(&overlay, 3, 4)); // Range 3..7 includes 5
-    }
-
-    #[test]
-    fn test_has_overlay_in_range_no() {
-        let mut overlay = HashMap::new();
-        overlay.insert(10, 0x00);
-        assert!(!has_overlay_in_range(&overlay, 0, 5)); // Range 0..5 doesn't include 10
-    }
-
-    #[test]
-    fn test_has_overlay_in_range_empty() {
-        let overlay = HashMap::new();
-        assert!(!has_overlay_in_range(&overlay, 0, 100));
-    }
-
-    // =========================================
-    // Tests for verify_pattern_at_with_overlay
-    // =========================================
-
-    #[test]
-    fn test_verify_pattern_with_overlay_match() {
-        let data = b"hello world";
-        let mut overlay = HashMap::new();
-        overlay.insert(6, b'W'); // Change 'w' to 'W'
-        let pat = exact(b"World");
-        assert!(verify_pattern_at_with_overlay(data, &overlay, 6, &pat, data.len()));
-    }
-
-    #[test]
-    fn test_verify_pattern_with_overlay_no_match() {
-        let data = b"hello world";
-        let mut overlay = HashMap::new();
-        overlay.insert(6, b'X');
-        let pat = exact(b"world");
-        assert!(!verify_pattern_at_with_overlay(data, &overlay, 6, &pat, data.len()));
     }
 
     // =========================================
@@ -851,86 +612,5 @@ mod tests {
 
         let results = search_in_memory(data, &pat, &cancel, &progress).unwrap();
         assert_eq!(results, vec![0, 6, 12]);
-    }
-
-    // =========================================
-    // Tests for search_in_file (using temp files)
-    // =========================================
-
-    #[test]
-    fn test_search_in_file_exact() {
-        use std::io::Write;
-        let mut temp = tempfile::NamedTempFile::new().unwrap();
-        temp.write_all(b"hello world hello").unwrap();
-        temp.flush().unwrap();
-
-        let path = temp.path().to_path_buf();
-        let overlay = HashMap::new();
-        let pat = exact(b"hello");
-        let (cancel, progress) = make_flags();
-
-        let results = search_in_file(&path, &overlay, 17, &pat, &cancel, &progress).unwrap();
-        assert_eq!(results, vec![0, 12]);
-    }
-
-    #[test]
-    fn test_search_in_file_with_overlay_creates_match() {
-        use std::io::Write;
-        let mut temp = tempfile::NamedTempFile::new().unwrap();
-        temp.write_all(b"hallo world").unwrap();
-        temp.flush().unwrap();
-
-        let path = temp.path().to_path_buf();
-        let mut overlay = HashMap::new();
-        overlay.insert(1, b'e'); // Change 'a' to 'e' -> "hello"
-        let pat = exact(b"hello");
-        let (cancel, progress) = make_flags();
-
-        let results = search_in_file(&path, &overlay, 11, &pat, &cancel, &progress).unwrap();
-        assert_eq!(results, vec![0]);
-    }
-
-    #[test]
-    fn test_search_in_file_overlay_removes_match() {
-        use std::io::Write;
-        let mut temp = tempfile::NamedTempFile::new().unwrap();
-        temp.write_all(b"hello world").unwrap();
-        temp.flush().unwrap();
-
-        let path = temp.path().to_path_buf();
-        let mut overlay = HashMap::new();
-        overlay.insert(0, b'X'); // Change 'h' to 'X' -> "Xello"
-        let pat = exact(b"hello");
-        let (cancel, progress) = make_flags();
-
-        let results = search_in_file(&path, &overlay, 11, &pat, &cancel, &progress).unwrap();
-        assert!(results.is_empty());
-    }
-
-    #[test]
-    fn test_search_in_file_with_wildcard() {
-        use std::io::Write;
-        let mut temp = tempfile::NamedTempFile::new().unwrap();
-        temp.write_all(b"cat bat rat").unwrap();
-        temp.flush().unwrap();
-
-        let path = temp.path().to_path_buf();
-        let overlay = HashMap::new();
-        let pat = pattern(&[None, Some(b'a'), Some(b't')]);
-        let (cancel, progress) = make_flags();
-
-        let results = search_in_file(&path, &overlay, 11, &pat, &cancel, &progress).unwrap();
-        assert_eq!(results, vec![0, 4, 8]);
-    }
-
-    #[test]
-    fn test_search_in_file_nonexistent() {
-        let path = std::path::PathBuf::from("/nonexistent/file/path");
-        let overlay = HashMap::new();
-        let pat = exact(b"test");
-        let (cancel, progress) = make_flags();
-
-        let results = search_in_file(&path, &overlay, 100, &pat, &cancel, &progress).unwrap();
-        assert!(results.is_empty());
     }
 }
