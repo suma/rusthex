@@ -449,20 +449,20 @@ impl HexEditor {
                                 div()
                                     .flex()
                                     .items_center()
-                                    .w(px(address_width))
                                     .flex_shrink_0()
                                     .when(has_bookmark, |d| {
                                         d.child(
                                             div()
-                                                .w(px(8.0))
-                                                .h(px(8.0))
+                                                .size(px(8.0))
+                                                .flex_shrink_0()
                                                 .mr(px(4.0))
                                                 .bg(if has_bookmark_comment { t_bookmark_comment } else { t_bookmark_plain })
                                                 .rounded(px(4.0))
+                                                .child("")
                                         )
                                     })
                                     .when(!has_bookmark, |d| {
-                                        d.child(div().w(px(12.0))) // Spacer to align addresses
+                                        d.child(div().w(px(12.0)).flex_shrink_0()) // Spacer to align addresses
                                     })
                                     .child(
                                         div()
