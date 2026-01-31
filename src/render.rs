@@ -1,6 +1,6 @@
 use crate::encoding::{decode_for_display, DisplayChar};
 use crate::keyboard;
-use crate::ui::{self, EditPane, HexNibble, TextEncoding};
+use crate::ui::{self, EditMode, EditPane, HexNibble, TextEncoding};
 use crate::HexEditor;
 use crate::SearchMode;
 use gpui::{
@@ -463,8 +463,10 @@ impl HexEditor {
                                                     }
                                                 }
                                             } else {
-                                                // Empty slot - use spaces to maintain width
-                                                ("  ".to_string(), false, false, false, false)
+                                                // Empty slot - Insert モード時はカーソルが doc_len にある場合表示
+                                                let is_insert_cursor = byte_idx == self.tab().cursor_position
+                                                    && self.tab().edit_mode == EditMode::Insert;
+                                                ("  ".to_string(), is_insert_cursor, false, false, false)
                                             };
 
                                         div()
@@ -584,6 +586,21 @@ impl HexEditor {
                                             })
                                             .child(ascii_char.to_string())
                                     }))
+                                    // Insert モード時、カーソルが doc_len にあり、この行に属する場合にカーソルを表示
+                                    .when(
+                                        self.tab().edit_mode == EditMode::Insert
+                                            && self.tab().cursor_position == document_len
+                                            && self.tab().cursor_position >= row_start
+                                            && self.tab().cursor_position < row_start + bytes_per_row,
+                                        |el| {
+                                            let cursor_el = if edit_pane == EditPane::Ascii {
+                                                div().bg(rgb(0xff8c00)).text_color(rgb(0x000000)).child(" ")
+                                            } else {
+                                                div().bg(rgb(0x333333)).text_color(rgb(0xffffff)).child(" ")
+                                            };
+                                            el.child(cursor_el)
+                                        }
+                                    )
                             )
                     }))
                                     // Bottom spacer for virtual scrolling
@@ -1062,6 +1079,18 @@ impl HexEditor {
                     .flex()
                     .gap_4()
                     .py_1()
+                    .child(
+                        // Edit mode indicator
+                        div()
+                            .text_color(match self.tab().edit_mode {
+                                EditMode::Overwrite => rgb(0xffffff),
+                                EditMode::Insert => rgb(0x00cccc),
+                            })
+                            .child(match self.tab().edit_mode {
+                                EditMode::Overwrite => "OVR",
+                                EditMode::Insert => "INS",
+                            })
+                    )
                     .child(
                         // Cursor position
                         div()
@@ -1651,7 +1680,16 @@ impl Render for HexEditor {
             cx.notify(); // Trigger re-render
         }
 
-        let row_count = ui::row_count(self.tab().document.len(), self.bytes_per_row());
+        let row_count = {
+            let base = ui::row_count(self.tab().document.len(), self.bytes_per_row());
+            if self.tab().edit_mode == EditMode::Insert {
+                // Insert モード: カーソルが doc_len に達する場合、その行が存在する必要がある
+                let max_row = self.tab().document.len() / self.bytes_per_row();
+                base.max(max_row + 1)
+            } else {
+                base
+            }
+        };
 
         // Phase 1: Get current scroll position
         let scroll_position = self.tab().scroll_handle.offset();

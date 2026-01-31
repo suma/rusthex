@@ -42,7 +42,7 @@ use document::Document;
 use render_cache::{CacheState, RenderCache};
 pub use search::SearchMode;
 use tab::EditorTab;
-pub use ui::{EditPane, HexNibble, Endian, TextEncoding};
+pub use ui::{EditMode, EditPane, HexNibble, Endian, TextEncoding};
 use gpui::{
     App, Application, Bounds, Focusable, FocusHandle, Timer,
     WindowBounds, WindowOptions, prelude::*, px, size,

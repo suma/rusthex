@@ -7,7 +7,7 @@
 //! - Document navigation (Ctrl+Home, Ctrl+End)
 
 use gpui::{px, Point};
-use crate::ui::{self, HexNibble};
+use crate::ui::{self, EditMode, HexNibble};
 use crate::HexEditor;
 
 impl HexEditor {
@@ -17,6 +17,12 @@ impl HexEditor {
     pub fn get_relative_position(&self, relative_pos: i64) -> usize {
         let current_pos = self.tab().cursor_position;
         let doc_len = self.tab().document.len();
+        // Insert モードではドキュメント末尾の1つ先まで許容（末尾追加用）
+        let max_pos = if self.tab().edit_mode == EditMode::Insert {
+            doc_len
+        } else {
+            doc_len.saturating_sub(1)
+        };
 
         if relative_pos < 0 {
             // Moving backward
@@ -29,7 +35,6 @@ impl HexEditor {
         } else {
             // Moving forward
             let diff = relative_pos as usize;
-            let max_pos = doc_len.saturating_sub(1);
             if current_pos.checked_add(diff).map_or(true, |p| p > max_pos) {
                 max_pos
             } else {
@@ -42,7 +47,11 @@ impl HexEditor {
     /// Resets nibble state and ensures cursor visibility.
     /// Based on suma/hex cursor.cpp movePosition.
     pub fn move_position(&mut self, new_pos: usize) {
-        let max_pos = self.tab().document.len().saturating_sub(1);
+        let max_pos = if self.tab().edit_mode == EditMode::Insert {
+            self.tab().document.len()
+        } else {
+            self.tab().document.len().saturating_sub(1)
+        };
         self.tab_mut().cursor_position = new_pos.min(max_pos);
         self.tab_mut().hex_nibble = HexNibble::High;
         self.ensure_cursor_visible_by_row();
@@ -51,7 +60,15 @@ impl HexEditor {
     /// Ensure cursor is visible by scrolling to its row
     pub fn ensure_cursor_visible_by_row(&mut self) {
         let cursor_row = self.tab().cursor_position / self.bytes_per_row();
-        let total_rows = ui::row_count(self.tab().document.len(), self.bytes_per_row());
+        let total_rows = {
+            let base = ui::row_count(self.tab().document.len(), self.bytes_per_row());
+            if self.tab().edit_mode == EditMode::Insert {
+                let max_row = self.tab().document.len() / self.bytes_per_row();
+                base.max(max_row + 1)
+            } else {
+                base
+            }
+        };
         let current_offset = self.tab().scroll_handle.offset();
 
         // If cursor is at position 0, reset scroll to top

@@ -5,16 +5,12 @@
 //! - ASCII input
 //! - Pane toggling and selection management
 
-use crate::ui::{EditPane, HexNibble};
+use crate::ui::{EditMode, EditPane, HexNibble};
 use crate::HexEditor;
 
 impl HexEditor {
     /// Handle hex input (0-9, A-F)
     pub fn input_hex(&mut self, c: char) {
-        if self.tab().cursor_position >= self.tab().document.len() {
-            return;
-        }
-
         // Parse hex digit
         let digit = match c.to_ascii_uppercase() {
             '0'..='9' => c as u8 - b'0',
@@ -23,47 +19,91 @@ impl HexEditor {
         };
 
         let cursor_pos = self.tab().cursor_position;
-        let current_byte = self.tab().document.get_byte(cursor_pos).unwrap();
 
-        let new_byte = match self.tab().hex_nibble {
-            HexNibble::High => {
-                // Update upper 4 bits
-                self.tab_mut().hex_nibble = HexNibble::Low;
-                (digit << 4) | (current_byte & 0x0F)
+        if self.tab().edit_mode == EditMode::Insert {
+            // Insert モード
+            match self.tab().hex_nibble {
+                HexNibble::High => {
+                    // High nibble: 新しいバイトを挿入
+                    let byte = digit << 4;
+                    if let Err(e) = self.tab_mut().document.insert_bytes(cursor_pos, &[byte]) {
+                        eprintln!("Failed to insert byte: {}", e);
+                        return;
+                    }
+                    self.invalidate_render_cache();
+                    self.tab_mut().hex_nibble = HexNibble::Low;
+                }
+                HexNibble::Low => {
+                    // Low nibble: 挿入したバイトの下位ニブルを更新
+                    if let Some(current_byte) = self.tab().document.get_byte(cursor_pos) {
+                        let new_byte = (current_byte & 0xF0) | digit;
+                        if let Err(e) = self.tab_mut().document.set_byte(cursor_pos, new_byte) {
+                            eprintln!("Failed to set byte: {}", e);
+                            return;
+                        }
+                        self.tab_mut().hex_nibble = HexNibble::High;
+                        self.move_cursor_right();
+                    }
+                }
             }
-            HexNibble::Low => {
-                // Update lower 4 bits
-                self.tab_mut().hex_nibble = HexNibble::High;
-                (current_byte & 0xF0) | digit
+        } else {
+            // Overwrite モード
+            if cursor_pos >= self.tab().document.len() {
+                return;
             }
-        };
 
-        let cursor_pos = self.tab().cursor_position;
-        if let Err(e) = self.tab_mut().document.set_byte(cursor_pos, new_byte) {
-            eprintln!("Failed to set byte: {}", e);
-            return;
-        }
+            let current_byte = self.tab().document.get_byte(cursor_pos).unwrap();
 
-        // Auto-advance to next byte after completing a full byte edit
-        if self.tab().hex_nibble == HexNibble::High {
-            self.move_cursor_right();
+            let new_byte = match self.tab().hex_nibble {
+                HexNibble::High => {
+                    self.tab_mut().hex_nibble = HexNibble::Low;
+                    (digit << 4) | (current_byte & 0x0F)
+                }
+                HexNibble::Low => {
+                    self.tab_mut().hex_nibble = HexNibble::High;
+                    (current_byte & 0xF0) | digit
+                }
+            };
+
+            let cursor_pos = self.tab().cursor_position;
+            if let Err(e) = self.tab_mut().document.set_byte(cursor_pos, new_byte) {
+                eprintln!("Failed to set byte: {}", e);
+                return;
+            }
+
+            // Auto-advance to next byte after completing a full byte edit
+            if self.tab().hex_nibble == HexNibble::High {
+                self.move_cursor_right();
+            }
         }
     }
 
     /// Handle ASCII input
     pub fn input_ascii(&mut self, c: char) {
-        if self.tab().cursor_position >= self.tab().document.len() {
+        // Only accept printable ASCII characters
+        if c < ' ' || c > '~' {
             return;
         }
 
-        // Only accept printable ASCII characters
-        if c >= ' ' && c <= '~' {
-            let cursor_pos = self.tab().cursor_position;
+        let cursor_pos = self.tab().cursor_position;
+
+        if self.tab().edit_mode == EditMode::Insert {
+            // Insert モード: バイトを挿入
+            if let Err(e) = self.tab_mut().document.insert_bytes(cursor_pos, &[c as u8]) {
+                eprintln!("Failed to insert byte: {}", e);
+                return;
+            }
+            self.invalidate_render_cache();
+            self.move_cursor_right();
+        } else {
+            // Overwrite モード
+            if cursor_pos >= self.tab().document.len() {
+                return;
+            }
             if let Err(e) = self.tab_mut().document.set_byte(cursor_pos, c as u8) {
                 eprintln!("Failed to set byte: {}", e);
                 return;
             }
-            // Auto-advance to next byte
             self.move_cursor_right();
         }
     }

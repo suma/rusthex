@@ -6,7 +6,7 @@
 use gpui::{Context, KeyDownEvent, Window};
 use std::sync::atomic::Ordering;
 
-use crate::{EditPane, HexEditor, SearchMode};
+use crate::{EditMode, EditPane, HexEditor, SearchMode};
 
 /// Check if Ctrl (Windows/Linux) or Cmd (macOS) modifier is held
 fn is_cmd(event: &KeyDownEvent) -> bool {
@@ -83,7 +83,15 @@ fn handle_command_shortcuts(
                 editor.tab_mut().current_search_index = None;
             }
         }
-        ("i", _) => editor.toggle_inspector(),
+        ("i", true) => {
+            // Ctrl+Shift+I: toggle Overwrite/Insert mode
+            editor.tab_mut().edit_mode = match editor.tab().edit_mode {
+                EditMode::Overwrite => EditMode::Insert,
+                EditMode::Insert => EditMode::Overwrite,
+            };
+            editor.tab_mut().hex_nibble = crate::HexNibble::High;
+        }
+        ("i", false) => editor.toggle_inspector(),
         ("e", true) => editor.cycle_encoding(),
         ("e", false) if editor.inspector_visible => editor.toggle_inspector_endian(),
         ("k", _) => {
@@ -161,6 +169,13 @@ fn handle_special_keys(
             } else {
                 return false;
             }
+        }
+        "insert" => {
+            editor.tab_mut().edit_mode = match editor.tab().edit_mode {
+                EditMode::Overwrite => EditMode::Insert,
+                EditMode::Insert => EditMode::Overwrite,
+            };
+            editor.tab_mut().hex_nibble = crate::HexNibble::High;
         }
         "f2" if !shift => editor.next_bookmark(),
         "f2" if shift => editor.prev_bookmark(),
@@ -249,6 +264,32 @@ fn handle_navigation_and_input(
                     editor.start_search_refresh_loop(cx);
                 }
                 cx.notify();
+            } else if editor.tab().edit_mode == EditMode::Insert {
+                let cursor_pos = editor.tab().cursor_position;
+                if cursor_pos > 0 {
+                    if let Err(e) = editor.tab_mut().document.delete_bytes(cursor_pos - 1, 1) {
+                        eprintln!("Failed to delete byte: {}", e);
+                    } else {
+                        editor.invalidate_render_cache();
+                        editor.tab_mut().hex_nibble = crate::HexNibble::High;
+                        editor.move_position(cursor_pos - 1);
+                        cx.notify();
+                    }
+                }
+            }
+        }
+        "delete" => {
+            if editor.tab().edit_mode == EditMode::Insert {
+                let cursor_pos = editor.tab().cursor_position;
+                if cursor_pos < editor.tab().document.len() {
+                    if let Err(e) = editor.tab_mut().document.delete_bytes(cursor_pos, 1) {
+                        eprintln!("Failed to delete byte: {}", e);
+                    } else {
+                        editor.invalidate_render_cache();
+                        editor.tab_mut().hex_nibble = crate::HexNibble::High;
+                        cx.notify();
+                    }
+                }
             }
         }
         "enter" => {

@@ -77,6 +77,16 @@ impl TextEncoding {
     }
 }
 
+/// Edit mode (Overwrite or Insert)
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum EditMode {
+    /// Overwrite mode: replace existing bytes
+    #[default]
+    Overwrite,
+    /// Insert mode: insert new bytes at cursor position
+    Insert,
+}
+
 /// Hex nibble position tracker
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HexNibble {

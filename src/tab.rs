@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use crate::document::Document;
 use crate::render_cache::RenderCache;
 use crate::search::SearchMode;
-use crate::ui::{EditPane, HexNibble};
+use crate::ui::{EditMode, EditPane, HexNibble};
 
 /// Represents a single editor tab with its own document and state
 pub struct EditorTab {
@@ -23,6 +23,7 @@ pub struct EditorTab {
     pub scroll_offset: Pixels,
     pub selection_start: Option<usize>,
     pub edit_pane: EditPane,
+    pub edit_mode: EditMode,
     pub hex_nibble: HexNibble,
     // Search state per tab
     pub search_visible: bool,
@@ -57,6 +58,7 @@ impl EditorTab {
             scroll_offset: px(0.0),
             selection_start: None,
             edit_pane: EditPane::Hex,
+            edit_mode: EditMode::Overwrite,
             hex_nibble: HexNibble::High,
             search_visible: false,
             search_query: String::new(),
