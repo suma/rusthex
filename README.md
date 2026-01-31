@@ -6,7 +6,12 @@ A modern hex editor built with Rust and [gpui](https://www.gpui.rs/), featuring 
 
 ### Core Functionality
 - **3-Column Layout**: Address, Hex, and ASCII views synchronized in real-time
-- **Dual Edit Modes**: Edit bytes in either Hex or ASCII mode (toggle with Tab)
+- **Dual Edit Panes**: Edit bytes in either Hex or ASCII pane (toggle with Tab)
+- **Overwrite / Insert Mode**: Toggle with Insert key or Ctrl+Shift+I
+  - **Overwrite (OVR)**: Replace existing bytes in-place (default)
+  - **Insert (INS)**: Insert new bytes at cursor position, increasing file size
+  - Backspace deletes the byte before cursor, Delete removes byte at cursor (Insert mode only)
+  - Status bar shows current mode (OVR in white, INS in cyan)
 - **Large File Support**: Memory-mapped files for efficient handling of files > 10MB
 - **Virtual Scrolling**: Smooth performance even with gigabyte-sized files
 - **Undo/Redo**: Full edit history with 1,000 operation limit
@@ -110,9 +115,12 @@ bytes_per_row = 16
 | Shift+Arrow / Shift+Page | Extend selection |
 | Ctrl+A / Cmd+A | Select all |
 | **Editing** ||
-| Tab | Switch between Hex/ASCII mode |
-| 0-9, A-F | Edit hex value (in Hex mode) |
-| Printable chars | Edit ASCII value (in ASCII mode) |
+| Tab | Switch between Hex/ASCII pane |
+| Insert / Ctrl+Shift+I | Toggle Overwrite/Insert mode |
+| 0-9, A-F | Edit hex value (in Hex pane) |
+| Printable chars | Edit ASCII value (in ASCII pane) |
+| Backspace (Insert mode) | Delete byte before cursor |
+| Delete (Insert mode) | Delete byte at cursor |
 | Ctrl+Z / Cmd+Z | Undo |
 | Ctrl+Y / Cmd+Y | Redo |
 | **File** ||
