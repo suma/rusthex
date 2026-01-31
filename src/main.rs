@@ -321,6 +321,7 @@ impl HexEditor {
                 &self.tab().search_match_set,
                 current_search_range,
                 |idx| self.tab().document.get_byte(idx),
+                |idx| self.tab().document.is_modified(idx),
             );
 
             self.tab_mut().render_cache.cache_row(row, row_data);

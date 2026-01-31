@@ -81,6 +81,7 @@ pub struct Theme {
     pub text_diff: Hsla,
 
     // 特殊
+    pub text_modified: Hsla,
     pub text_insert_mode: Hsla,
     pub bookmark_plain: Hsla,
     pub bookmark_comment: Hsla,
@@ -143,6 +144,7 @@ impl Theme {
             text_diff: color(0xff6666),
 
             // 特殊
+            text_modified: color(0xff6b6b),
             text_insert_mode: color(0x00cccc),
             bookmark_plain: color(0x00bfff),
             bookmark_comment: color(0x00ff88),
@@ -197,6 +199,7 @@ impl Theme {
             text_diff: color(0xcc3333),
 
             // 特殊
+            text_modified: color(0xd32f2f),
             text_insert_mode: color(0x008888),
             bookmark_plain: color(0x0088cc),
             bookmark_comment: color(0x00aa44),
@@ -251,6 +254,7 @@ impl Theme {
             text_diff: color(0xf92672),
 
             // 特殊
+            text_modified: color(0xf92672),
             text_insert_mode: color(0x66d9ef),
             bookmark_plain: color(0x66d9ef),
             bookmark_comment: color(0xa6e22e),

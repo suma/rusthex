@@ -331,6 +331,7 @@ impl HexEditor {
         let t_text_primary = t.text_primary;
         let t_accent_secondary = t.accent_secondary;
         let t_text_dim = t.text_dim;
+        let t_text_modified = t.text_modified;
         let t_bg_elevated = t.bg_elevated;
         let t_bg_surface = t.bg_surface;
         let t_border_primary = t.border_primary;
@@ -484,24 +485,24 @@ impl HexEditor {
                                         let bookmark_has_comment = is_bookmarked && self.tab().bookmarks.get(&byte_idx).is_some_and(|c| !c.is_empty());
 
                                         // Get byte data from cache or compute
-                                        let (hex_str, is_cursor, is_selected, is_search_match, is_current_search) =
+                                        let (hex_str, is_cursor, is_selected, is_search_match, is_current_search, is_modified) =
                                             if has_data {
                                                 match &row_data {
                                                     Some(data) if i < data.bytes.len() => {
                                                         let b = &data.bytes[i];
-                                                        (format!("{:02X}", b.value), b.is_cursor, b.is_selected, b.is_search_match, b.is_current_search)
+                                                        (format!("{:02X}", b.value), b.is_cursor, b.is_selected, b.is_search_match, b.is_current_search, b.is_modified)
                                                     }
                                                     _ => {
                                                         // Fallback: compute inline (shouldn't happen if cache is properly updated)
                                                         let byte = self.tab().document.get_byte(byte_idx).unwrap_or(0);
-                                                        (format!("{:02X}", byte), false, false, false, false)
+                                                        (format!("{:02X}", byte), false, false, false, false, false)
                                                     }
                                                 }
                                             } else {
                                                 // Empty slot - Insert モード時はカーソルが doc_len にある場合表示
                                                 let is_insert_cursor = byte_idx == self.tab().cursor_position
                                                     && self.tab().edit_mode == EditMode::Insert;
-                                                ("  ".to_string(), is_insert_cursor, false, false, false)
+                                                ("  ".to_string(), is_insert_cursor, false, false, false, false)
                                             };
 
                                         div()
@@ -538,7 +539,10 @@ impl HexEditor {
                                                 div.bg(t_bg_selection)
                                                     .text_color(t_text_primary)
                                             })
-                                            .when(!is_cursor && !is_current_search && !is_search_match && !is_selected, |div| {
+                                            .when(!is_cursor && !is_current_search && !is_search_match && !is_selected && is_modified, |div| {
+                                                div.text_color(t_text_modified)
+                                            })
+                                            .when(!is_cursor && !is_current_search && !is_search_match && !is_selected && !is_modified, |div| {
                                                 div.text_color(t_accent_success)
                                             })
                                             // Bookmark underline indicator
@@ -565,13 +569,13 @@ impl HexEditor {
                                         let bookmark_has_comment = is_bookmarked && self.tab().bookmarks.get(&byte_idx).is_some_and(|c| !c.is_empty());
 
                                         // Get cursor/selection state from cache
-                                        let (is_cursor, is_selected, is_search_match, is_current_search) =
+                                        let (is_cursor, is_selected, is_search_match, is_current_search, is_modified) =
                                             match &row_data {
                                                 Some(data) if i < data.bytes.len() => {
                                                     let b = &data.bytes[i];
-                                                    (b.is_cursor, b.is_selected, b.is_search_match, b.is_current_search)
+                                                    (b.is_cursor, b.is_selected, b.is_search_match, b.is_current_search, b.is_modified)
                                                 }
-                                                _ => (false, false, false, false)
+                                                _ => (false, false, false, false, false)
                                             };
 
                                         div()
@@ -610,8 +614,12 @@ impl HexEditor {
                                             .when(!is_cursor && !is_current_search && !is_search_match && !is_selected && is_continuation, |div| {
                                                 div.text_color(t_text_dim)
                                             })
+                                            // Modified (non-continuation) characters
+                                            .when(!is_cursor && !is_current_search && !is_search_match && !is_selected && !is_continuation && is_modified, |div| {
+                                                div.text_color(t_text_modified)
+                                            })
                                             // Normal characters
-                                            .when(!is_cursor && !is_current_search && !is_search_match && !is_selected && !is_continuation, |div| {
+                                            .when(!is_cursor && !is_current_search && !is_search_match && !is_selected && !is_continuation && !is_modified, |div| {
                                                 div.text_color(t_text_primary)
                                             })
                                             // Bookmark underline indicator

@@ -14,6 +14,7 @@ pub struct ByteRenderData {
     pub is_selected: bool,
     pub is_search_match: bool,
     pub is_current_search: bool,
+    pub is_modified: bool,
 }
 
 /// Cached render data for a single row
@@ -112,6 +113,7 @@ impl RenderCache {
         search_match_set: &HashSet<usize>,
         current_search_range: Option<(usize, usize)>,
         get_byte: impl Fn(usize) -> Option<u8>,
+        is_modified: impl Fn(usize) -> bool,
     ) -> RowRenderData {
         let row_start = row * bytes_per_row;
         let row_end = (row_start + bytes_per_row).min(document_len);
@@ -137,6 +139,7 @@ impl RenderCache {
                     is_selected,
                     is_search_match,
                     is_current_search,
+                    is_modified: is_modified(byte_idx),
                 }
             })
             .collect();
