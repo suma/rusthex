@@ -201,6 +201,7 @@ impl HexEditor {
             let next_idx = (current_idx + 1) % self.tab().search_results.len();
             self.tab_mut().current_search_index = Some(next_idx);
             let result_pos = self.tab().search_results[next_idx];
+            self.is_dragging = false;
             self.move_position(result_pos);
         }
     }
@@ -219,6 +220,7 @@ impl HexEditor {
             };
             self.tab_mut().current_search_index = Some(prev_idx);
             let result_pos = self.tab().search_results[prev_idx];
+            self.is_dragging = false;
             self.move_position(result_pos);
         }
     }
