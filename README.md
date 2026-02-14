@@ -84,6 +84,15 @@ A modern hex editor built with Rust and [gpui](https://www.gpui.rs/), featuring 
 - **Width Adjustment**: +/- keys to change bitmap width (64, 128, 256, 512, 1024)
 - **Cursor Tracking**: Current position highlighted in bitmap view
 
+### Pattern Language (Binary Structure Decoding)
+- **ImHex Pattern Language**: Decode binary files using `.hexpat` pattern files
+- **Toggle Pattern Panel**: Ctrl+P to show/hide the right-side panel
+- **Pattern Selection**: Dropdown to choose from `.hexpat` files in the configured directory
+- **Tree View**: Hierarchical display of decoded structures
+  - Click to expand/collapse struct, union, array, and bitfield nodes
+  - Leaf values displayed with type, value, and offset
+- **Include Support**: `#include` directives resolved from the hexpat directory
+
 ### Color Themes
 - **Built-in Themes**: Dark (default), Light, Monokai
 - **Switch Themes**: Click "Theme: Dark ▼" in status bar to select
@@ -116,6 +125,12 @@ max_undo_levels = 1000
 [window]
 width = 800
 height = 600
+
+[pattern]
+hexpat_dir = "/path/to/hexpat/patterns"    # Directory containing .hexpat files
+include_dirs = [                            # Additional directories for #include / import resolution
+    "/path/to/hexpat/includes",
+]
 ```
 
 ## Keyboard Shortcuts
@@ -171,6 +186,8 @@ height = 600
 | C (in bitmap) | Cycle color mode |
 | + / = | Increase bitmap width |
 | - | Decrease bitmap width |
+| **Pattern** ||
+| Ctrl+P / Cmd+P | Toggle pattern panel |
 
 ## Installation
 
@@ -253,11 +270,14 @@ rusthex/
 │   ├── input.rs        # Hex/ASCII input handling
 │   ├── inspector.rs    # Data inspector panel
 │   ├── bitmap.rs       # Bitmap visualization
+│   ├── pattern.rs      # Pattern language integration
 │   ├── config.rs       # Configuration file handling
 │   ├── compare.rs      # Compare mode functionality
 │   ├── render_cache.rs # Render optimization cache
 │   ├── encoding.rs     # Text encoding support (ASCII, UTF-8, SJIS, etc.)
 │   └── theme.rs        # Color theme definitions (Dark, Light, Monokai)
+├── crates/
+│   └── pattern-lang/   # ImHex pattern language parser and evaluator
 ├── Cargo.toml
 ├── LICENSE-MIT
 ├── LICENSE-APACHE
@@ -293,15 +313,33 @@ cargo run
 # Run with a specific file
 cargo run -- Cargo.toml
 
-# Run tests
-cargo test
-
 # Check code quality
 cargo clippy
 
 # Format code
 cargo fmt
 ```
+
+### Testing
+
+```bash
+# Run all tests in the workspace
+cargo test
+
+# Run only pattern-lang crate tests
+cargo test -p pattern-lang
+
+# Run a specific test by name
+cargo test -p pattern-lang test_endian_cast
+
+# Run tests with stdout visible
+cargo test -- --nocapture
+
+# Quick compilation check without running tests
+cargo check
+```
+
+See [`crates/pattern-lang/README.md`](crates/pattern-lang/README.md#testing) for details on pattern-lang test structure.
 
 ## Roadmap
 
@@ -313,6 +351,7 @@ See [todo.md](todo.md) for detailed implementation status and planned features.
 - [x] Customizable themes (Dark, Light, Monokai)
 - [ ] Export (C array, Base64, Hex dump)
 - [x] Bitmap visualization (implemented)
+- [x] Pattern language support (ImHex .hexpat files)
 
 ## License
 

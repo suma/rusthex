@@ -1,13 +1,15 @@
-use crate::encoding::{decode_for_display, DisplayChar};
-use crate::keyboard;
-use crate::ui::{self, EditMode, EditPane, HexNibble, TextEncoding};
 use crate::HexEditor;
 use crate::SearchMode;
+use crate::encoding::{DisplayChar, decode_for_display};
+use crate::keyboard;
+use crate::pattern;
+use crate::ui::{self, EditMode, EditPane, HexNibble, TextEncoding};
 use gpui::{
-    div, img, px, rgb, prelude::*, ExternalPaths, Font, FontFeatures, FontStyle, FontWeight,
-    Pixels, SharedString, Window,
+    ExternalPaths, Font, FontFeatures, FontStyle, FontWeight, Pixels, SharedString, Window,
+    deferred, div, img, prelude::*, px, rgb,
 };
 use gpui_component::scroll::{Scrollbar, ScrollbarShow};
+use std::collections::HashSet;
 use std::sync::atomic::Ordering;
 
 /// Bundle of parameters computed in the render() preamble
@@ -92,96 +94,114 @@ impl HexEditor {
             .bg(t.bg_surface)
             .border_b_1()
             .border_color(t.border_primary)
-            .on_mouse_up(gpui::MouseButton::Left, cx.listener(|this, _event, _window, cx| {
-                // Complete the drag operation
-                if let (Some(from), Some(to)) = (this.dragging_tab_index, this.tab_drop_target) {
-                    if from != to {
-                        this.reorder_tab(from, to);
+            .on_mouse_up(
+                gpui::MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    // Complete the drag operation
+                    if let (Some(from), Some(to)) = (this.dragging_tab_index, this.tab_drop_target)
+                    {
+                        if from != to {
+                            this.reorder_tab(from, to);
+                        }
                     }
-                }
-                this.dragging_tab_index = None;
-                this.tab_drop_target = None;
-                cx.notify();
-            }))
+                    this.dragging_tab_index = None;
+                    this.tab_drop_target = None;
+                    cx.notify();
+                }),
+            )
             .children(
-                self.tabs.iter().enumerate().map(|(idx, tab)| {
-                    let is_active = idx == self.active_tab;
-                    let tab_name = tab.display_name();
-                    let is_being_dragged = dragging_tab == Some(idx);
-                    let is_drop_target = drop_target == Some(idx) && dragging_tab != Some(idx);
-                    div()
-                        .id(("tab", idx))
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .px_3()
-                        .py_1()
-                        .text_sm()
-                        .cursor_pointer()
-                        .rounded_t_md()
-                        // Drop target indicator (left border)
-                        .when(is_drop_target, |d| {
-                            d.border_l_2()
-                                .border_color(accent_primary)
-                        })
-                        // Dragging state (semi-transparent)
-                        .when(is_being_dragged, |d| {
-                            d.opacity(0.5)
-                        })
-                        .when(is_active && !is_being_dragged, |d| {
-                            d.bg(bg_primary)
-                                .text_color(text_primary)
-                                .border_t_1()
-                                .border_l_1()
-                                .border_r_1()
-                                .border_color(border_primary)
-                        })
-                        .when(!is_active && !is_being_dragged, |d| {
-                            d.bg(bg_elevated)
-                                .text_color(text_muted)
-                                .hover(|h| h.bg(bg_hover))
-                        })
-                        .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event, _window, cx| {
-                            this.dragging_tab_index = Some(idx);
-                            this.switch_to_tab(idx);
-                            cx.notify();
-                        }))
-                        .on_mouse_move(cx.listener(move |this, event: &gpui::MouseMoveEvent, _window, cx| {
-                            // Update drop target when dragging over tabs
-                            if this.dragging_tab_index.is_some() && event.dragging() {
-                                if this.tab_drop_target != Some(idx) {
-                                    this.tab_drop_target = Some(idx);
+                self.tabs
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, tab)| {
+                        let is_active = idx == self.active_tab;
+                        let tab_name = tab.display_name();
+                        let is_being_dragged = dragging_tab == Some(idx);
+                        let is_drop_target = drop_target == Some(idx) && dragging_tab != Some(idx);
+                        div()
+                            .id(("tab", idx))
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .px_3()
+                            .py_1()
+                            .text_sm()
+                            .cursor_pointer()
+                            .rounded_t_md()
+                            // Drop target indicator (left border)
+                            .when(is_drop_target, |d| {
+                                d.border_l_2().border_color(accent_primary)
+                            })
+                            // Dragging state (semi-transparent)
+                            .when(is_being_dragged, |d| d.opacity(0.5))
+                            .when(is_active && !is_being_dragged, |d| {
+                                d.bg(bg_primary)
+                                    .text_color(text_primary)
+                                    .border_t_1()
+                                    .border_l_1()
+                                    .border_r_1()
+                                    .border_color(border_primary)
+                            })
+                            .when(!is_active && !is_being_dragged, |d| {
+                                d.bg(bg_elevated)
+                                    .text_color(text_muted)
+                                    .hover(|h| h.bg(bg_hover))
+                            })
+                            .on_mouse_down(
+                                gpui::MouseButton::Left,
+                                cx.listener(move |this, _event, _window, cx| {
+                                    this.dragging_tab_index = Some(idx);
+                                    this.switch_to_tab(idx);
                                     cx.notify();
-                                }
-                            }
-                        }))
-                        .child(tab_name)
-                        .child(
-                            // Close button
-                            div()
-                                .id(("tab-close", idx))
-                                .text_xs()
-                                .text_color(text_muted)
-                                .hover(|h| h.text_color(text_diff))
-                                .cursor_pointer()
-                                .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event: &gpui::MouseDownEvent, _window, cx| {
-                                    // Close this specific tab
-                                    if this.tabs.len() > 1 {
-                                        this.tabs.remove(idx);
-                                        if this.active_tab >= this.tabs.len() {
-                                            this.active_tab = this.tabs.len() - 1;
-                                        } else if this.active_tab > idx {
-                                            this.active_tab -= 1;
+                                }),
+                            )
+                            .on_mouse_move(cx.listener(
+                                move |this, event: &gpui::MouseMoveEvent, _window, cx| {
+                                    // Update drop target when dragging over tabs
+                                    if this.dragging_tab_index.is_some() && event.dragging() {
+                                        if this.tab_drop_target != Some(idx) {
+                                            this.tab_drop_target = Some(idx);
+                                            cx.notify();
                                         }
                                     }
-                                    // Clear drag state
-                                    this.dragging_tab_index = None;
-                                    this.tab_drop_target = None;
-                                    cx.notify();
-                                }))
-                                .child("×")
-                        )
-                }).collect::<Vec<_>>()
+                                },
+                            ))
+                            .child(tab_name)
+                            .child(
+                                // Close button
+                                div()
+                                    .id(("tab-close", idx))
+                                    .text_xs()
+                                    .text_color(text_muted)
+                                    .hover(|h| h.text_color(text_diff))
+                                    .cursor_pointer()
+                                    .on_mouse_down(
+                                        gpui::MouseButton::Left,
+                                        cx.listener(
+                                            move |this,
+                                                  _event: &gpui::MouseDownEvent,
+                                                  _window,
+                                                  cx| {
+                                                // Close this specific tab
+                                                if this.tabs.len() > 1 {
+                                                    this.tabs.remove(idx);
+                                                    if this.active_tab >= this.tabs.len() {
+                                                        this.active_tab = this.tabs.len() - 1;
+                                                    } else if this.active_tab > idx {
+                                                        this.active_tab -= 1;
+                                                    }
+                                                }
+                                                // Clear drag state
+                                                this.dragging_tab_index = None;
+                                                this.tab_drop_target = None;
+                                                cx.notify();
+                                            },
+                                        ),
+                                    )
+                                    .child("×"),
+                            )
+                    })
+                    .collect::<Vec<_>>(),
             )
             .child(
                 // New tab button
@@ -193,11 +213,14 @@ impl HexEditor {
                     .text_color(t.text_muted)
                     .cursor_pointer()
                     .hover(|h| h.text_color(accent_success))
-                    .on_mouse_down(gpui::MouseButton::Left, cx.listener(|this, _event, _window, cx| {
-                        this.new_tab();
-                        cx.notify();
-                    }))
-                    .child("+")
+                    .on_mouse_down(
+                        gpui::MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
+                            this.new_tab();
+                            cx.notify();
+                        }),
+                    )
+                    .child("+"),
             )
     }
 
@@ -297,25 +320,29 @@ impl HexEditor {
                         div()
                             .text_sm()
                             .text_color(t.bookmark_plain)
-                            .child(format!("0x{:08X}", pos))
+                            .child(format!("0x{:08X}", pos)),
                     )
                     .child(
                         div()
                             .text_sm()
                             .text_color(t.text_primary)
-                            .child(format!("Comment: {}", comment_text))
-                    )
+                            .child(format!("Comment: {}", comment_text)),
+                    ),
             )
             .child(
                 div()
                     .text_xs()
                     .text_color(t.text_muted)
-                    .child("Enter: save | Esc: cancel | Backspace: delete")
+                    .child("Enter: save | Esc: cancel | Backspace: delete"),
             )
     }
 
     /// Normal mode: hex/ASCII view with optional bitmap panel
-    pub(crate) fn render_normal_mode(&self, cx: &mut gpui::Context<Self>, params: &RenderParams) -> impl IntoElement {
+    pub(crate) fn render_normal_mode(
+        &self,
+        cx: &mut gpui::Context<Self>,
+        params: &RenderParams,
+    ) -> impl IntoElement {
         let t = &self.theme;
         // Capture theme colors for closures
         let t_bookmark_comment = t.bookmark_comment;
@@ -357,12 +384,13 @@ impl HexEditor {
         let char_width = self.cached_char_width;
         let bytes_per_row = self.bytes_per_row();
         let address_col_width = char_width * 8.0 + 16.0; // 8 chars + bookmark indicator + padding
-        let hex_column_width = bytes_per_row as f32 * char_width * 2.0
-            + (bytes_per_row - 1) as f32 * 4.0; // 2 chars per byte + gaps
+        let hex_column_width =
+            bytes_per_row as f32 * char_width * 2.0 + (bytes_per_row - 1) as f32 * 4.0; // 2 chars per byte + gaps
         let ascii_column_width = bytes_per_row as f32 * char_width + 8.0; // Dynamic based on char_width + padding
         let gaps = 16.0 * 2.0; // gap_4 between columns
         let scrollbar_area = 24.0 + 16.0; // pr(24) + scrollbar width + margin
-        let content_min_width = address_col_width + hex_column_width + ascii_column_width + gaps + scrollbar_area;
+        let content_min_width =
+            address_col_width + hex_column_width + ascii_column_width + gaps + scrollbar_area;
 
         // Outer container for hex view + bitmap (horizontal layout)
         div()
@@ -947,6 +975,410 @@ impl HexEditor {
                         )
                 )
             })
+            // Pattern panel (when visible)
+            .when(self.pattern_panel_visible, |container| {
+                container.child(self.render_pattern_panel(cx))
+            })
+    }
+
+    /// Pattern panel: tree view of decoded binary structure
+    pub(crate) fn render_pattern_panel(&self, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+        let t = &self.theme;
+        let t_bg_surface = t.bg_surface;
+        let t_border_primary = t.border_primary;
+        let t_accent_primary = t.accent_primary;
+        let t_text_primary = t.text_primary;
+        let t_text_muted = t.text_muted;
+        let t_text_dim = t.text_dim;
+        let t_accent_success = t.accent_success;
+        let t_bg_hover = t.bg_hover;
+        let t_bg_elevated = t.bg_elevated;
+        let t_text_error = t.text_error;
+
+        let panel_width = self.pattern_panel_width;
+        let viewport_bounds = self.tab().scroll_handle.bounds();
+        let panel_height = f32::from(viewport_bounds.size.height);
+        let dropdown_open = self.pattern_dropdown_open;
+
+        // Build panel content
+        let mut panel = div()
+            .w(px(panel_width))
+            .h(px(panel_height))
+            .flex()
+            .flex_col()
+            .bg(t_bg_surface)
+            .border_l_1()
+            .border_color(t_border_primary)
+            .overflow_hidden();
+
+        // Header: "Pattern" + close button
+        panel = panel.child(
+            div()
+                .flex()
+                .justify_between()
+                .items_center()
+                .px_2()
+                .py_1()
+                .border_b_1()
+                .border_color(t_border_primary)
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(t_accent_primary)
+                        .child("Pattern"),
+                )
+                .child(
+                    div()
+                        .id("pattern-close")
+                        .text_sm()
+                        .text_color(t_text_muted)
+                        .cursor_pointer()
+                        .hover(|s| s.text_color(t_text_primary))
+                        .on_mouse_down(
+                            gpui::MouseButton::Left,
+                            cx.listener(|this, _event, _window, cx| {
+                                this.pattern_panel_visible = false;
+                                cx.notify();
+                            }),
+                        )
+                        .child("✕"),
+                ),
+        );
+
+        // Pattern dropdown selector
+        let selected_name = self
+            .tab()
+            .pattern
+            .selected_index
+            .and_then(|idx| self.tab().pattern.available_patterns.get(idx))
+            .map(|p| p.name.clone())
+            .unwrap_or_else(|| "Select pattern...".to_string());
+
+        panel = panel.child(
+            div()
+                .px_2()
+                .py_1()
+                .border_b_1()
+                .border_color(t_border_primary)
+                .child(
+                    div()
+                        .id("pattern-dropdown-trigger")
+                        .flex()
+                        .justify_between()
+                        .items_center()
+                        .px_2()
+                        .py_1()
+                        .bg(t_bg_elevated)
+                        .rounded_sm()
+                        .cursor_pointer()
+                        .hover(|s| s.bg(t_bg_hover))
+                        .text_sm()
+                        .text_color(t_text_primary)
+                        .on_mouse_down(
+                            gpui::MouseButton::Left,
+                            cx.listener(|this, _event, _window, cx| {
+                                this.pattern_dropdown_open = !this.pattern_dropdown_open;
+                                if this.pattern_dropdown_open {
+                                    this.pattern_filter_query.clear();
+                                    let filtered = this.get_filtered_patterns();
+                                    this.pattern_filter_index =
+                                        if filtered.is_empty() { None } else { Some(0) };
+                                }
+                                cx.notify();
+                            }),
+                        )
+                        .child(selected_name)
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(t_text_muted)
+                                .child(if dropdown_open { "▲" } else { "▼" }),
+                        ),
+                )
+                .when(dropdown_open, |dropdown| {
+                    let filter_query = self.pattern_filter_query.clone();
+                    let filter_index = self.pattern_filter_index;
+                    let filtered_patterns = self.get_filtered_patterns();
+
+                    let mut list = div()
+                        .id("pattern-dropdown-list")
+                        .absolute()
+                        .w(px(panel_width - 16.0))
+                        .bg(t_bg_elevated)
+                        .border_1()
+                        .border_color(t_border_primary)
+                        .rounded_sm()
+                        .overflow_y_scroll()
+                        .max_h(px(200.0));
+
+                    // Filter input field
+                    list = list.child(
+                        div()
+                            .px_2()
+                            .py_1()
+                            .bg(t_bg_elevated)
+                            .border_b_1()
+                            .border_color(t_border_primary)
+                            .text_sm()
+                            .text_color(t_text_primary)
+                            .child(format!("Filter: {}_", filter_query)),
+                    );
+
+                    if filtered_patterns.is_empty() {
+                        let message = if self.tab().pattern.available_patterns.is_empty() {
+                            "No .hexpat files found"
+                        } else {
+                            "No matching patterns"
+                        };
+                        list = list.child(
+                            div()
+                                .px_2()
+                                .py_1()
+                                .bg(t_bg_elevated)
+                                .text_xs()
+                                .text_color(t_text_dim)
+                                .child(message),
+                        );
+                    } else {
+                        for (list_idx, (original_idx, pat)) in filtered_patterns.iter().enumerate()
+                        {
+                            let name = pat.name.clone();
+                            let original_idx = *original_idx;
+                            let is_selected =
+                                self.tab().pattern.selected_index == Some(original_idx);
+                            let is_highlighted = filter_index == Some(list_idx);
+                            list = list.child(
+                                div()
+                                    .id(SharedString::from(format!(
+                                        "pattern-item-{}",
+                                        original_idx
+                                    )))
+                                    .px_2()
+                                    .py_1()
+                                    .bg(if is_highlighted {
+                                        t_bg_hover
+                                    } else {
+                                        t_bg_elevated
+                                    })
+                                    .text_sm()
+                                    .text_color(if is_selected {
+                                        t_accent_primary
+                                    } else {
+                                        t_text_primary
+                                    })
+                                    .cursor_pointer()
+                                    .hover(|s| s.bg(t_bg_hover))
+                                    .on_mouse_down(
+                                        gpui::MouseButton::Left,
+                                        cx.listener(move |this, _event, _window, cx| {
+                                            this.select_pattern(original_idx);
+                                            cx.notify();
+                                        }),
+                                    )
+                                    .child(name),
+                            );
+                        }
+                    }
+
+                    dropdown.child(deferred(list).with_priority(100))
+                }),
+        );
+
+        // Tree view or status
+        match &self.tab().pattern.result {
+            Some(pattern::PatternResult::Err(err)) => {
+                let path_str = err.path.display().to_string();
+                let err_msg = err.message.clone();
+                panel = panel.child(
+                    div()
+                        .id("pattern-error")
+                        .flex_1()
+                        .p_2()
+                        .overflow_y_scroll()
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(t_text_error)
+                                .child(format!("{}: {}", path_str, err_msg)),
+                        ),
+                );
+            }
+            Some(pattern::PatternResult::Ok(nodes)) => {
+                let expanded = &self.tab().pattern.expanded_nodes;
+                let total_visible = pattern::count_visible_nodes(nodes, expanded, "");
+
+                // Build flattened tree items
+                let mut tree_items: Vec<(String, &pattern_lang::PatternNode, usize)> = Vec::new();
+                Self::flatten_tree(nodes, expanded, "", 0, &mut tree_items);
+
+                let mut tree_view = div()
+                    .id("pattern-tree-scroll")
+                    .flex_1()
+                    .overflow_y_scroll()
+                    .track_scroll(&self.tab().pattern.scroll_handle)
+                    .px_1()
+                    .py_1();
+
+                for (path, node, depth) in &tree_items {
+                    let indent = *depth as f32 * 16.0;
+                    let has_children = !node.children.is_empty();
+                    let is_expanded = expanded.contains(path);
+                    let path_clone = path.clone();
+
+                    let display_name = node
+                        .attributes
+                        .display_name
+                        .as_deref()
+                        .unwrap_or(&node.name);
+
+                    // Build node line
+                    let mut node_div = div()
+                        .id(SharedString::from(format!("pn-{}", path)))
+                        .flex()
+                        .items_center()
+                        .gap_1()
+                        .pl(px(indent))
+                        .pr_1()
+                        .py(px(1.0))
+                        .text_xs()
+                        .cursor_pointer()
+                        .hover(|s| s.bg(t_bg_hover));
+
+                    // Click handler for expand/collapse
+                    if has_children {
+                        node_div = node_div.on_mouse_down(
+                            gpui::MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.toggle_pattern_node(&path_clone);
+                                cx.notify();
+                            }),
+                        );
+                    }
+
+                    // Expand/collapse indicator
+                    if has_children {
+                        node_div = node_div.child(
+                            div()
+                                .text_xs()
+                                .text_color(t_text_dim)
+                                .w(px(12.0))
+                                .child(if is_expanded { "▼" } else { "▶" }),
+                        );
+                    } else {
+                        node_div = node_div.child(div().w(px(12.0)));
+                    }
+
+                    // Name
+                    node_div = node_div.child(
+                        div()
+                            .text_color(t_text_primary)
+                            .child(display_name.to_string()),
+                    );
+
+                    // Value (for leaf nodes)
+                    match &node.value {
+                        pattern_lang::PatternValue::Struct
+                        | pattern_lang::PatternValue::Union
+                        | pattern_lang::PatternValue::Array
+                        | pattern_lang::PatternValue::Bitfield
+                        | pattern_lang::PatternValue::LazyStructArray { .. } => {
+                            // Show type name for container types
+                            node_div = node_div.child(
+                                div()
+                                    .text_color(t_text_muted)
+                                    .child(format!(" [{}]", node.type_name)),
+                            );
+                        }
+                        _ => {
+                            // Show value for leaf types
+                            node_div = node_div.child(
+                                div()
+                                    .text_color(t_accent_success)
+                                    .child(format!(" = {}", pattern::format_value(&node.value))),
+                            );
+                            node_div = node_div.child(
+                                div()
+                                    .text_color(t_text_muted)
+                                    .child(format!(" [{}]", node.type_name)),
+                            );
+                        }
+                    }
+
+                    // Offset
+                    node_div = node_div.child(
+                        div()
+                            .text_color(t_text_dim)
+                            .child(format!(" @ 0x{:X}", node.offset)),
+                    );
+
+                    tree_view = tree_view.child(node_div);
+                }
+
+                panel = panel.child(tree_view);
+
+                // Status bar
+                panel = panel.child(
+                    div()
+                        .px_2()
+                        .py_1()
+                        .border_t_1()
+                        .border_color(t_border_primary)
+                        .text_xs()
+                        .text_color(t_text_dim)
+                        .child(format!(
+                            "{} nodes ({} visible)",
+                            Self::count_all_nodes(nodes),
+                            total_visible
+                        )),
+                );
+            }
+            None => {
+                panel = panel.child(
+                    div().flex_1().flex().items_center().justify_center().child(
+                        div()
+                            .text_xs()
+                            .text_color(t_text_dim)
+                            .child("Select a pattern to decode"),
+                    ),
+                );
+            }
+        }
+
+        panel
+    }
+
+    /// Flatten tree nodes for rendering (pre-order traversal respecting expanded state)
+    fn flatten_tree<'a>(
+        nodes: &'a [pattern_lang::PatternNode],
+        expanded: &HashSet<String>,
+        prefix: &str,
+        depth: usize,
+        out: &mut Vec<(String, &'a pattern_lang::PatternNode, usize)>,
+    ) {
+        for node in nodes {
+            if node.attributes.hidden {
+                continue;
+            }
+            let path = if prefix.is_empty() {
+                node.name.clone()
+            } else {
+                format!("{}.{}", prefix, node.name)
+            };
+            out.push((path.clone(), node, depth));
+            if !node.children.is_empty() && expanded.contains(&path) {
+                Self::flatten_tree(&node.children, expanded, &path, depth + 1, out);
+            }
+        }
+    }
+
+    /// Count all nodes in a tree (including hidden ones)
+    fn count_all_nodes(nodes: &[pattern_lang::PatternNode]) -> usize {
+        let mut count = 0;
+        for node in nodes {
+            count += 1;
+            count += Self::count_all_nodes(&node.children);
+        }
+        count
     }
 
     /// Compare mode: dual pane view with virtual scrolling
@@ -1007,19 +1439,16 @@ impl HexEditor {
                             .flex_1()
                             .text_sm()
                             .text_color(t.compare_left)
-                            .child(format!("Left: {}", active_name))
+                            .child(format!("Left: {}", active_name)),
                     )
-                    .child(
-                        div()
-                            .w(px(2.0))
-                    )
+                    .child(div().w(px(2.0)))
                     .child(
                         div()
                             .flex_1()
                             .text_sm()
                             .text_color(t.compare_right)
-                            .child(format!("Right: {}", compare_name))
-                    )
+                            .child(format!("Right: {}", compare_name)),
+                    ),
             )
             // Synchronized scrolling container with virtual scrolling
             .child({
@@ -1034,88 +1463,153 @@ impl HexEditor {
                             .flex()
                             .flex_col()
                             // Top spacer for virtual scrolling
-                            .when(compare_render_start > 0, |d| d.child(div().h(compare_top_spacer)))
+                            .when(compare_render_start > 0, |d| {
+                                d.child(div().h(compare_top_spacer))
+                            })
                             // Row container
                             .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .children((compare_render_start..compare_render_end).map(|row| {
-                                        let start = row * self.bytes_per_row();
-                                        let address = ui::format_address(start);
-                                        let cursor_row = cursor_pos / self.bytes_per_row();
-                                        let is_cursor_row = row == cursor_row;
+                                div().flex().flex_col().children(
+                                    (compare_render_start..compare_render_end)
+                                        .map(|row| {
+                                            let start = row * self.bytes_per_row();
+                                            let address = ui::format_address(start);
+                                            let cursor_row = cursor_pos / self.bytes_per_row();
+                                            let is_cursor_row = row == cursor_row;
 
-                                        div()
-                                            .flex()
-                                            .flex_shrink_0()
-                                            .whitespace_nowrap()
-                                            .gap_2()
-                                            .mb_1()
-                                            // Address column
-                                            .child(
-                                                div()
-                                                    .w(px(address_width))
-                                                    .flex_shrink_0()
-                                                    .text_color(if is_cursor_row { t_accent_primary } else { t_text_muted })
-                                                    .font_family(font_name)
-                                                    .text_size(px(font_size))
-                                                    .child(address.clone())
-                                            )
-                                            // Left pane hex bytes
-                                            .child(
-                                                div()
-                                                    .flex()
-                                                    .gap_1()
-                                                    .flex_1()
-                                                    .font_family(font_name)
-                                                    .text_size(px(font_size))
-                                                    .children((start..(start + self.bytes_per_row()).min(active_doc.len())).map(|byte_idx| {
-                                                        let byte = active_doc.get_byte(byte_idx).unwrap_or(0);
-                                                        let compare_byte = compare_doc.get_byte(byte_idx);
-                                                        let is_diff = compare_byte.map(|b| b != byte).unwrap_or(true);
-                                                        let is_cursor = byte_idx == cursor_pos;
-                                                        div()
-                                                            .when(is_cursor, |d| d.bg(t_compare_left).text_color(t_text_on_accent))
-                                                            .when(!is_cursor, |d| d.text_color(if is_diff { t_text_diff } else { t_accent_success }))
-                                                            .child(format!("{:02X}", byte))
-                                                    }).collect::<Vec<_>>())
-                                            )
-                                            // Separator
-                                            .child(
-                                                div()
-                                                    .w(px(2.0))
-                                                    .bg(t_compare_separator)
-                                            )
-                                            // Right pane hex bytes
-                                            .child(
-                                                div()
-                                                    .flex()
-                                                    .gap_1()
-                                                    .flex_1()
-                                                    .font_family(font_name)
-                                                    .text_size(px(font_size))
-                                                    .children((start..(start + self.bytes_per_row()).min(compare_doc.len())).map(|byte_idx| {
-                                                        let byte = compare_doc.get_byte(byte_idx).unwrap_or(0);
-                                                        let active_byte = active_doc.get_byte(byte_idx);
-                                                        let is_diff = active_byte.map(|b| b != byte).unwrap_or(true);
-                                                        let is_cursor = byte_idx == cursor_pos;
-                                                        div()
-                                                            .when(is_cursor, |d| d.bg(t_compare_right).text_color(t_text_on_accent))
-                                                            .when(!is_cursor, |d| d.text_color(if is_diff { t_text_diff } else { t_accent_success }))
-                                                            .child(format!("{:02X}", byte))
-                                                    }).collect::<Vec<_>>())
-                                            )
-                                    }).collect::<Vec<_>>())
+                                            div()
+                                                .flex()
+                                                .flex_shrink_0()
+                                                .whitespace_nowrap()
+                                                .gap_2()
+                                                .mb_1()
+                                                // Address column
+                                                .child(
+                                                    div()
+                                                        .w(px(address_width))
+                                                        .flex_shrink_0()
+                                                        .text_color(if is_cursor_row {
+                                                            t_accent_primary
+                                                        } else {
+                                                            t_text_muted
+                                                        })
+                                                        .font_family(font_name)
+                                                        .text_size(px(font_size))
+                                                        .child(address.clone()),
+                                                )
+                                                // Left pane hex bytes
+                                                .child(
+                                                    div()
+                                                        .flex()
+                                                        .gap_1()
+                                                        .flex_1()
+                                                        .font_family(font_name)
+                                                        .text_size(px(font_size))
+                                                        .children(
+                                                            (start
+                                                                ..(start + self.bytes_per_row())
+                                                                    .min(active_doc.len()))
+                                                                .map(|byte_idx| {
+                                                                    let byte = active_doc
+                                                                        .get_byte(byte_idx)
+                                                                        .unwrap_or(0);
+                                                                    let compare_byte = compare_doc
+                                                                        .get_byte(byte_idx);
+                                                                    let is_diff = compare_byte
+                                                                        .map(|b| b != byte)
+                                                                        .unwrap_or(true);
+                                                                    let is_cursor =
+                                                                        byte_idx == cursor_pos;
+                                                                    div()
+                                                                        .when(is_cursor, |d| {
+                                                                            d.bg(t_compare_left)
+                                                                                .text_color(
+                                                                                t_text_on_accent,
+                                                                            )
+                                                                        })
+                                                                        .when(!is_cursor, |d| {
+                                                                            d.text_color(
+                                                                                if is_diff {
+                                                                                    t_text_diff
+                                                                                } else {
+                                                                                    t_accent_success
+                                                                                },
+                                                                            )
+                                                                        })
+                                                                        .child(format!(
+                                                                            "{:02X}",
+                                                                            byte
+                                                                        ))
+                                                                })
+                                                                .collect::<Vec<_>>(),
+                                                        ),
+                                                )
+                                                // Separator
+                                                .child(div().w(px(2.0)).bg(t_compare_separator))
+                                                // Right pane hex bytes
+                                                .child(
+                                                    div()
+                                                        .flex()
+                                                        .gap_1()
+                                                        .flex_1()
+                                                        .font_family(font_name)
+                                                        .text_size(px(font_size))
+                                                        .children(
+                                                            (start
+                                                                ..(start + self.bytes_per_row())
+                                                                    .min(compare_doc.len()))
+                                                                .map(|byte_idx| {
+                                                                    let byte = compare_doc
+                                                                        .get_byte(byte_idx)
+                                                                        .unwrap_or(0);
+                                                                    let active_byte = active_doc
+                                                                        .get_byte(byte_idx);
+                                                                    let is_diff = active_byte
+                                                                        .map(|b| b != byte)
+                                                                        .unwrap_or(true);
+                                                                    let is_cursor =
+                                                                        byte_idx == cursor_pos;
+                                                                    div()
+                                                                        .when(is_cursor, |d| {
+                                                                            d.bg(t_compare_right)
+                                                                                .text_color(
+                                                                                t_text_on_accent,
+                                                                            )
+                                                                        })
+                                                                        .when(!is_cursor, |d| {
+                                                                            d.text_color(
+                                                                                if is_diff {
+                                                                                    t_text_diff
+                                                                                } else {
+                                                                                    t_accent_success
+                                                                                },
+                                                                            )
+                                                                        })
+                                                                        .child(format!(
+                                                                            "{:02X}",
+                                                                            byte
+                                                                        ))
+                                                                })
+                                                                .collect::<Vec<_>>(),
+                                                        ),
+                                                )
+                                        })
+                                        .collect::<Vec<_>>(),
+                                ),
                             )
                             // Bottom spacer for virtual scrolling
-                            .when(compare_render_end < compare_row_count, |d| d.child(div().h(compare_bottom_spacer)))
+                            .when(compare_render_end < compare_row_count, |d| {
+                                d.child(div().h(compare_bottom_spacer))
+                            }),
                     )
             })
     }
 
     /// Status bar (cursor position, byte value, selection, search status, etc.)
-    pub(crate) fn render_status_bar(&self, cx: &mut gpui::Context<Self>, font_name: &String) -> impl IntoElement {
+    pub(crate) fn render_status_bar(
+        &self,
+        cx: &mut gpui::Context<Self>,
+        font_name: &String,
+    ) -> impl IntoElement {
         let t = &self.theme;
         let t_accent_primary = t.accent_primary;
         let t_text_on_accent = t.text_on_accent;
@@ -1131,7 +1625,8 @@ impl HexEditor {
 
         // Determine current theme name for display
         use crate::theme::ThemeName;
-        let current_theme_name = ThemeName::all().iter()
+        let current_theme_name = ThemeName::all()
+            .iter()
             .find(|name| {
                 let candidate = crate::theme::Theme::from_name(**name);
                 candidate.bg_primary == self.theme.bg_primary
@@ -1502,37 +1997,21 @@ impl HexEditor {
                         div()
                             .flex()
                             .gap_2()
-                            .child(
-                                div()
-                                    .text_color(t.accent_primary)
-                                    .child("Data Inspector")
-                            )
+                            .child(div().text_color(t.accent_primary).child("Data Inspector"))
                             .child(
                                 div()
                                     .text_color(t.text_muted)
-                                    .child(format!("@ 0x{:08X}", self.tab().cursor_position))
-                            )
+                                    .child(format!("@ 0x{:08X}", self.tab().cursor_position)),
+                            ),
                     )
                     .child(
                         div()
                             .flex()
                             .gap_2()
-                            .child(
-                                div()
-                                    .text_color(t.text_muted)
-                                    .child("Endian:")
-                            )
-                            .child(
-                                div()
-                                    .text_color(t.accent_secondary)
-                                    .child(endian_label)
-                            )
-                            .child(
-                                div()
-                                    .text_color(t.text_dim)
-                                    .child("(Ctrl+E)")
-                            )
-                    )
+                            .child(div().text_color(t.text_muted).child("Endian:"))
+                            .child(div().text_color(t.accent_secondary).child(endian_label))
+                            .child(div().text_color(t.text_dim).child("(Ctrl+E)")),
+                    ),
             )
             // Values grid
             .when_some(values, |el, vals| {
@@ -1551,15 +2030,37 @@ impl HexEditor {
                                     div()
                                         .flex()
                                         .gap_2()
-                                        .child(div().w(px(60.0)).text_color(t.text_muted).child("Int8:"))
-                                        .child(div().w(px(100.0)).text_right().text_color(t.accent_success).child(format!("{}", vals.int8)))
+                                        .child(
+                                            div()
+                                                .w(px(60.0))
+                                                .text_color(t.text_muted)
+                                                .child("Int8:"),
+                                        )
+                                        .child(
+                                            div()
+                                                .w(px(100.0))
+                                                .text_right()
+                                                .text_color(t.accent_success)
+                                                .child(format!("{}", vals.int8)),
+                                        ),
                                 )
                                 .child(
                                     div()
                                         .flex()
                                         .gap_2()
-                                        .child(div().w(px(60.0)).text_color(t.text_muted).child("UInt8:"))
-                                        .child(div().w(px(100.0)).text_right().text_color(t.accent_success).child(format!("{}", vals.uint8)))
+                                        .child(
+                                            div()
+                                                .w(px(60.0))
+                                                .text_color(t.text_muted)
+                                                .child("UInt8:"),
+                                        )
+                                        .child(
+                                            div()
+                                                .w(px(100.0))
+                                                .text_right()
+                                                .text_color(t.accent_success)
+                                                .child(format!("{}", vals.uint8)),
+                                        ),
                                 )
                                 // 16-bit values
                                 .when_some(vals.int16, |el, v| {
@@ -1567,8 +2068,19 @@ impl HexEditor {
                                         div()
                                             .flex()
                                             .gap_2()
-                                            .child(div().w(px(60.0)).text_color(t.text_muted).child("Int16:"))
-                                            .child(div().w(px(100.0)).text_right().text_color(t.accent_success).child(format!("{}", v)))
+                                            .child(
+                                                div()
+                                                    .w(px(60.0))
+                                                    .text_color(t.text_muted)
+                                                    .child("Int16:"),
+                                            )
+                                            .child(
+                                                div()
+                                                    .w(px(100.0))
+                                                    .text_right()
+                                                    .text_color(t.accent_success)
+                                                    .child(format!("{}", v)),
+                                            ),
                                     )
                                 })
                                 .when_some(vals.uint16, |el, v| {
@@ -1576,8 +2088,19 @@ impl HexEditor {
                                         div()
                                             .flex()
                                             .gap_2()
-                                            .child(div().w(px(60.0)).text_color(t.text_muted).child("UInt16:"))
-                                            .child(div().w(px(100.0)).text_right().text_color(t.accent_success).child(format!("{}", v)))
+                                            .child(
+                                                div()
+                                                    .w(px(60.0))
+                                                    .text_color(t.text_muted)
+                                                    .child("UInt16:"),
+                                            )
+                                            .child(
+                                                div()
+                                                    .w(px(100.0))
+                                                    .text_right()
+                                                    .text_color(t.accent_success)
+                                                    .child(format!("{}", v)),
+                                            ),
                                     )
                                 })
                                 // 32-bit values
@@ -1586,8 +2109,19 @@ impl HexEditor {
                                         div()
                                             .flex()
                                             .gap_2()
-                                            .child(div().w(px(60.0)).text_color(t.text_muted).child("Int32:"))
-                                            .child(div().w(px(100.0)).text_right().text_color(t.accent_success).child(format!("{}", v)))
+                                            .child(
+                                                div()
+                                                    .w(px(60.0))
+                                                    .text_color(t.text_muted)
+                                                    .child("Int32:"),
+                                            )
+                                            .child(
+                                                div()
+                                                    .w(px(100.0))
+                                                    .text_right()
+                                                    .text_color(t.accent_success)
+                                                    .child(format!("{}", v)),
+                                            ),
                                     )
                                 })
                                 .when_some(vals.uint32, |el, v| {
@@ -1595,10 +2129,21 @@ impl HexEditor {
                                         div()
                                             .flex()
                                             .gap_2()
-                                            .child(div().w(px(60.0)).text_color(t.text_muted).child("UInt32:"))
-                                            .child(div().w(px(100.0)).text_right().text_color(t.accent_success).child(format!("{}", v)))
+                                            .child(
+                                                div()
+                                                    .w(px(60.0))
+                                                    .text_color(t.text_muted)
+                                                    .child("UInt32:"),
+                                            )
+                                            .child(
+                                                div()
+                                                    .w(px(100.0))
+                                                    .text_right()
+                                                    .text_color(t.accent_success)
+                                                    .child(format!("{}", v)),
+                                            ),
                                     )
-                                })
+                                }),
                         )
                         // 64-bit and float column
                         .child(
@@ -1612,8 +2157,19 @@ impl HexEditor {
                                         div()
                                             .flex()
                                             .gap_2()
-                                            .child(div().w(px(60.0)).text_color(t.text_muted).child("Int64:"))
-                                            .child(div().w(px(180.0)).text_right().text_color(t.accent_success).child(format!("{}", v)))
+                                            .child(
+                                                div()
+                                                    .w(px(60.0))
+                                                    .text_color(t.text_muted)
+                                                    .child("Int64:"),
+                                            )
+                                            .child(
+                                                div()
+                                                    .w(px(180.0))
+                                                    .text_right()
+                                                    .text_color(t.accent_success)
+                                                    .child(format!("{}", v)),
+                                            ),
                                     )
                                 })
                                 .when_some(vals.uint64, |el, v| {
@@ -1621,8 +2177,19 @@ impl HexEditor {
                                         div()
                                             .flex()
                                             .gap_2()
-                                            .child(div().w(px(60.0)).text_color(t.text_muted).child("UInt64:"))
-                                            .child(div().w(px(180.0)).text_right().text_color(t.accent_success).child(format!("{}", v)))
+                                            .child(
+                                                div()
+                                                    .w(px(60.0))
+                                                    .text_color(t.text_muted)
+                                                    .child("UInt64:"),
+                                            )
+                                            .child(
+                                                div()
+                                                    .w(px(180.0))
+                                                    .text_right()
+                                                    .text_color(t.accent_success)
+                                                    .child(format!("{}", v)),
+                                            ),
                                     )
                                 })
                                 // Float values
@@ -1636,8 +2203,19 @@ impl HexEditor {
                                         div()
                                             .flex()
                                             .gap_2()
-                                            .child(div().w(px(60.0)).text_color(t.text_muted).child("Float32:"))
-                                            .child(div().w(px(180.0)).text_right().text_color(t.text_warning).child(display))
+                                            .child(
+                                                div()
+                                                    .w(px(60.0))
+                                                    .text_color(t.text_muted)
+                                                    .child("Float32:"),
+                                            )
+                                            .child(
+                                                div()
+                                                    .w(px(180.0))
+                                                    .text_right()
+                                                    .text_color(t.text_warning)
+                                                    .child(display),
+                                            ),
                                     )
                                 })
                                 .when_some(vals.float64, |el, v| {
@@ -1650,10 +2228,21 @@ impl HexEditor {
                                         div()
                                             .flex()
                                             .gap_2()
-                                            .child(div().w(px(60.0)).text_color(t.text_muted).child("Float64:"))
-                                            .child(div().w(px(180.0)).text_right().text_color(t.text_warning).child(display))
+                                            .child(
+                                                div()
+                                                    .w(px(60.0))
+                                                    .text_color(t.text_muted)
+                                                    .child("Float64:"),
+                                            )
+                                            .child(
+                                                div()
+                                                    .w(px(180.0))
+                                                    .text_right()
+                                                    .text_color(t.text_warning)
+                                                    .child(display),
+                                            ),
                                     )
-                                })
+                                }),
                         )
                         // Hex column
                         .child(
@@ -1665,16 +2254,34 @@ impl HexEditor {
                                     div()
                                         .flex()
                                         .gap_2()
-                                        .child(div().w(px(60.0)).text_color(t.text_muted).child("Hex8:"))
-                                        .child(div().text_color(t.accent_primary).child(format!("0x{:02X}", vals.uint8)))
+                                        .child(
+                                            div()
+                                                .w(px(60.0))
+                                                .text_color(t.text_muted)
+                                                .child("Hex8:"),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_color(t.accent_primary)
+                                                .child(format!("0x{:02X}", vals.uint8)),
+                                        ),
                                 )
                                 .when_some(vals.uint16, |el, v| {
                                     el.child(
                                         div()
                                             .flex()
                                             .gap_2()
-                                            .child(div().w(px(60.0)).text_color(t.text_muted).child("Hex16:"))
-                                            .child(div().text_color(t.accent_primary).child(format!("0x{:04X}", v)))
+                                            .child(
+                                                div()
+                                                    .w(px(60.0))
+                                                    .text_color(t.text_muted)
+                                                    .child("Hex16:"),
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_color(t.accent_primary)
+                                                    .child(format!("0x{:04X}", v)),
+                                            ),
                                     )
                                 })
                                 .when_some(vals.uint32, |el, v| {
@@ -1682,8 +2289,17 @@ impl HexEditor {
                                         div()
                                             .flex()
                                             .gap_2()
-                                            .child(div().w(px(60.0)).text_color(t.text_muted).child("Hex32:"))
-                                            .child(div().text_color(t.accent_primary).child(format!("0x{:08X}", v)))
+                                            .child(
+                                                div()
+                                                    .w(px(60.0))
+                                                    .text_color(t.text_muted)
+                                                    .child("Hex32:"),
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_color(t.accent_primary)
+                                                    .child(format!("0x{:08X}", v)),
+                                            ),
                                     )
                                 })
                                 .when_some(vals.uint64, |el, v| {
@@ -1691,20 +2307,25 @@ impl HexEditor {
                                         div()
                                             .flex()
                                             .gap_2()
-                                            .child(div().w(px(60.0)).text_color(t.text_muted).child("Hex64:"))
-                                            .child(div().text_color(t.accent_primary).child(format!("0x{:016X}", v)))
+                                            .child(
+                                                div()
+                                                    .w(px(60.0))
+                                                    .text_color(t.text_muted)
+                                                    .child("Hex64:"),
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_color(t.accent_primary)
+                                                    .child(format!("0x{:016X}", v)),
+                                            ),
                                     )
-                                })
-                        )
+                                }),
+                        ),
                 )
             })
             // No data message
             .when(self.tab().document.len() == 0, |el| {
-                el.child(
-                    div()
-                        .text_color(t.text_muted)
-                        .child("No data available")
-                )
+                el.child(div().text_color(t.text_muted).child("No data available"))
             })
     }
 
@@ -1713,7 +2334,10 @@ impl HexEditor {
         let t = &self.theme;
         let t_accent_primary = t.accent_primary;
         let t_bg_hover = t.bg_hover;
-        let tabs_info: Vec<(usize, String)> = self.tabs.iter().enumerate()
+        let tabs_info: Vec<(usize, String)> = self
+            .tabs
+            .iter()
+            .enumerate()
             .filter(|(idx, _)| *idx != self.active_tab)
             .map(|(idx, tab)| (idx, tab.display_name()))
             .collect();
@@ -1743,44 +2367,46 @@ impl HexEditor {
                         div()
                             .text_lg()
                             .text_color(t.accent_primary)
-                            .child("Select tab to compare")
+                            .child("Select tab to compare"),
                     )
                     .child(
                         div()
                             .text_sm()
                             .text_color(t.text_muted)
-                            .child("Press 1-9 or click to select | Esc: cancel")
+                            .child("Press 1-9 or click to select | Esc: cancel"),
                     )
                     .children(
-                        tabs_info.into_iter().map(move |(idx, name)| {
-                            let display_num = if idx < self.active_tab { idx + 1 } else { idx };
-                            div()
-                                .id(("compare-tab", idx))
-                                .flex()
-                                .gap_2()
-                                .px_3()
-                                .py_2()
-                                .rounded_md()
-                                .cursor_pointer()
-                                .bg(t_bg_hover)
-                                .hover(|h| h.bg(t_accent_primary))
-                                .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event, _window, cx| {
-                                    this.select_compare_tab(idx);
-                                    cx.notify();
-                                }))
-                                .child(
-                                    div()
-                                        .text_color(t.accent_secondary)
-                                        .w(px(20.0))
-                                        .child(format!("{}", display_num))
-                                )
-                                .child(
-                                    div()
-                                        .text_color(t.text_primary)
-                                        .child(name)
-                                )
-                        }).collect::<Vec<_>>()
-                    )
+                        tabs_info
+                            .into_iter()
+                            .map(move |(idx, name)| {
+                                let display_num = if idx < self.active_tab { idx + 1 } else { idx };
+                                div()
+                                    .id(("compare-tab", idx))
+                                    .flex()
+                                    .gap_2()
+                                    .px_3()
+                                    .py_2()
+                                    .rounded_md()
+                                    .cursor_pointer()
+                                    .bg(t_bg_hover)
+                                    .hover(|h| h.bg(t_accent_primary))
+                                    .on_mouse_down(
+                                        gpui::MouseButton::Left,
+                                        cx.listener(move |this, _event, _window, cx| {
+                                            this.select_compare_tab(idx);
+                                            cx.notify();
+                                        }),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_color(t.accent_secondary)
+                                            .w(px(20.0))
+                                            .child(format!("{}", display_num)),
+                                    )
+                                    .child(div().text_color(t.text_primary).child(name))
+                            })
+                            .collect::<Vec<_>>(),
+                    ),
             )
     }
 }
@@ -1874,15 +2500,14 @@ impl Render for HexEditor {
 
         // Phase 3: Calculate spacer heights for virtual scrolling
         // Uses capped virtual height to avoid f32 precision issues with large files
-        let (top_spacer_height, bottom_spacer_height) = ui::calculate_spacer_heights(
-            render_start,
-            render_end,
-            row_count,
-            self.row_height(),
-        );
+        let (top_spacer_height, bottom_spacer_height) =
+            ui::calculate_spacer_heights(render_start, render_end, row_count, self.row_height());
 
         // Get display title
-        let title = self.tab().document.file_name()
+        let title = self
+            .tab()
+            .document
+            .file_name()
             .unwrap_or("Rust Hex Editor")
             .to_string();
 
@@ -1906,143 +2531,163 @@ impl Render for HexEditor {
             .size_full()
             .p_4()
             .track_focus(&self.focus_handle)
-            .on_mouse_down(gpui::MouseButton::Left, cx.listener(|_this, _event, window, cx| {
-                cx.focus_self(window);
-            }))
-            .on_mouse_up(gpui::MouseButton::Left, cx.listener(|this, _event, _window, cx| {
-                if this.is_dragging {
-                    this.is_dragging = false;
-                    this.drag_pane = None;
-                    this.bitmap.drag_start_y = None;
-                    this.bitmap.drag_start_row = None;
-                    cx.notify();
-                }
-            }))
-            .on_mouse_move(cx.listener(|this, event: &gpui::MouseMoveEvent, _window, cx| {
-                // Cancel drag if mouse button was released outside the window
-                if this.is_dragging && !event.dragging() {
-                    this.is_dragging = false;
-                    this.drag_pane = None;
-                    this.bitmap.drag_start_y = None;
-                    this.bitmap.drag_start_row = None;
-                    cx.notify();
-                    return;
-                }
+            .on_mouse_down(
+                gpui::MouseButton::Left,
+                cx.listener(|_this, _event, window, cx| {
+                    cx.focus_self(window);
+                }),
+            )
+            .on_mouse_up(
+                gpui::MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    if this.is_dragging {
+                        this.is_dragging = false;
+                        this.drag_pane = None;
+                        this.bitmap.drag_start_y = None;
+                        this.bitmap.drag_start_row = None;
+                        cx.notify();
+                    }
+                }),
+            )
+            .on_mouse_move(
+                cx.listener(|this, event: &gpui::MouseMoveEvent, _window, cx| {
+                    // Cancel drag if mouse button was released outside the window
+                    if this.is_dragging && !event.dragging() {
+                        this.is_dragging = false;
+                        this.drag_pane = None;
+                        this.bitmap.drag_start_y = None;
+                        this.bitmap.drag_start_row = None;
+                        cx.notify();
+                        return;
+                    }
 
-                // Handle bitmap viewport indicator drag at root level
-                if this.drag_pane == Some(EditPane::Bitmap) && this.is_dragging {
-                    if let (Some(start_y), Some(start_row)) = (this.bitmap.drag_start_y, this.bitmap.drag_start_row) {
-                        let mouse_y: f32 = event.position.y.into();
-                        let delta_y = mouse_y - start_y;
+                    // Handle bitmap viewport indicator drag at root level
+                    if this.drag_pane == Some(EditPane::Bitmap) && this.is_dragging {
+                        if let (Some(start_y), Some(start_row)) =
+                            (this.bitmap.drag_start_y, this.bitmap.drag_start_row)
+                        {
+                            let mouse_y: f32 = event.position.y.into();
+                            let delta_y = mouse_y - start_y;
 
-                        // Convert pixel delta to bitmap rows
-                        let bitmap_width = this.bitmap.width;
-                        let bitmap_panel_width = this.bitmap.panel_width;
-                        let pixel_size = ((bitmap_panel_width - 20.0) / bitmap_width as f32).max(1.0).min(4.0);
-                        let delta_bitmap_rows = (delta_y / pixel_size) as isize;
+                            // Convert pixel delta to bitmap rows
+                            let bitmap_width = this.bitmap.width;
+                            let bitmap_panel_width = this.bitmap.panel_width;
+                            let pixel_size = ((bitmap_panel_width - 20.0) / bitmap_width as f32)
+                                .max(1.0)
+                                .min(4.0);
+                            let delta_bitmap_rows = (delta_y / pixel_size) as isize;
 
-                        // Convert bitmap rows to hex view rows
+                            // Convert bitmap rows to hex view rows
+                            let bytes_per_row = this.bytes_per_row();
+                            let delta_hex_rows =
+                                delta_bitmap_rows * bitmap_width as isize / bytes_per_row as isize;
+
+                            // Calculate new scroll position
+                            let new_row = if delta_hex_rows >= 0 {
+                                start_row.saturating_add(delta_hex_rows as usize)
+                            } else {
+                                start_row.saturating_sub((-delta_hex_rows) as usize)
+                            };
+
+                            // Calculate scroll offset and apply
+                            let doc_len = this.tab().document.len();
+                            let total_rows = (doc_len + bytes_per_row - 1) / bytes_per_row;
+                            let row_height = this.row_height();
+                            let visible_rows = this.content_view_rows;
+
+                            let new_y_offset = ui::calculate_scroll_offset(
+                                new_row,
+                                visible_rows,
+                                total_rows,
+                                row_height,
+                            );
+                            let current_offset = this.tab().scroll_handle.offset();
+                            let new_offset = gpui::Point::new(current_offset.x, new_y_offset);
+                            this.tab_mut().scroll_handle.set_offset(new_offset);
+                            this.tab_mut().scroll_offset = new_y_offset;
+                            cx.notify();
+                        }
+                    }
+
+                    // Handle hex/ASCII drag selection at root level
+                    // Root-level handler ensures events fire even when mouse moves outside hex-content div
+                    if (this.drag_pane == Some(EditPane::Hex)
+                        || this.drag_pane == Some(EditPane::Ascii))
+                        && this.is_dragging
+                    {
                         let bytes_per_row = this.bytes_per_row();
-                        let delta_hex_rows = delta_bitmap_rows * bitmap_width as isize / bytes_per_row as isize;
+                        let doc_len = this.tab().document.len();
+                        if doc_len == 0 {
+                            return;
+                        }
+                        let scroll_offset_f32: f32 =
+                            (-f32::from(this.tab().scroll_offset)).max(0.0);
 
-                        // Calculate new scroll position
-                        let new_row = if delta_hex_rows >= 0 {
-                            start_row.saturating_add(delta_hex_rows as usize)
+                        let row_height = this.cached_row_height;
+                        let char_width = this.cached_char_width;
+                        // Hex byte: 2 chars + gap_1 (4px)
+                        let hex_byte_width = char_width * 2.0 + 4.0;
+
+                        // Calculate row from Y position
+                        // event.position is in window coordinates
+                        let mouse_y: f32 = event.position.y.into();
+
+                        // Content area offset: outer padding + header height + content top padding
+                        let outer_padding = 16.0; // p_4
+                        let content_top_padding = 16.0; // pt_4
+                        let content_top =
+                            outer_padding + this.calculate_header_height() + content_top_padding;
+                        let relative_y = mouse_y - content_top + scroll_offset_f32;
+
+                        let row = if relative_y < 0.0 {
+                            0
                         } else {
-                            start_row.saturating_sub((-delta_hex_rows) as usize)
+                            (relative_y / row_height) as usize
                         };
 
-                        // Calculate scroll offset and apply
-                        let doc_len = this.tab().document.len();
-                        let total_rows = (doc_len + bytes_per_row - 1) / bytes_per_row;
-                        let row_height = this.row_height();
-                        let visible_rows = this.content_view_rows;
+                        let row_start = row * bytes_per_row;
 
-                        let new_y_offset = ui::calculate_scroll_offset(
-                            new_row,
-                            visible_rows,
-                            total_rows,
-                            row_height,
-                        );
-                        let current_offset = this.tab().scroll_handle.offset();
-                        let new_offset = gpui::Point::new(current_offset.x, new_y_offset);
-                        this.tab_mut().scroll_handle.set_offset(new_offset);
-                        this.tab_mut().scroll_offset = new_y_offset;
-                        cx.notify();
-                    }
-                }
-
-                // Handle hex/ASCII drag selection at root level
-                // Root-level handler ensures events fire even when mouse moves outside hex-content div
-                if (this.drag_pane == Some(EditPane::Hex) || this.drag_pane == Some(EditPane::Ascii)) && this.is_dragging {
-                    let bytes_per_row = this.bytes_per_row();
-                    let doc_len = this.tab().document.len();
-                    if doc_len == 0 { return; }
-                    let scroll_offset_f32: f32 = (-f32::from(this.tab().scroll_offset)).max(0.0);
-
-                    let row_height = this.cached_row_height;
-                    let char_width = this.cached_char_width;
-                    // Hex byte: 2 chars + gap_1 (4px)
-                    let hex_byte_width = char_width * 2.0 + 4.0;
-
-                    // Calculate row from Y position
-                    // event.position is in window coordinates
-                    let mouse_y: f32 = event.position.y.into();
-
-                    // Content area offset: outer padding + header height + content top padding
-                    let outer_padding = 16.0; // p_4
-                    let content_top_padding = 16.0; // pt_4
-                    let content_top = outer_padding + this.calculate_header_height() + content_top_padding;
-                    let relative_y = mouse_y - content_top + scroll_offset_f32;
-
-                    let row = if relative_y < 0.0 {
-                        0
-                    } else {
-                        (relative_y / row_height) as usize
-                    };
-
-                    let row_start = row * bytes_per_row;
-
-                    // Calculate byte in row from X position
-                    let mouse_x: f32 = event.position.x.into();
-                    // hex column starts after: outer_padding + address_column + gap_4
-                    let address_width = char_width * 8.0;
-                    let hex_start = outer_padding + address_width + 16.0;
-                    let gap = 16.0; // gap_4
-                    let gap_1 = 4.0; // gap_1 between hex bytes
-                    let byte_in_row = match this.drag_pane {
-                        Some(EditPane::Hex) => {
-                            if mouse_x < hex_start {
-                                0
-                            } else {
-                                ((mouse_x - hex_start) / hex_byte_width) as usize
+                        // Calculate byte in row from X position
+                        let mouse_x: f32 = event.position.x.into();
+                        // hex column starts after: outer_padding + address_column + gap_4
+                        let address_width = char_width * 8.0;
+                        let hex_start = outer_padding + address_width + 16.0;
+                        let gap = 16.0; // gap_4
+                        let gap_1 = 4.0; // gap_1 between hex bytes
+                        let byte_in_row = match this.drag_pane {
+                            Some(EditPane::Hex) => {
+                                if mouse_x < hex_start {
+                                    0
+                                } else {
+                                    ((mouse_x - hex_start) / hex_byte_width) as usize
+                                }
                             }
-                        }
-                        Some(EditPane::Ascii) => {
-                            // Hex column: each byte is 2 chars, with gap_1 between bytes (not after last)
-                            let hex_column_width = bytes_per_row as f32 * char_width * 2.0
-                                + (bytes_per_row - 1) as f32 * gap_1;
-                            let ascii_start = hex_start + hex_column_width + gap;
-                            if mouse_x < ascii_start {
-                                0
-                            } else {
-                                // ASCII column: each character is char_width, no gaps
-                                ((mouse_x - ascii_start) / char_width) as usize
+                            Some(EditPane::Ascii) => {
+                                // Hex column: each byte is 2 chars, with gap_1 between bytes (not after last)
+                                let hex_column_width = bytes_per_row as f32 * char_width * 2.0
+                                    + (bytes_per_row - 1) as f32 * gap_1;
+                                let ascii_start = hex_start + hex_column_width + gap;
+                                if mouse_x < ascii_start {
+                                    0
+                                } else {
+                                    // ASCII column: each character is char_width, no gaps
+                                    ((mouse_x - ascii_start) / char_width) as usize
+                                }
                             }
+                            _ => 0,
+                        };
+
+                        let byte_in_row = byte_in_row.min(bytes_per_row - 1);
+                        let new_cursor = (row_start + byte_in_row).min(doc_len.saturating_sub(1));
+
+                        if this.tab().cursor_position != new_cursor {
+                            this.tab_mut().cursor_position = new_cursor;
+                            this.ensure_cursor_visible_by_row();
+                            cx.notify();
                         }
-                        _ => 0,
-                    };
-
-                    let byte_in_row = byte_in_row.min(bytes_per_row - 1);
-                    let new_cursor = (row_start + byte_in_row).min(doc_len.saturating_sub(1));
-
-                    if this.tab().cursor_position != new_cursor {
-                        this.tab_mut().cursor_position = new_cursor;
-                        this.ensure_cursor_visible_by_row();
-                        cx.notify();
                     }
-                }
-            }))
+                }),
+            )
             .on_key_down(cx.listener(keyboard::handle_key_event))
             .on_drop(cx.listener(|editor, paths: &ExternalPaths, _window, cx| {
                 editor.handle_file_drop(paths, cx);

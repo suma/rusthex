@@ -13,8 +13,8 @@ use std::sync::atomic::Ordering;
 
 use memchr::memmem;
 
-use crate::document::SearchDataSource;
 use crate::HexEditor;
+use crate::document::SearchDataSource;
 
 /// Search mode selection
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -59,7 +59,10 @@ impl HexEditor {
         let pattern: Vec<PatternByte> = match self.tab().search_mode {
             SearchMode::Ascii => {
                 // ASCII search: convert query string to exact bytes
-                self.tab().search_query.as_bytes().iter()
+                self.tab()
+                    .search_query
+                    .as_bytes()
+                    .iter()
                     .map(|&b| PatternByte::Exact(b))
                     .collect()
             }
@@ -89,7 +92,9 @@ impl HexEditor {
         }
 
         // Reset cancel flag and set searching flag
-        self.tab().search_cancel_flag.store(false, Ordering::Relaxed);
+        self.tab()
+            .search_cancel_flag
+            .store(false, Ordering::Relaxed);
         self.tab_mut().is_searching = true;
 
         // Clear shared results
@@ -601,13 +606,7 @@ mod tests {
     fn test_search_in_memory_wildcard_at_end() {
         let data = b"test1 test2 test3";
         // "test?"
-        let pat = pattern(&[
-            Some(b't'),
-            Some(b'e'),
-            Some(b's'),
-            Some(b't'),
-            None,
-        ]);
+        let pat = pattern(&[Some(b't'), Some(b'e'), Some(b's'), Some(b't'), None]);
         let (cancel, progress) = make_flags();
 
         let results = search_in_memory(data, &pat, &cancel, &progress).unwrap();

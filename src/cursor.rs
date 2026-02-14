@@ -6,9 +6,9 @@
 //! - Line navigation (Home, End)
 //! - Document navigation (Ctrl+Home, Ctrl+End)
 
-use gpui::{px, Point};
-use crate::ui::{self, EditMode, HexNibble};
 use crate::HexEditor;
+use crate::ui::{self, EditMode, HexNibble};
+use gpui::{Point, px};
 
 impl HexEditor {
     /// Calculate new position from current position with relative offset.
@@ -154,7 +154,9 @@ impl HexEditor {
     /// End: Move cursor to the end of the current row
     pub fn move_cursor_end(&mut self) {
         let current_row = self.tab().cursor_position / self.bytes_per_row();
-        let row_end = ((current_row + 1) * self.bytes_per_row()).min(self.tab().document.len()).saturating_sub(1);
+        let row_end = ((current_row + 1) * self.bytes_per_row())
+            .min(self.tab().document.len())
+            .saturating_sub(1);
         self.move_position(row_end);
     }
 

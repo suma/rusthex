@@ -89,6 +89,25 @@ impl Default for WindowSettings {
     }
 }
 
+/// Pattern language settings
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PatternSettings {
+    /// Directory path containing .hexpat files
+    pub hexpat_dir: String,
+    /// Additional directories to search for #include / import files
+    pub include_dirs: Vec<String>,
+}
+
+impl Default for PatternSettings {
+    fn default() -> Self {
+        Self {
+            hexpat_dir: String::new(),
+            include_dirs: Vec::new(),
+        }
+    }
+}
+
 /// Application settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -99,6 +118,8 @@ pub struct Settings {
     pub editor: EditorSettings,
     /// Window settings
     pub window: WindowSettings,
+    /// Pattern language settings
+    pub pattern: PatternSettings,
 }
 
 impl Default for Settings {
@@ -107,6 +128,7 @@ impl Default for Settings {
             display: DisplaySettings::default(),
             editor: EditorSettings::default(),
             window: WindowSettings::default(),
+            pattern: PatternSettings::default(),
         }
     }
 }

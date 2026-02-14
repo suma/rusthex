@@ -5,15 +5,19 @@
 //! - Switching between tabs
 //! - Reordering tabs via drag and drop
 
-use crate::tab::EditorTab;
-use crate::HexEditor;
 use crate::Document;
+use crate::HexEditor;
+use crate::pattern;
+use crate::tab::EditorTab;
 use std::path::PathBuf;
 
 impl HexEditor {
     /// Create a new empty tab
     pub fn new_tab(&mut self) {
-        self.tabs.push(EditorTab::new());
+        let mut tab = EditorTab::new();
+        tab.pattern.available_patterns =
+            pattern::scan_hexpat_dir(&self.settings.pattern.hexpat_dir);
+        self.tabs.push(tab);
         self.active_tab = self.tabs.len() - 1;
     }
 
@@ -77,7 +81,9 @@ impl HexEditor {
     pub fn open_file_in_new_tab(&mut self, path: PathBuf) -> std::io::Result<()> {
         let mut doc = Document::new();
         doc.load(path)?;
-        let tab = EditorTab::with_document(doc);
+        let mut tab = EditorTab::with_document(doc);
+        tab.pattern.available_patterns =
+            pattern::scan_hexpat_dir(&self.settings.pattern.hexpat_dir);
         self.tabs.push(tab);
         self.active_tab = self.tabs.len() - 1;
         Ok(())

@@ -5,8 +5,8 @@
 //! - ASCII input
 //! - Pane toggling and selection management
 
-use crate::ui::{EditMode, EditPane, HexNibble};
 use crate::HexEditor;
+use crate::ui::{EditMode, EditPane, HexNibble};
 
 impl HexEditor {
     /// Handle hex input (0-9, A-F)

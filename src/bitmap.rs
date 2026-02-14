@@ -3,10 +3,10 @@
 //! This module provides functionality to visualize binary data as a bitmap image,
 //! which can help identify patterns, structures, and anomalies in binary files.
 
-use std::sync::Arc;
 use gpui::RenderImage;
-use image::{ImageBuffer, Rgba, Frame, Delay};
+use image::{Delay, Frame, ImageBuffer, Rgba};
 use smallvec::smallvec;
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Bitmap visualization state for HexEditor
@@ -75,9 +75,9 @@ impl BitmapColorMode {
     /// Returns RGB color value as u32
     pub fn indicator_color(&self) -> u32 {
         match self {
-            BitmapColorMode::Grayscale => 0x00ff00,  // Green: high contrast against grayscale
-            BitmapColorMode::Heatmap => 0xeeeeee,    // Light gray: visible against colorful gradient
-            BitmapColorMode::Category => 0xeeeeee,   // Light gray: visible against colorful background
+            BitmapColorMode::Grayscale => 0x00ff00, // Green: high contrast against grayscale
+            BitmapColorMode::Heatmap => 0xeeeeee,   // Light gray: visible against colorful gradient
+            BitmapColorMode::Category => 0xeeeeee, // Light gray: visible against colorful background
         }
     }
 
@@ -174,15 +174,15 @@ impl HexEditor {
         // Calculate pixel size
         let scrollbar_width = 12.0;
         let bitmap_area_width = self.bitmap.panel_width - 16.0 - scrollbar_width - 4.0;
-        let pixel_size = (bitmap_area_width / bitmap_width_pixels as f32).max(1.0).floor();
+        let pixel_size = (bitmap_area_width / bitmap_width_pixels as f32)
+            .max(1.0)
+            .floor();
 
         // Calculate canvas and display height
         let viewport_bounds = self.tab().scroll_handle.bounds();
         let bitmap_panel_height = f32::from(viewport_bounds.size.height);
-        let panel_overhead = self.cached_line_height_sm
-            + self.cached_line_height_xs * 2.0
-            + 8.0 * 2.0
-            + 8.0 * 3.0;
+        let panel_overhead =
+            self.cached_line_height_sm + self.cached_line_height_xs * 2.0 + 8.0 * 2.0 + 8.0 * 3.0;
         let canvas_height = (bitmap_panel_height - panel_overhead).max(10.0 * pixel_size);
         let display_height = ((canvas_height / pixel_size) as usize).min(bitmap_height);
 
@@ -190,7 +190,8 @@ impl HexEditor {
         let bitmap_scroll_offset = self.bitmap.scroll_handle.offset();
         let bitmap_scroll_y: f32 = (-f32::from(bitmap_scroll_offset.y)).max(0.0);
         let bitmap_scroll_start = (bitmap_scroll_y / pixel_size) as usize;
-        let bitmap_scroll_start = bitmap_scroll_start.min(bitmap_height.saturating_sub(display_height));
+        let bitmap_scroll_start =
+            bitmap_scroll_start.min(bitmap_height.saturating_sub(display_height));
 
         let cursor_pos = self.tab().cursor_position;
 
@@ -205,7 +206,10 @@ impl HexEditor {
         };
 
         // Check if cache is valid
-        let cache_valid = self.bitmap.cached_params.as_ref()
+        let cache_valid = self
+            .bitmap
+            .cached_params
+            .as_ref()
             .map(|p| *p == current_params)
             .unwrap_or(false);
 
@@ -329,6 +333,11 @@ where
     }
 
     // Create Frame and RenderImage
-    let frame = Frame::from_parts(img_buffer, 0, 0, Delay::from_saturating_duration(Duration::from_millis(0)));
+    let frame = Frame::from_parts(
+        img_buffer,
+        0,
+        0,
+        Delay::from_saturating_duration(Duration::from_millis(0)),
+    );
     Arc::new(RenderImage::new(smallvec![frame]))
 }

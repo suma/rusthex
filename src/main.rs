@@ -28,6 +28,7 @@ mod file_ops;
 mod input;
 mod inspector;
 mod keyboard;
+mod pattern;
 mod render;
 mod render_cache;
 mod search;
@@ -40,16 +41,16 @@ use bitmap::BitmapState;
 use compare::CompareState;
 use config::Settings;
 use document::Document;
+use gpui::{
+    App, Application, Bounds, FocusHandle, Focusable, Timer, WindowBounds, WindowOptions,
+    prelude::*, px, size,
+};
 use render_cache::{CacheState, RenderCache};
 pub use search::SearchMode;
-use tab::EditorTab;
-pub use ui::{EditMode, EditPane, HexNibble, Endian, TextEncoding};
-use gpui::{
-    App, Application, Bounds, Focusable, FocusHandle, Timer,
-    WindowBounds, WindowOptions, prelude::*, px, size,
-};
 use std::path::PathBuf;
 use std::time::Duration;
+use tab::EditorTab;
+pub use ui::{EditMode, EditPane, Endian, HexNibble, TextEncoding};
 
 struct HexEditor {
     tabs: Vec<EditorTab>,
@@ -88,6 +89,12 @@ struct HexEditor {
     theme: theme::Theme,
     // Theme dropdown open state
     theme_dropdown_open: bool,
+    // Pattern panel state
+    pattern_panel_visible: bool,
+    pattern_panel_width: f32,
+    pattern_dropdown_open: bool,
+    pattern_filter_query: String,
+    pattern_filter_index: Option<usize>,
 }
 
 impl HexEditor {
@@ -99,8 +106,11 @@ impl HexEditor {
         };
         let theme_name = theme::ThemeName::from_str(&settings.display.theme);
         let current_theme = theme::Theme::from_name(theme_name);
+        let initial_patterns = pattern::scan_hexpat_dir(&settings.pattern.hexpat_dir);
+        let mut initial_tab = EditorTab::new();
+        initial_tab.pattern.available_patterns = initial_patterns;
         Self {
-            tabs: vec![EditorTab::new()],
+            tabs: vec![initial_tab],
             active_tab: 0,
             settings,
             focus_handle: cx.focus_handle(),
@@ -124,6 +134,11 @@ impl HexEditor {
             bitmap: BitmapState::new(),
             theme: current_theme,
             theme_dropdown_open: false,
+            pattern_panel_visible: false,
+            pattern_panel_width: 280.0,
+            pattern_dropdown_open: false,
+            pattern_filter_query: String::new(),
+            pattern_filter_index: None,
         }
     }
 
@@ -195,6 +210,66 @@ impl HexEditor {
     fn set_theme(&mut self, name: theme::ThemeName) {
         self.theme = theme::Theme::from_name(name);
         self.invalidate_render_cache();
+    }
+
+    /// Toggle pattern panel visibility
+    fn toggle_pattern_panel(&mut self) {
+        self.pattern_panel_visible = !self.pattern_panel_visible;
+        self.pattern_dropdown_open = false;
+        self.pattern_filter_query.clear();
+        self.pattern_filter_index = None;
+    }
+
+    /// Select a pattern by index and run evaluation
+    fn select_pattern(&mut self, index: usize) {
+        self.tab_mut().pattern.selected_index = Some(index);
+        self.pattern_dropdown_open = false;
+        self.pattern_filter_query.clear();
+        self.pattern_filter_index = None;
+        self.run_pattern();
+    }
+
+    /// Get filtered patterns based on the current filter query.
+    /// Returns a vector of (original_index, &PatternFileInfo) tuples.
+    fn get_filtered_patterns(&self) -> Vec<(usize, &pattern::PatternFileInfo)> {
+        let query = self.pattern_filter_query.to_lowercase();
+        self.tab()
+            .pattern
+            .available_patterns
+            .iter()
+            .enumerate()
+            .filter(|(_, pat)| query.is_empty() || pat.name.to_lowercase().contains(&query))
+            .collect()
+    }
+
+    /// Run the currently selected pattern against the document
+    fn run_pattern(&mut self) {
+        let selected = self.tab().pattern.selected_index;
+        if let Some(idx) = selected {
+            if idx < self.tab().pattern.available_patterns.len() {
+                let pattern_path = self.tab().pattern.available_patterns[idx].path.clone();
+                let hexpat_dir = std::path::PathBuf::from(&self.settings.pattern.hexpat_dir);
+                let result = pattern::evaluate_pattern(
+                    &pattern_path,
+                    &self.tab().document,
+                    &hexpat_dir,
+                    &self.settings.pattern.include_dirs,
+                );
+                self.tab_mut().pattern.result = Some(result);
+            }
+        }
+    }
+
+    /// Toggle a tree node expanded/collapsed
+    fn toggle_pattern_node(&mut self, path: &str) {
+        if self.tab().pattern.expanded_nodes.contains(path) {
+            self.tab_mut().pattern.expanded_nodes.remove(path);
+        } else {
+            self.tab_mut()
+                .pattern
+                .expanded_nodes
+                .insert(path.to_string());
+        }
     }
 
     // Selection, file operations, cursor, and input methods are in separate modules:
@@ -306,7 +381,10 @@ impl HexEditor {
             // Skip if row is cached and doesn't need rebuild
             if !full_rebuild
                 && self.tab().render_cache.get_row(row).is_some()
-                && !self.tab().render_cache.row_needs_rebuild(row, bytes_per_row)
+                && !self
+                    .tab()
+                    .render_cache
+                    .row_needs_rebuild(row, bytes_per_row)
             {
                 continue;
             }
@@ -347,7 +425,6 @@ impl Focusable for HexEditor {
         self.focus_handle.clone()
     }
 }
-
 
 fn main() {
     // Get command line arguments

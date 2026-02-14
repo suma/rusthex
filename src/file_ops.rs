@@ -6,7 +6,7 @@
 //! - File drop handling
 //! - Unsaved changes management
 
-use gpui::{Context, ExternalPaths, PromptLevel, SharedString, Window, PathPromptOptions};
+use gpui::{Context, ExternalPaths, PathPromptOptions, PromptLevel, SharedString, Window};
 use std::path::PathBuf;
 
 use crate::HexEditor;
@@ -46,7 +46,10 @@ impl HexEditor {
         }
 
         // Get file path for the dialog message
-        let file_name = self.tab().document.file_name()
+        let file_name = self
+            .tab()
+            .document
+            .file_name()
             .unwrap_or("file")
             .to_string();
 
@@ -82,7 +85,9 @@ impl HexEditor {
 
     /// Check if any tab has unsaved changes
     pub fn has_any_unsaved_changes(&self) -> bool {
-        self.tabs.iter().any(|tab| tab.document.has_unsaved_changes())
+        self.tabs
+            .iter()
+            .any(|tab| tab.document.has_unsaved_changes())
     }
 
     /// Get list of files with unsaved changes
@@ -90,21 +95,12 @@ impl HexEditor {
         self.tabs
             .iter()
             .filter(|tab| tab.document.has_unsaved_changes())
-            .map(|tab| {
-                tab.document
-                    .file_name()
-                    .unwrap_or("Untitled")
-                    .to_string()
-            })
+            .map(|tab| tab.document.file_name().unwrap_or("Untitled").to_string())
             .collect()
     }
 
     /// Show confirmation dialog before closing with unsaved changes
-    pub fn confirm_close_with_unsaved(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn confirm_close_with_unsaved(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let unsaved_files = self.get_unsaved_file_names();
         if unsaved_files.is_empty() {
             // No unsaved changes, just quit
@@ -126,7 +122,10 @@ impl HexEditor {
         let receiver = window.prompt(
             PromptLevel::Warning,
             "Unsaved Changes",
-            Some(&format!("{}\n\nDo you want to discard changes and quit?", message)),
+            Some(&format!(
+                "{}\n\nDo you want to discard changes and quit?",
+                message
+            )),
             &["Discard and Quit", "Cancel"],
             cx,
         );
@@ -163,7 +162,8 @@ impl HexEditor {
                     let _ = entity.update(cx, |editor, cx| {
                         match editor.open_file_in_new_tab(path.clone()) {
                             Ok(_) => {
-                                editor.save_message = Some(format!("Opened in new tab: {}", path.display()));
+                                editor.save_message =
+                                    Some(format!("Opened in new tab: {}", path.display()));
                             }
                             Err(e) => {
                                 editor.save_message = Some(format!("Error: {}", e));
@@ -181,7 +181,10 @@ impl HexEditor {
     pub fn save_as_dialog(&mut self, cx: &mut Context<Self>) {
         // Get directory and suggested filename from current document
         let (directory, suggested_name) = if let Some(path) = self.tab().document.file_path() {
-            let dir = path.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from("."));
+            let dir = path
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| PathBuf::from("."));
             let name = path.file_name().map(|n| n.to_string_lossy().to_string());
             (dir, name)
         } else {

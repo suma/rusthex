@@ -805,22 +805,20 @@ impl Document {
         let mut result = Vec::with_capacity(self.cached_length);
         for piece in &self.pieces {
             match piece.source {
-                PieceSource::Original => {
-                    match &self.original {
-                        OriginalBuffer::InMemory(data) => {
-                            let end = (piece.start + piece.length).min(data.len());
-                            if piece.start < end {
-                                result.extend_from_slice(&data[piece.start..end]);
-                            }
-                        }
-                        OriginalBuffer::MemoryMapped { mmap, .. } => {
-                            let end = (piece.start + piece.length).min(mmap.len());
-                            if piece.start < end {
-                                result.extend_from_slice(&mmap[piece.start..end]);
-                            }
+                PieceSource::Original => match &self.original {
+                    OriginalBuffer::InMemory(data) => {
+                        let end = (piece.start + piece.length).min(data.len());
+                        if piece.start < end {
+                            result.extend_from_slice(&data[piece.start..end]);
                         }
                     }
-                }
+                    OriginalBuffer::MemoryMapped { mmap, .. } => {
+                        let end = (piece.start + piece.length).min(mmap.len());
+                        if piece.start < end {
+                            result.extend_from_slice(&mmap[piece.start..end]);
+                        }
+                    }
+                },
                 PieceSource::Add => {
                     let end = (piece.start + piece.length).min(self.add_buffer.len());
                     if piece.start < end {

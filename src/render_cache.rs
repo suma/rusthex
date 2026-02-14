@@ -3,8 +3,8 @@
 //! This module provides caching for row render data to avoid
 //! recalculating byte states on every render cycle.
 
-use std::collections::{HashMap, HashSet};
 use crate::ui::TextEncoding;
+use std::collections::{HashMap, HashSet};
 
 /// Cached render data for a single byte
 #[derive(Clone, PartialEq)]
@@ -98,9 +98,9 @@ impl RenderCache {
         let row_start = row * bytes_per_row;
         let row_end = row_start + bytes_per_row;
 
-        self.modified_offsets.iter().any(|&offset| {
-            offset >= row_start && offset < row_end
-        })
+        self.modified_offsets
+            .iter()
+            .any(|&offset| offset >= row_start && offset < row_end)
     }
 
     /// Build row render data

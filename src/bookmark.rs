@@ -37,10 +37,17 @@ impl HexEditor {
         }
 
         // Extract position and comment before mutating self
-        let target = self.tab().bookmarks.range((current + 1)..).next()
+        let target = self
+            .tab()
+            .bookmarks
+            .range((current + 1)..)
+            .next()
             .map(|(&pos, comment)| (pos, comment.clone()));
         let wrapped = if target.is_none() {
-            self.tab().bookmarks.iter().next()
+            self.tab()
+                .bookmarks
+                .iter()
+                .next()
                 .map(|(&pos, comment)| (pos, comment.clone()))
         } else {
             None
@@ -51,14 +58,18 @@ impl HexEditor {
             if comment.is_empty() {
                 self.save_message = Some(format!("Jumped to bookmark at 0x{:08X}", pos));
             } else {
-                self.save_message = Some(format!("Jumped to bookmark at 0x{:08X}: {}", pos, comment));
+                self.save_message =
+                    Some(format!("Jumped to bookmark at 0x{:08X}: {}", pos, comment));
             }
         } else if let Some((pos, comment)) = wrapped {
             self.move_position(pos);
             if comment.is_empty() {
                 self.save_message = Some(format!("Jumped to bookmark at 0x{:08X} (wrapped)", pos));
             } else {
-                self.save_message = Some(format!("Jumped to bookmark at 0x{:08X}: {} (wrapped)", pos, comment));
+                self.save_message = Some(format!(
+                    "Jumped to bookmark at 0x{:08X}: {} (wrapped)",
+                    pos, comment
+                ));
             }
         }
     }
@@ -73,10 +84,17 @@ impl HexEditor {
         }
 
         // Extract position and comment before mutating self
-        let target = self.tab().bookmarks.range(..current).next_back()
+        let target = self
+            .tab()
+            .bookmarks
+            .range(..current)
+            .next_back()
             .map(|(&pos, comment)| (pos, comment.clone()));
         let wrapped = if target.is_none() {
-            self.tab().bookmarks.iter().next_back()
+            self.tab()
+                .bookmarks
+                .iter()
+                .next_back()
                 .map(|(&pos, comment)| (pos, comment.clone()))
         } else {
             None
@@ -87,14 +105,18 @@ impl HexEditor {
             if comment.is_empty() {
                 self.save_message = Some(format!("Jumped to bookmark at 0x{:08X}", pos));
             } else {
-                self.save_message = Some(format!("Jumped to bookmark at 0x{:08X}: {}", pos, comment));
+                self.save_message =
+                    Some(format!("Jumped to bookmark at 0x{:08X}: {}", pos, comment));
             }
         } else if let Some((pos, comment)) = wrapped {
             self.move_position(pos);
             if comment.is_empty() {
                 self.save_message = Some(format!("Jumped to bookmark at 0x{:08X} (wrapped)", pos));
             } else {
-                self.save_message = Some(format!("Jumped to bookmark at 0x{:08X}: {} (wrapped)", pos, comment));
+                self.save_message = Some(format!(
+                    "Jumped to bookmark at 0x{:08X}: {} (wrapped)",
+                    pos, comment
+                ));
             }
         }
     }
@@ -128,7 +150,8 @@ impl HexEditor {
             if text.is_empty() {
                 self.save_message = Some(format!("Bookmark comment cleared at 0x{:08X}", pos));
             } else {
-                self.save_message = Some(format!("Bookmark comment saved at 0x{:08X}: {}", pos, text));
+                self.save_message =
+                    Some(format!("Bookmark comment saved at 0x{:08X}: {}", pos, text));
             }
         }
         self.tab_mut().bookmark_comment_editing = false;

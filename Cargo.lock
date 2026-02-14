@@ -3923,6 +3923,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "pattern-lang"
+version = "0.1.0"
+dependencies = [
+ "rustc-hash 2.1.1",
+]
+
+[[package]]
 name = "pbkdf2"
 version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4732,6 +4739,7 @@ dependencies = [
  "image",
  "memchr",
  "memmap2",
+ "pattern-lang",
  "serde",
  "smallvec",
  "tempfile",

@@ -60,7 +60,9 @@ fn handle_command_shortcuts(
 
     match (event.keystroke.key.as_str(), shift) {
         ("t", _) => editor.new_tab(),
-        ("w", _) => { editor.close_tab(); }
+        ("w", _) => {
+            editor.close_tab();
+        }
         ("tab", false) => editor.next_tab(),
         ("tab", true) => editor.prev_tab(),
         ("o", _) => {
@@ -112,6 +114,7 @@ fn handle_command_shortcuts(
         ("b", false) => editor.toggle_bookmark(),
         ("b", true) => editor.edit_bookmark_comment(),
         ("m", false) => editor.toggle_bitmap(),
+        ("p", false) => editor.toggle_pattern_panel(),
         ("z", false) => {
             if let Some(offset) = editor.tab_mut().document.undo() {
                 editor.move_position(offset);
@@ -151,8 +154,12 @@ fn handle_special_keys(
 
     match event.keystroke.key.as_str() {
         "escape" => {
-            // Priority: bookmark comment editing > compare selection dialog > compare mode > search
-            if editor.tab().bookmark_comment_editing {
+            // Priority: pattern dropdown > bookmark comment editing > compare selection dialog > compare mode > search
+            if editor.pattern_dropdown_open {
+                editor.pattern_dropdown_open = false;
+                editor.pattern_filter_query.clear();
+                editor.pattern_filter_index = None;
+            } else if editor.tab().bookmark_comment_editing {
                 editor.cancel_bookmark_comment();
             } else if editor.compare.selection_visible {
                 editor.compare.selection_visible = false;
@@ -160,7 +167,10 @@ fn handle_special_keys(
                 editor.exit_compare_mode();
             } else if editor.tab().search_visible {
                 if editor.tab().is_searching {
-                    editor.tab().search_cancel_flag.store(true, Ordering::Relaxed);
+                    editor
+                        .tab()
+                        .search_cancel_flag
+                        .store(true, Ordering::Relaxed);
                     editor.tab_mut().is_searching = false;
                 }
                 editor.tab_mut().search_visible = false;
@@ -193,14 +203,12 @@ fn handle_special_keys(
                 return false;
             }
         }
-        key if editor.bitmap.visible => {
-            match key {
-                "c" if !is_cmd(event) => editor.cycle_bitmap_color_mode(),
-                "=" | "+" => editor.increase_bitmap_width(),
-                "-" => editor.decrease_bitmap_width(),
-                _ => return false,
-            }
-        }
+        key if editor.bitmap.visible => match key {
+            "c" if !is_cmd(event) => editor.cycle_bitmap_color_mode(),
+            "=" | "+" => editor.increase_bitmap_width(),
+            "-" => editor.decrease_bitmap_width(),
+            _ => return false,
+        },
         _ => return false,
     }
 
@@ -222,19 +230,42 @@ fn handle_navigation_and_input(
 
     match key {
         "up" | "down" | "left" | "right" | "pageup" | "pagedown" | "home" | "end" => {
-            update_selection(editor, shift);
-            match key {
-                "up" => editor.move_cursor_up(),
-                "down" => editor.move_cursor_down(),
-                "left" => editor.move_cursor_left(),
-                "right" => editor.move_cursor_right(),
-                "pageup" => editor.move_cursor_page_up(PAGE_ROWS),
-                "pagedown" => editor.move_cursor_page_down(PAGE_ROWS),
-                "home" => editor.move_cursor_home(),
-                "end" => editor.move_cursor_end(),
-                _ => unreachable!(),
+            if editor.pattern_dropdown_open && (key == "up" || key == "down") {
+                // Navigate within filtered pattern list
+                let filtered = editor.get_filtered_patterns();
+                if !filtered.is_empty() {
+                    let current = editor.pattern_filter_index.unwrap_or(0);
+                    let new_idx = if key == "up" {
+                        if current == 0 {
+                            filtered.len() - 1
+                        } else {
+                            current - 1
+                        }
+                    } else {
+                        if current >= filtered.len() - 1 {
+                            0
+                        } else {
+                            current + 1
+                        }
+                    };
+                    editor.pattern_filter_index = Some(new_idx);
+                }
+                cx.notify();
+            } else {
+                update_selection(editor, shift);
+                match key {
+                    "up" => editor.move_cursor_up(),
+                    "down" => editor.move_cursor_down(),
+                    "left" => editor.move_cursor_left(),
+                    "right" => editor.move_cursor_right(),
+                    "pageup" => editor.move_cursor_page_up(PAGE_ROWS),
+                    "pagedown" => editor.move_cursor_page_down(PAGE_ROWS),
+                    "home" => editor.move_cursor_home(),
+                    "end" => editor.move_cursor_end(),
+                    _ => unreachable!(),
+                }
+                cx.notify();
             }
-            cx.notify();
         }
         "tab" => {
             if editor.tab().search_visible {
@@ -254,7 +285,13 @@ fn handle_navigation_and_input(
             cx.notify();
         }
         "backspace" => {
-            if editor.tab().bookmark_comment_editing {
+            if editor.pattern_dropdown_open {
+                editor.pattern_filter_query.pop();
+                // Reset to first item after filter change
+                let filtered = editor.get_filtered_patterns();
+                editor.pattern_filter_index = if filtered.is_empty() { None } else { Some(0) };
+                cx.notify();
+            } else if editor.tab().bookmark_comment_editing {
                 editor.tab_mut().bookmark_comment_text.pop();
                 cx.notify();
             } else if editor.tab().search_visible {
@@ -293,7 +330,17 @@ fn handle_navigation_and_input(
             }
         }
         "enter" => {
-            if editor.tab().bookmark_comment_editing {
+            if editor.pattern_dropdown_open {
+                // Select the highlighted pattern
+                let filtered = editor.get_filtered_patterns();
+                if let Some(idx) = editor.pattern_filter_index {
+                    if let Some((original_idx, _)) = filtered.get(idx) {
+                        let original_idx = *original_idx;
+                        editor.select_pattern(original_idx);
+                    }
+                }
+                cx.notify();
+            } else if editor.tab().bookmark_comment_editing {
                 editor.confirm_bookmark_comment();
                 cx.notify();
             } else if editor.tab().search_visible {
@@ -303,7 +350,12 @@ fn handle_navigation_and_input(
         }
         "space" => {
             // Handle space key explicitly (gpui reports it as "space", not " ")
-            if editor.tab().bookmark_comment_editing {
+            if editor.pattern_dropdown_open {
+                editor.pattern_filter_query.push(' ');
+                let filtered = editor.get_filtered_patterns();
+                editor.pattern_filter_index = if filtered.is_empty() { None } else { Some(0) };
+                cx.notify();
+            } else if editor.tab().bookmark_comment_editing {
                 editor.tab_mut().bookmark_comment_text.push(' ');
                 cx.notify();
             } else if editor.tab().search_visible {
@@ -350,7 +402,16 @@ fn handle_navigation_and_input(
                     };
                 }
 
-                if editor.tab().bookmark_comment_editing {
+                if editor.pattern_dropdown_open {
+                    // Add character to pattern filter query
+                    if (c >= ' ' && c <= '~') || c.is_whitespace() {
+                        editor.pattern_filter_query.push(c);
+                        let filtered = editor.get_filtered_patterns();
+                        editor.pattern_filter_index =
+                            if filtered.is_empty() { None } else { Some(0) };
+                        cx.notify();
+                    }
+                } else if editor.tab().bookmark_comment_editing {
                     // Add character to bookmark comment
                     if (c >= ' ' && c <= '~') || c.is_whitespace() {
                         editor.tab_mut().bookmark_comment_text.push(c);

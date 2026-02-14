@@ -156,7 +156,12 @@ impl DataInspectorValues {
     /// * `cursor_pos` - Current cursor position
     /// * `doc_len` - Total document length
     /// * `endian` - Byte order for multi-byte values
-    pub fn from_bytes<F>(get_byte: F, cursor_pos: usize, doc_len: usize, endian: Endian) -> Option<Self>
+    pub fn from_bytes<F>(
+        get_byte: F,
+        cursor_pos: usize,
+        doc_len: usize,
+        endian: Endian,
+    ) -> Option<Self>
     where
         F: Fn(usize) -> Option<u8>,
     {
@@ -165,13 +170,41 @@ impl DataInspectorValues {
         // Get bytes for multi-byte values
         let bytes_available = doc_len.saturating_sub(cursor_pos);
 
-        let b1 = if bytes_available >= 2 { get_byte(cursor_pos + 1) } else { None };
-        let b2 = if bytes_available >= 3 { get_byte(cursor_pos + 2) } else { None };
-        let b3 = if bytes_available >= 4 { get_byte(cursor_pos + 3) } else { None };
-        let b4 = if bytes_available >= 5 { get_byte(cursor_pos + 4) } else { None };
-        let b5 = if bytes_available >= 6 { get_byte(cursor_pos + 5) } else { None };
-        let b6 = if bytes_available >= 7 { get_byte(cursor_pos + 6) } else { None };
-        let b7 = if bytes_available >= 8 { get_byte(cursor_pos + 7) } else { None };
+        let b1 = if bytes_available >= 2 {
+            get_byte(cursor_pos + 1)
+        } else {
+            None
+        };
+        let b2 = if bytes_available >= 3 {
+            get_byte(cursor_pos + 2)
+        } else {
+            None
+        };
+        let b3 = if bytes_available >= 4 {
+            get_byte(cursor_pos + 3)
+        } else {
+            None
+        };
+        let b4 = if bytes_available >= 5 {
+            get_byte(cursor_pos + 4)
+        } else {
+            None
+        };
+        let b5 = if bytes_available >= 6 {
+            get_byte(cursor_pos + 5)
+        } else {
+            None
+        };
+        let b6 = if bytes_available >= 7 {
+            get_byte(cursor_pos + 6)
+        } else {
+            None
+        };
+        let b7 = if bytes_available >= 8 {
+            get_byte(cursor_pos + 7)
+        } else {
+            None
+        };
 
         // 16-bit values
         let (int16, uint16) = if let Some(b1) = b1 {
@@ -216,27 +249,30 @@ impl DataInspectorValues {
         };
 
         // 64-bit values
-        let (int64, uint64, float64) = if let (Some(b1), Some(b2), Some(b3), Some(b4), Some(b5), Some(b6), Some(b7)) = (b1, b2, b3, b4, b5, b6, b7) {
-            let bytes = match endian {
-                Endian::Little => [b0, b1, b2, b3, b4, b5, b6, b7],
-                Endian::Big => [b7, b6, b5, b4, b3, b2, b1, b0],
+        let (int64, uint64, float64) =
+            if let (Some(b1), Some(b2), Some(b3), Some(b4), Some(b5), Some(b6), Some(b7)) =
+                (b1, b2, b3, b4, b5, b6, b7)
+            {
+                let bytes = match endian {
+                    Endian::Little => [b0, b1, b2, b3, b4, b5, b6, b7],
+                    Endian::Big => [b7, b6, b5, b4, b3, b2, b1, b0],
+                };
+                let val = match endian {
+                    Endian::Little => i64::from_le_bytes(bytes),
+                    Endian::Big => i64::from_be_bytes([b0, b1, b2, b3, b4, b5, b6, b7]),
+                };
+                let uval = match endian {
+                    Endian::Little => u64::from_le_bytes(bytes),
+                    Endian::Big => u64::from_be_bytes([b0, b1, b2, b3, b4, b5, b6, b7]),
+                };
+                let fval = match endian {
+                    Endian::Little => f64::from_le_bytes(bytes),
+                    Endian::Big => f64::from_be_bytes([b0, b1, b2, b3, b4, b5, b6, b7]),
+                };
+                (Some(val), Some(uval), Some(fval))
+            } else {
+                (None, None, None)
             };
-            let val = match endian {
-                Endian::Little => i64::from_le_bytes(bytes),
-                Endian::Big => i64::from_be_bytes([b0, b1, b2, b3, b4, b5, b6, b7]),
-            };
-            let uval = match endian {
-                Endian::Little => u64::from_le_bytes(bytes),
-                Endian::Big => u64::from_be_bytes([b0, b1, b2, b3, b4, b5, b6, b7]),
-            };
-            let fval = match endian {
-                Endian::Little => f64::from_le_bytes(bytes),
-                Endian::Big => f64::from_be_bytes([b0, b1, b2, b3, b4, b5, b6, b7]),
-            };
-            (Some(val), Some(uval), Some(fval))
-        } else {
-            (None, None, None)
-        };
 
         Some(Self {
             int8: b0 as i8,
@@ -287,7 +323,11 @@ pub fn calculate_visible_range(
     row_height: f64,
 ) -> VisibleRange {
     if total_rows == 0 {
-        return VisibleRange { render_start: 0, render_end: 0, visible_rows: 20 };
+        return VisibleRange {
+            render_start: 0,
+            render_end: 0,
+            visible_rows: 20,
+        };
     }
 
     // Use f64 for calculations to avoid precision loss
@@ -325,7 +365,8 @@ pub fn calculate_visible_range(
     let first_visible_row = first_visible_row.min(max_first_row);
 
     let render_start = first_visible_row.saturating_sub(buffer_rows);
-    let render_end = (first_visible_row + visible_row_count + buffer_rows + render_margin).min(total_rows);
+    let render_end =
+        (first_visible_row + visible_row_count + buffer_rows + render_margin).min(total_rows);
 
     VisibleRange {
         render_start,
@@ -466,7 +507,12 @@ pub fn calculate_scroll_to_row(
         }
     };
 
-    Some(calculate_scroll_offset(target_row, visible_rows, total_rows, row_height))
+    Some(calculate_scroll_offset(
+        target_row,
+        visible_rows,
+        total_rows,
+        row_height,
+    ))
 }
 
 /// Calculate spacer heights for virtual scrolling

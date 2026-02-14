@@ -5,8 +5,8 @@
 //! - Tab selection for comparison
 //! - Difference highlighting
 
-use crate::tab::EditorTab;
 use crate::HexEditor;
+use crate::tab::EditorTab;
 
 /// Compare mode state for HexEditor
 pub(crate) struct CompareState {

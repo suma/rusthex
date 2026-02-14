@@ -4,8 +4,8 @@
 //! - Toggle visibility
 //! - Toggle endianness
 
-use crate::ui::Endian;
 use crate::HexEditor;
+use crate::ui::Endian;
 
 impl HexEditor {
     /// Toggle data inspector visibility

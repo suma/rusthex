@@ -3,13 +3,14 @@
 //! Contains the EditorTab struct which represents a single editor tab
 //! with its own document and state.
 
-use gpui::{px, Pixels, ScrollHandle};
+use gpui::{Pixels, ScrollHandle, px};
 use gpui_component::scroll::ScrollbarState;
-use std::collections::{HashSet, BTreeMap};
+use std::collections::{BTreeMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::{Arc, Mutex};
 
 use crate::document::Document;
+use crate::pattern::PatternState;
 use crate::render_cache::RenderCache;
 use crate::search::SearchMode;
 use crate::ui::{EditMode, EditPane, HexNibble};
@@ -46,6 +47,8 @@ pub struct EditorTab {
     pub bookmark_comment_editing: bool,
     pub bookmark_comment_text: String,
     pub bookmark_comment_position: usize,
+    // Pattern language state
+    pub pattern: PatternState,
 }
 
 impl EditorTab {
@@ -77,6 +80,7 @@ impl EditorTab {
             bookmark_comment_editing: false,
             bookmark_comment_text: String::new(),
             bookmark_comment_position: 0,
+            pattern: PatternState::new(),
         }
     }
 
@@ -90,10 +94,18 @@ impl EditorTab {
     /// Get display name for the tab
     pub fn display_name(&self) -> String {
         if let Some(name) = self.document.file_name() {
-            let modified = if self.document.has_unsaved_changes() { "*" } else { "" };
+            let modified = if self.document.has_unsaved_changes() {
+                "*"
+            } else {
+                ""
+            };
             format!("{}{}", name, modified)
         } else {
-            let modified = if self.document.has_unsaved_changes() { "*" } else { "" };
+            let modified = if self.document.has_unsaved_changes() {
+                "*"
+            } else {
+                ""
+            };
             format!("Untitled{}", modified)
         }
     }
