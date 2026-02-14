@@ -1,0 +1,11 @@
+[package]
+name = "pattern-lang"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "ImHex pattern language parser and evaluator"
+
+[dependencies]
+rustc-hash = "2"
+
+[dev-dependencies]
