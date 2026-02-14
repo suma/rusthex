@@ -31,9 +31,6 @@ pub struct Parser<'a> {
 /// Maximum lookahead distance when searching for bitfield colon (`name : width`).
 const MAX_BITFIELD_LOOKAHEAD: usize = 10;
 
-/// Maximum lookahead distance when scanning template/array brackets in anonymous placement detection.
-const MAX_BRACKET_LOOKAHEAD: usize = 100;
-
 impl<'a> Parser<'a> {
     pub fn new(tokens: Vec<Token>, interner: &'a mut StringInterner) -> Self {
         Self {
