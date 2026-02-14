@@ -134,8 +134,8 @@ impl Theme {
             accent_success: color(0x00ff00),
 
             // Search
-            search_current_bg: color(0xff8c00),
-            search_match_bg: color(0xffff00),
+            search_current_bg: color(0xff6a00),
+            search_match_bg: color(0x2e8b57),
 
             // Warning / Error
             text_warning: color(0xffff00),
@@ -189,8 +189,8 @@ impl Theme {
             accent_success: color(0x008800),
 
             // Search
-            search_current_bg: color(0xff9900),
-            search_match_bg: color(0xffee00),
+            search_current_bg: color(0xe67300),
+            search_match_bg: color(0x3cb371),
 
             // Warning / Error
             text_warning: color(0xcc8800),
@@ -245,7 +245,7 @@ impl Theme {
 
             // Search
             search_current_bg: color(0xfd971f),
-            search_match_bg: color(0xe6db74),
+            search_match_bg: color(0x4a9a6e),
 
             // Warning / Error
             text_warning: color(0xe6db74),

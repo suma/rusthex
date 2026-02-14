@@ -183,7 +183,7 @@ impl HexEditor {
             if !self.tab().search_results.is_empty() {
                 self.tab_mut().current_search_index = Some(0);
                 let first_result = self.tab().search_results[0];
-                self.scroll_to_search_result(first_result);
+                self.move_position(first_result);
             }
             return true;
         }
@@ -201,7 +201,7 @@ impl HexEditor {
             let next_idx = (current_idx + 1) % self.tab().search_results.len();
             self.tab_mut().current_search_index = Some(next_idx);
             let result_pos = self.tab().search_results[next_idx];
-            self.scroll_to_search_result(result_pos);
+            self.move_position(result_pos);
         }
     }
 
@@ -219,17 +219,8 @@ impl HexEditor {
             };
             self.tab_mut().current_search_index = Some(prev_idx);
             let result_pos = self.tab().search_results[prev_idx];
-            self.scroll_to_search_result(result_pos);
+            self.move_position(result_pos);
         }
-    }
-
-    /// Scroll to make search result visible and update cursor
-    pub fn scroll_to_search_result(&mut self, result_position: usize) {
-        // Update cursor position to the search result
-        self.tab_mut().cursor_position = result_position;
-
-        // Use ensure_cursor_visible_by_row() for proper virtual scroll handling
-        self.ensure_cursor_visible_by_row();
     }
 }
 
