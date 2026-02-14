@@ -48,6 +48,8 @@ use gpui::{
 use render_cache::{CacheState, RenderCache};
 pub use search::SearchMode;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tab::EditorTab;
 pub use ui::{EditMode, EditPane, Endian, HexNibble, TextEncoding};
@@ -95,6 +97,8 @@ struct HexEditor {
     pattern_dropdown_open: bool,
     pattern_filter_query: String,
     pattern_filter_index: Option<usize>,
+    // Search debounce generation counter
+    search_debounce_gen: Arc<AtomicU64>,
 }
 
 impl HexEditor {
@@ -139,6 +143,7 @@ impl HexEditor {
             pattern_dropdown_open: false,
             pattern_filter_query: String::new(),
             pattern_filter_index: None,
+            search_debounce_gen: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -306,6 +311,33 @@ impl HexEditor {
 
         editor.tab_mut().document = Document::with_data(data);
         editor
+    }
+
+    /// Schedule a debounced search execution
+    ///
+    /// Waits for a short delay after the last keystroke before starting the search.
+    /// If another keystroke arrives during the delay, the previous pending search is cancelled.
+    pub fn schedule_search(&mut self, cx: &mut Context<Self>) {
+        let generation = self.search_debounce_gen.fetch_add(1, Ordering::Relaxed) + 1;
+        let gen_arc = Arc::clone(&self.search_debounce_gen);
+
+        cx.spawn(async move |entity, cx| {
+            Timer::after(Duration::from_millis(150)).await;
+
+            // Only proceed if no newer keystroke has arrived
+            if gen_arc.load(Ordering::Relaxed) != generation {
+                return;
+            }
+
+            let _ = entity.update(cx, |editor, cx| {
+                editor.perform_search();
+                if editor.tab().is_searching {
+                    editor.start_search_refresh_loop(cx);
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     /// Start a background refresh loop to update UI during search

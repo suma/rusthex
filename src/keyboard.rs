@@ -275,10 +275,7 @@ fn handle_navigation_and_input(
                     SearchMode::Hex => SearchMode::Ascii,
                 };
                 editor.tab_mut().search_mode = new_mode;
-                editor.perform_search();
-                if editor.tab().is_searching {
-                    editor.start_search_refresh_loop(cx);
-                }
+                editor.schedule_search(cx);
             } else {
                 editor.toggle_pane();
             }
@@ -296,10 +293,7 @@ fn handle_navigation_and_input(
                 cx.notify();
             } else if editor.tab().search_visible {
                 editor.tab_mut().search_query.pop();
-                editor.perform_search();
-                if editor.tab().is_searching {
-                    editor.start_search_refresh_loop(cx);
-                }
+                editor.schedule_search(cx);
                 cx.notify();
             } else if editor.tab().edit_mode == EditMode::Insert {
                 let cursor_pos = editor.tab().cursor_position;
@@ -360,10 +354,7 @@ fn handle_navigation_and_input(
                 cx.notify();
             } else if editor.tab().search_visible {
                 editor.tab_mut().search_query.push(' ');
-                editor.perform_search();
-                if editor.tab().is_searching {
-                    editor.start_search_refresh_loop(cx);
-                }
+                editor.schedule_search(cx);
                 cx.notify();
             }
         }
@@ -421,10 +412,7 @@ fn handle_navigation_and_input(
                     // Add character to search query
                     if (c >= ' ' && c <= '~') || c.is_whitespace() {
                         editor.tab_mut().search_query.push(c);
-                        editor.perform_search();
-                        if editor.tab().is_searching {
-                            editor.start_search_refresh_loop(cx);
-                        }
+                        editor.schedule_search(cx);
                         cx.notify();
                     }
                 } else {
