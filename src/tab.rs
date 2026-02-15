@@ -49,6 +49,8 @@ pub struct EditorTab {
     pub bookmark_comment_position: usize,
     // Pattern language state
     pub pattern: PatternState,
+    // Logical first visible row for programmatic scroll (bypass f32 precision loss)
+    pub scroll_logical_row: Option<usize>,
 }
 
 impl EditorTab {
@@ -81,6 +83,7 @@ impl EditorTab {
             bookmark_comment_text: String::new(),
             bookmark_comment_position: 0,
             pattern: PatternState::new(),
+            scroll_logical_row: None,
         }
     }
 

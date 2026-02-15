@@ -419,6 +419,9 @@ impl HexEditor {
                             .bottom_0()
                             .overflow_y_scroll()
                             .track_scroll(&self.tab().scroll_handle)
+                            .on_scroll_wheel(cx.listener(|this, _event: &gpui::ScrollWheelEvent, _window, _cx| {
+                                this.user_scrolled = true;
+                            }))
                             .pr(px(24.0))
                             .child(
                                 div()
@@ -1407,6 +1410,7 @@ impl HexEditor {
             params.content_height,
             compare_row_count,
             self.row_height(),
+            self.tab().scroll_logical_row,
         );
         let compare_render_start = compare_visible_range.render_start;
         let compare_render_end = compare_visible_range.render_end;
@@ -1416,6 +1420,8 @@ impl HexEditor {
             compare_render_end,
             compare_row_count,
             self.row_height(),
+            self.tab().scroll_offset,
+            compare_visible_range.buffer_before,
         );
 
         let font_size = self.settings.display.font_size;
@@ -2467,9 +2473,40 @@ impl Render for HexEditor {
             }
         };
 
-        // Phase 1: Get current scroll position
+        // Phase 1: Get current scroll position and handle programmatic vs user scroll
         let scroll_position = self.tab().scroll_handle.offset();
-        self.tab_mut().scroll_offset = scroll_position.y;
+
+        if self.tab().scroll_logical_row.is_some() {
+            if self.user_scrolled {
+                // User scrolled via mouse wheel — clear the logical row anchor
+                self.tab_mut().scroll_logical_row = None;
+                self.user_scrolled = false;
+                self.tab_mut().scroll_offset = scroll_position.y;
+            } else {
+                // Check for scrollbar drag: large offset change (> 2px) without mouse wheel
+                let expected_offset = ui::calculate_scroll_offset(
+                    self.tab().scroll_logical_row.unwrap(),
+                    self.content_view_rows,
+                    row_count,
+                    self.row_height(),
+                );
+                let diff = (f32::from(scroll_position.y) - f32::from(expected_offset)).abs();
+                if diff > 2.0 {
+                    // Scrollbar drag or other external offset change
+                    self.tab_mut().scroll_logical_row = None;
+                    self.tab_mut().scroll_offset = scroll_position.y;
+                } else {
+                    // gpui clamping or no change — re-apply offset from logical_row
+                    self.tab_mut().scroll_handle.set_offset(
+                        gpui::Point::new(scroll_position.x, expected_offset),
+                    );
+                    self.tab_mut().scroll_offset = expected_offset;
+                }
+            }
+        } else {
+            self.user_scrolled = false;
+            self.tab_mut().scroll_offset = scroll_position.y;
+        }
 
         // Phase 2: Calculate visible range based on viewport
         // scroll_handle.bounds() returns the hex-content div's layout bounds,
@@ -2478,11 +2515,13 @@ impl Render for HexEditor {
         let viewport_height = viewport_bounds.size.height;
         let content_height = viewport_height.max(px(20.0));
 
+        let anchor_row = self.tab().scroll_logical_row;
         let visible_range = ui::calculate_visible_range(
             self.tab().scroll_offset,
             content_height,
             row_count,
             self.row_height(),
+            anchor_row,
         );
         let render_start = visible_range.render_start;
         let render_end = visible_range.render_end;
@@ -2500,8 +2539,14 @@ impl Render for HexEditor {
 
         // Phase 3: Calculate spacer heights for virtual scrolling
         // Uses capped virtual height to avoid f32 precision issues with large files
-        let (top_spacer_height, bottom_spacer_height) =
-            ui::calculate_spacer_heights(render_start, render_end, row_count, self.row_height());
+        let (top_spacer_height, bottom_spacer_height) = ui::calculate_spacer_heights(
+            render_start,
+            render_end,
+            row_count,
+            self.row_height(),
+            self.tab().scroll_offset,
+            visible_range.buffer_before,
+        );
 
         // Get display title
         let title = self

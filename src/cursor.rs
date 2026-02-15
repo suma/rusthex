@@ -70,26 +70,41 @@ impl HexEditor {
             }
         };
         let current_offset = self.tab().scroll_handle.offset();
+        let visible_rows = self.content_view_rows;
 
         // If cursor is at position 0, reset scroll to top
         if self.tab().cursor_position == 0 {
             let new_offset = Point::new(current_offset.x, px(0.0));
             self.tab_mut().scroll_handle.set_offset(new_offset);
             self.tab_mut().scroll_offset = px(0.0);
+            self.tab_mut().scroll_logical_row = Some(0);
             return;
         }
 
-        if let Some(new_y_offset) = ui::calculate_scroll_to_row(
+        // When scroll_logical_row is set, use it directly for visibility check
+        // (bypasses f32 precision loss in offset-based visible range calculation)
+        if let Some(logical_row) = self.tab().scroll_logical_row {
+            let max_first_row = total_rows.saturating_sub(visible_rows);
+            let first_visible = logical_row.min(max_first_row);
+            let last_visible = first_visible + visible_rows.saturating_sub(1);
+            if cursor_row >= first_visible && cursor_row <= last_visible {
+                return; // Already visible
+            }
+        }
+
+        if let Some(result) = ui::calculate_scroll_to_row(
             cursor_row,
             current_offset.y,
-            self.content_view_rows,
+            visible_rows,
             total_rows,
             self.row_height(),
         ) {
-            let new_offset = Point::new(current_offset.x, new_y_offset);
+            let new_offset = Point::new(current_offset.x, result.offset);
             self.tab_mut().scroll_handle.set_offset(new_offset);
             // Keep scroll_offset in sync for mouse drag calculations
-            self.tab_mut().scroll_offset = new_y_offset;
+            self.tab_mut().scroll_offset = result.offset;
+            // Store logical row to bypass f32 precision loss in large files
+            self.tab_mut().scroll_logical_row = Some(result.target_first_row);
         }
     }
 

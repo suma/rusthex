@@ -99,6 +99,8 @@ struct HexEditor {
     pattern_filter_index: Option<usize>,
     // Search debounce generation counter
     search_debounce_gen: Arc<AtomicU64>,
+    // Flag: user scrolled (mouse wheel) since last programmatic scroll
+    user_scrolled: bool,
 }
 
 impl HexEditor {
@@ -144,6 +146,7 @@ impl HexEditor {
             pattern_filter_query: String::new(),
             pattern_filter_index: None,
             search_debounce_gen: Arc::new(AtomicU64::new(0)),
+            user_scrolled: false,
         }
     }
 

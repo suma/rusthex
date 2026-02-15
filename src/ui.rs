@@ -299,11 +299,17 @@ pub const ROW_HEIGHT: f64 = 24.0;
 /// f32 loses precision above ~16 million, so we cap at 10 million pixels
 const MAX_VIRTUAL_HEIGHT: f64 = 10_000_000.0;
 
+/// Buffer rows above/below visible area to prevent flickering during scroll
+const BUFFER_ROWS: usize = 10;
+/// Additional margin for partial rows and layout differences
+const RENDER_MARGIN: usize = 4;
+
 /// Result of visible range calculation
 pub struct VisibleRange {
     pub render_start: usize,
     pub render_end: usize,
     pub visible_rows: usize, // Actual number of rows visible in viewport (without buffer)
+    pub buffer_before: usize, // Actual buffer rows before first_visible_row
 }
 
 /// Calculate visible row range for virtual scrolling
@@ -321,57 +327,72 @@ pub fn calculate_visible_range(
     content_height: Pixels,
     total_rows: usize,
     row_height: f64,
+    anchor_first_row: Option<usize>,
 ) -> VisibleRange {
     if total_rows == 0 {
         return VisibleRange {
             render_start: 0,
             render_end: 0,
             visible_rows: 20,
+            buffer_before: 0,
         };
     }
 
     // Use f64 for calculations to avoid precision loss
-    let scroll_offset_f64: f64 = scroll_offset.into();
     let content_height_f64: f64 = f64::from(content_height).max(row_height);
-
-    // Calculate the actual total content height
-    let actual_total_height = total_rows as f64 * row_height;
-
-    // Calculate first visible row using ratio if content is very large
-    let first_visible_row = if actual_total_height > MAX_VIRTUAL_HEIGHT {
-        let scroll_ratio = (-scroll_offset_f64) / MAX_VIRTUAL_HEIGHT;
-        let scroll_ratio = scroll_ratio.clamp(0.0, 1.0);
-        (scroll_ratio * total_rows as f64).floor() as usize
-    } else {
-        let scroll_offset_abs = -scroll_offset_f64;
-        if scroll_offset_abs > 0.0 {
-            (scroll_offset_abs / row_height).floor() as usize
-        } else {
-            0
-        }
-    };
 
     // Calculate number of visible rows (actual rows that fit in viewport)
     let visible_row_count = (content_height_f64 / row_height).floor() as usize;
     let visible_row_count = visible_row_count.max(5); // Minimum rows for rendering
 
-    // Add buffer rows to prevent flickering during scroll
-    let buffer_rows = 10;
-    // Additional margin for partial rows and layout differences
-    let render_margin = 4;
+    // Use anchor_first_row if provided (bypasses f32 precision loss for large files),
+    // otherwise compute from scroll offset
+    let first_visible_row = if let Some(anchor) = anchor_first_row {
+        anchor
+    } else {
+        let scroll_offset_f64: f64 = scroll_offset.into();
+        let actual_total_height = total_rows as f64 * row_height;
+
+        if actual_total_height > MAX_VIRTUAL_HEIGHT {
+            let scroll_ratio = (-scroll_offset_f64) / MAX_VIRTUAL_HEIGHT;
+            let scroll_ratio = scroll_ratio.clamp(0.0, 1.0);
+            (scroll_ratio * total_rows as f64).floor() as usize
+        } else {
+            let scroll_offset_abs = -scroll_offset_f64;
+            if scroll_offset_abs > 0.0 {
+                (scroll_offset_abs / row_height).floor() as usize
+            } else {
+                0
+            }
+        }
+    };
 
     // Clamp first_visible_row to ensure we can render full viewport at the end
     let max_first_row = total_rows.saturating_sub(visible_row_count);
     let first_visible_row = first_visible_row.min(max_first_row);
 
-    let render_start = first_visible_row.saturating_sub(buffer_rows);
+    // For ratio-based virtual scrolling, limit buffer rows so that
+    // top_spacer = |scroll_offset| - buffer_before * row_height >= 0
+    // This ensures first_visible_row is positioned at the viewport top.
+    let actual_total_height = total_rows as f64 * row_height;
+    let max_buffer = if actual_total_height > MAX_VIRTUAL_HEIGHT {
+        let scroll_abs: f64 = (-f64::from(f32::from(scroll_offset))).max(0.0);
+        (scroll_abs / row_height).floor() as usize
+    } else {
+        BUFFER_ROWS
+    };
+    let buffer = BUFFER_ROWS.min(max_buffer).min(first_visible_row);
+
+    let render_start = first_visible_row - buffer;
+    let buffer_before = buffer;
     let render_end =
-        (first_visible_row + visible_row_count + buffer_rows + render_margin).min(total_rows);
+        (first_visible_row + visible_row_count + BUFFER_ROWS + RENDER_MARGIN).min(total_rows);
 
     VisibleRange {
         render_start,
         render_end,
         visible_rows: visible_row_count,
+        buffer_before,
     }
 }
 
@@ -456,8 +477,16 @@ pub fn calculate_scroll_offset(
     }
 }
 
+/// Scroll result containing both pixel offset and logical first visible row.
+/// The logical row is needed because for very large files, the f32 pixel offset
+/// loses precision during the row→offset→row round-trip conversion.
+pub struct ScrollResult {
+    pub offset: Pixels,
+    pub target_first_row: usize,
+}
+
 /// Calculate the scroll offset needed to make a row visible
-/// Returns Some(new_offset) if scrolling is needed, None if the row is already visible
+/// Returns Some(ScrollResult) if scrolling is needed, None if the row is already visible
 ///
 /// Arguments:
 /// - cursor_row: The row to make visible
@@ -471,7 +500,7 @@ pub fn calculate_scroll_to_row(
     visible_rows: usize,
     total_rows: usize,
     row_height: f64,
-) -> Option<Pixels> {
+) -> Option<ScrollResult> {
     if total_rows == 0 || visible_rows == 0 {
         return None;
     }
@@ -507,27 +536,37 @@ pub fn calculate_scroll_to_row(
         }
     };
 
-    Some(calculate_scroll_offset(
-        target_row,
-        visible_rows,
-        total_rows,
-        row_height,
-    ))
+    // Clamp target_row same as calculate_scroll_offset does internally
+    let max_target_row = total_rows.saturating_sub(visible_rows);
+    let clamped_target = target_row.min(max_target_row);
+
+    Some(ScrollResult {
+        offset: calculate_scroll_offset(target_row, visible_rows, total_rows, row_height),
+        target_first_row: clamped_target,
+    })
 }
 
 /// Calculate spacer heights for virtual scrolling
 /// Uses capped virtual height to avoid f32 precision issues
+///
+/// For large files using ratio-based scrolling, the top spacer is computed so that
+/// first_visible_row appears at the viewport top. The key equation:
+///   top_spacer + buffer_before * row_height = |scroll_offset|
 ///
 /// Arguments:
 /// - render_start: First row index to render
 /// - render_end: Last row index to render (exclusive)
 /// - total_rows: Total number of rows in the document
 /// - row_height: Height of each row in pixels (font_size + margin)
+/// - scroll_offset: Current scroll offset (for ratio-based spacer consistency)
+/// - buffer_before: Number of buffer rows before first_visible_row
 pub fn calculate_spacer_heights(
     render_start: usize,
     render_end: usize,
     total_rows: usize,
     row_height: f64,
+    scroll_offset: Pixels,
+    buffer_before: usize,
 ) -> (Pixels, Pixels) {
     if total_rows == 0 {
         return (px(0.0), px(0.0));
@@ -536,12 +575,15 @@ pub fn calculate_spacer_heights(
     let actual_total_height = total_rows as f64 * row_height;
 
     if actual_total_height > MAX_VIRTUAL_HEIGHT {
-        // Use ratio-based spacer heights for large files
-        let top_ratio = render_start as f64 / total_rows as f64;
-        let bottom_ratio = (total_rows - render_end) as f64 / total_rows as f64;
+        // Position first_visible_row at viewport top:
+        // top_spacer + buffer_before * row_height = |scroll_offset|
+        let scroll_abs: f64 = (-f64::from(f32::from(scroll_offset))).max(0.0);
+        let top_height = (scroll_abs - buffer_before as f64 * row_height).max(0.0) as f32;
 
-        let top_height = (top_ratio * MAX_VIRTUAL_HEIGHT) as f32;
-        let bottom_height = (bottom_ratio * MAX_VIRTUAL_HEIGHT) as f32;
+        // Bottom spacer: remaining space after top spacer and rendered rows
+        let rendered_height = (render_end - render_start) as f64 * row_height;
+        let bottom_height =
+            (MAX_VIRTUAL_HEIGHT - top_height as f64 - rendered_height).max(0.0) as f32;
 
         (px(top_height), px(bottom_height))
     } else {
