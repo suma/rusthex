@@ -19,6 +19,10 @@ actions!(
         Copy,
         Paste,
         ToggleInsertMode,
+        // Copy variants
+        CopyAsAscii,
+        CopyAsHexString,
+        CopyAsCArray,
         // View
         ToggleSearch,
         ToggleInspector,

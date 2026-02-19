@@ -145,28 +145,76 @@ impl HexEditor {
         self.tab_mut().selection_start = None;
     }
 
-    /// Copy selected bytes to clipboard as hex string
-    pub fn copy_selection(&mut self, cx: &mut Context<Self>) {
+    /// Get selected bytes with start offset. Returns None if no valid selection.
+    fn get_selected_bytes(&self) -> Option<(usize, Vec<u8>)> {
         let (start, end) = if let Some(range) = self.selection_range() {
             range
         } else {
-            // No selection: copy single byte at cursor
             let pos = self.tab().cursor_position;
             if pos >= self.tab().document.len() {
-                return;
+                return None;
             }
             (pos, pos)
         };
 
-        let mut hex_parts = Vec::new();
+        let mut bytes = Vec::with_capacity(end - start + 1);
         for i in start..=end {
             if let Some(byte) = self.tab().document.get_byte(i) {
-                hex_parts.push(format!("{:02X}", byte));
+                bytes.push(byte);
             }
         }
-        let hex_string = hex_parts.join(" ");
-        cx.write_to_clipboard(ClipboardItem::new_string(hex_string.clone()));
-        self.save_message = Some(format!("Copied {} byte(s)", end - start + 1));
+        if bytes.is_empty() {
+            None
+        } else {
+            Some((start, bytes))
+        }
+    }
+
+    /// Smart copy: ASCII text when in ASCII pane, hex string when in Hex pane
+    pub fn copy_selection(&mut self, cx: &mut Context<Self>) {
+        match self.tab().edit_pane {
+            EditPane::Ascii => self.copy_as_ascii(cx),
+            _ => self.copy_as_hex_string(cx),
+        }
+    }
+
+    /// Copy selected bytes as space-separated hex string (e.g. "4A 6F 68 6E")
+    pub fn copy_as_hex_string(&mut self, cx: &mut Context<Self>) {
+        if let Some((_start, bytes)) = self.get_selected_bytes() {
+            let hex_string: String = bytes
+                .iter()
+                .map(|b| format!("{:02X}", b))
+                .collect::<Vec<_>>()
+                .join(" ");
+            cx.write_to_clipboard(ClipboardItem::new_string(hex_string));
+            self.save_message = Some(format!("Copied {} byte(s) as hex", bytes.len()));
+        }
+    }
+
+    /// Copy selected bytes as ASCII text (non-printable chars replaced with '.')
+    pub fn copy_as_ascii(&mut self, cx: &mut Context<Self>) {
+        if let Some((_start, bytes)) = self.get_selected_bytes() {
+            let ascii: String = bytes
+                .iter()
+                .map(|&b| if (0x20..=0x7E).contains(&b) { b as char } else { '.' })
+                .collect();
+            cx.write_to_clipboard(ClipboardItem::new_string(ascii));
+            self.save_message = Some(format!("Copied {} byte(s) as ASCII", bytes.len()));
+        }
+    }
+
+    /// Copy selected bytes as C array (e.g. "{ 0x4A, 0x6F, 0x68, 0x6E }")
+    pub fn copy_as_c_array(&mut self, cx: &mut Context<Self>) {
+        if let Some((_start, bytes)) = self.get_selected_bytes() {
+            let items: String = bytes
+                .iter()
+                .map(|b| format!("0x{:02X}", b))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let c_array = format!("{{ {} }}", items);
+            cx.write_to_clipboard(ClipboardItem::new_string(c_array));
+            self.save_message = Some(format!("Copied {} byte(s) as C array", bytes.len()));
+        }
     }
 
     /// Paste hex string from clipboard
