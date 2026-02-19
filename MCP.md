@@ -10,14 +10,15 @@ Claude Code ──stdio──▶ rusthex-mcp ──Unix socket──▶ rusthex 
                            └── fallback: direct file I/O
 ```
 
-- **rusthex-ipc** (`crates/rusthex-ipc/`) — Shared protocol types crate. Both the GUI and MCP server depend on it.
-- **rusthex-mcp** (`crates/rusthex-mcp/`) — MCP server (stdio transport)
-- **rusthex GUI** (`src/`) — gpui-based hex editor. Automatically starts an IPC server on launch.
-- **Socket path** — `$TMPDIR/rusthex.sock` (per-user temp directory on macOS)
+The system consists of three crates:
 
-## Setup
+| Crate | Path | Role |
+|---|---|---|
+| **rusthex** (GUI) | `src/` | gpui-based hex editor. Starts an IPC server on launch. |
+| **rusthex-mcp** | `crates/rusthex-mcp/` | MCP server binary (stdio transport). Connects to GUI via socket. |
+| **rusthex-ipc** | `crates/rusthex-ipc/` | Shared library defining protocol types and `send_request()`. |
 
-### 1. Build
+## Building
 
 ```bash
 cargo build --release
@@ -27,9 +28,51 @@ Output binaries:
 - GUI: `target/release/rusthex`
 - MCP server: `target/release/rusthex-mcp`
 
-### 2. Register the MCP server with Claude Code
+## rusthex GUI
 
-Add the following to `.claude/settings.json` or `.mcp.json`:
+### Running
+
+```bash
+# Open with a file
+./target/release/rusthex /path/to/file.bin
+
+# Open with sample data
+./target/release/rusthex
+```
+
+### IPC Server
+
+The GUI automatically starts a Unix domain socket listener at `$TMPDIR/rusthex.sock` on launch. No configuration is needed. The socket file is cleaned up when the GUI quits normally.
+
+If a stale socket file exists (e.g. from a crash), the GUI removes it on startup.
+
+### Keyboard Shortcuts
+
+| Shortcut | Action |
+|---|---|
+| `Cmd-O` | Open file |
+| `Cmd-S` | Save |
+| `Cmd-Shift-S` | Save as |
+| `Cmd-T` | New tab |
+| `Cmd-W` | Close tab |
+| `Cmd-Z` | Undo |
+| `Cmd-Y` | Redo |
+| `Cmd-C` | Copy |
+| `Cmd-V` | Paste |
+| `Cmd-A` | Select all |
+| `Cmd-F` | Toggle search |
+| `Cmd-I` | Toggle data inspector |
+| `Cmd-M` | Toggle bitmap view |
+| `Cmd-P` | Toggle pattern panel |
+| `Cmd-K` | Toggle compare mode |
+| `Cmd-Shift-I` | Toggle insert mode |
+| `Cmd-Shift-E` | Cycle text encoding |
+
+## rusthex-mcp
+
+### Registering with Claude Code
+
+Add to `.claude/settings.json` or `.mcp.json`:
 
 ```json
 {
@@ -41,22 +84,22 @@ Add the following to `.claude/settings.json` or `.mcp.json`:
 }
 ```
 
-### 3. Usage Patterns
+### Usage Patterns
 
 #### GUI-connected mode (recommended)
 
 1. Open a file in the rusthex GUI: `./target/release/rusthex /path/to/file.bin`
 2. Use MCP tools from Claude Code
 
-When the GUI is running, tools automatically operate on in-memory state. Responses are prefixed with `[via GUI]` to indicate this.
+When the GUI is running, tools automatically operate on in-memory state. Responses are prefixed with `[via GUI]`.
 
 #### Standalone mode
 
-You can also use MCP tools without the GUI for direct file I/O. In this mode, `hex_write` writes directly to disk and `hex_patch` creates a `.bak` backup.
+MCP tools work without the GUI via direct file I/O. In this mode, `hex_write` writes directly to disk and `hex_patch` creates a `.bak` backup. No undo support is available.
 
-## MCP Tools
+### MCP Tools
 
-### File Operation Tools (with GUI fallback)
+#### File Operation Tools (with GUI fallback)
 
 These tools automatically use in-memory operations for files open in the GUI. For files not open in the GUI or when the GUI is not running, they fall back to direct file I/O.
 
@@ -69,7 +112,7 @@ These tools automatically use in-memory operations for files open in the GUI. Fo
 | `hex_interpret` | `path`, `offset` | Interpret bytes at offset as u8/u16/u32/u64/i8-i64/f32/f64/ASCII/UTF-8 |
 | `hex_patch` | `path`, `offset`, `delete_count`, `insert_data?` | Delete and/or insert bytes. Supports undo when via GUI; creates `.bak` backup for direct I/O |
 
-### GUI-Only Tools
+#### GUI-Only Tools
 
 These tools require the rusthex GUI to be running. They return an error message if the GUI is not available.
 
@@ -80,51 +123,110 @@ These tools require the rusthex GUI to be running. They return an error message 
 | `gui_undo` | `path` | Undo the last edit on the specified file |
 | `gui_redo` | `path` | Redo the last undone edit on the specified file |
 
-## Usage Examples
-
-### Read bytes from a file
+### Tool Examples
 
 ```
+# Read 64 bytes at offset 0x100
 hex_read(path: "/path/to/binary", offset: 0x100, length: 64)
-```
 
-### Write and undo via GUI
-
-```
+# Overwrite bytes, then undo
 hex_write(path: "/path/to/binary", offset: 0x00, hex_data: "90 90 90")
 gui_undo(path: "/path/to/binary")
-```
 
-### Search for a pattern
-
-```
+# Search for hex pattern with wildcard
 hex_search(path: "/path/to/binary", pattern: "4d 5a ?? 00", mode: "hex")
+
+# Search for ASCII string
 hex_search(path: "/path/to/binary", pattern: "Hello", mode: "ascii")
-```
 
-### Patch: delete 2 bytes and insert 4 bytes
-
-```
+# Delete 2 bytes and insert 4 bytes at offset 0x10
 hex_patch(path: "/path/to/binary", offset: 0x10, delete_count: 2, insert_data: "DE AD BE EF")
-```
 
-### Navigate in GUI
-
-```
+# List open tabs and navigate
 gui_list_tabs()
 gui_goto(path: "/path/to/binary", offset: 0xFF00)
 ```
 
-## IPC Protocol Details
+## rusthex-ipc
 
-### Socket
+### Overview
 
-- Path: `std::env::temp_dir().join("rusthex.sock")` (macOS: `/var/folders/.../T/rusthex.sock`)
-- Protocol: JSON Lines (1 connection = 1 request + 1 response, then disconnect)
+`rusthex-ipc` is a library crate that defines the IPC protocol types shared by the GUI and MCP server. It can also be used by third-party tools to communicate with the rusthex GUI.
 
-### Manual Testing
+### Dependency
 
-You can verify IPC connectivity while the GUI is running with the following commands:
+```toml
+[dependencies]
+rusthex-ipc = { path = "crates/rusthex-ipc" }
+```
+
+### API
+
+```rust
+use rusthex_ipc::{socket_path, send_request, IpcRequest, IpcResponse, IpcResult};
+
+// Get the socket path
+let path = socket_path();  // e.g. /var/folders/.../T/rusthex.sock
+
+// Send a request to the GUI (returns None if GUI is not running)
+if let Some(resp) = send_request(&IpcRequest::Ping) {
+    assert!(resp.ok);
+    // resp.result == Some(IpcResult::Pong)
+}
+
+// Read bytes from a file open in the GUI
+let resp = send_request(&IpcRequest::ReadBytes {
+    path: "/path/to/file.bin".into(),
+    offset: 0,
+    length: 256,
+});
+match resp {
+    Some(r) if r.ok => { /* use r.result */ }
+    Some(r) => eprintln!("error: {}", r.error.unwrap_or_default()),
+    None => eprintln!("GUI is not running"),
+}
+```
+
+### IPC Protocol
+
+- **Socket path**: `std::env::temp_dir().join("rusthex.sock")`
+- **Transport**: Unix domain socket
+- **Framing**: JSON Lines (one JSON object per line)
+- **Connection model**: 1 connection = 1 request + 1 response, then disconnect
+
+#### Request Format
+
+```json
+{"method":"<MethodName>","params":{...}}
+```
+
+`Ping` and `ListTabs` have no params field.
+
+#### Response Format
+
+```json
+{"ok":true,"result":{"type":"<ResultType>",...}}
+{"ok":false,"error":"error message"}
+```
+
+#### IPC Methods
+
+| Method | Params | Result | Description |
+|---|---|---|---|
+| `Ping` | — | `Pong` | Health check |
+| `ListTabs` | — | `Tabs { tabs }` | List all open tabs |
+| `ReadBytes` | `path`, `offset`, `length` | `Bytes { data, raw_hex, length }` | Read bytes as hex dump |
+| `WriteBytes` | `path`, `offset`, `data` (hex) | `WriteOk { bytes_written }` | Overwrite bytes |
+| `InsertBytes` | `path`, `offset`, `data` (hex) | `InsertOk { bytes_inserted }` | Insert bytes at offset |
+| `DeleteBytes` | `path`, `offset`, `count` | `DeleteOk { bytes_deleted }` | Delete bytes at offset |
+| `SearchBytes` | `path`, `pattern`, `mode?`, `max_results?` | `SearchResults { matches, total }` | Search for pattern |
+| `FileInfo` | `path` | `FileInfo { path, size, has_unsaved_changes, cursor_position }` | File metadata |
+| `InterpretBytes` | `path`, `offset` | `Interpretation { text }` | Multi-type interpretation |
+| `Goto` | `path`, `offset` | `GotoOk { offset }` | Move cursor |
+| `Undo` | `path` | `UndoOk { offset? }` | Undo last edit |
+| `Redo` | `path` | `RedoOk { offset? }` | Redo last undo |
+
+#### Manual Testing with nc
 
 ```bash
 # Ping
@@ -133,23 +235,27 @@ echo '{"method":"Ping"}' | nc -U $TMPDIR/rusthex.sock
 # List tabs
 echo '{"method":"ListTabs"}' | nc -U $TMPDIR/rusthex.sock
 
-# Read bytes
+# Read 16 bytes at offset 0
 echo '{"method":"ReadBytes","params":{"path":"/path/to/file","offset":0,"length":16}}' | nc -U $TMPDIR/rusthex.sock
+
+# Write bytes
+echo '{"method":"WriteBytes","params":{"path":"/path/to/file","offset":0,"data":"deadbeef"}}' | nc -U $TMPDIR/rusthex.sock
+
+# Undo
+echo '{"method":"Undo","params":{"path":"/path/to/file"}}' | nc -U $TMPDIR/rusthex.sock
+
+# Navigate cursor
+echo '{"method":"Goto","params":{"path":"/path/to/file","offset":256}}' | nc -U $TMPDIR/rusthex.sock
 ```
 
-### Request Format
+### Testing
 
-```json
-{"method":"<MethodName>","params":{...}}
-```
+```bash
+# Protocol type serialization tests
+cargo test -p rusthex-ipc
 
-Params vary by method. `Ping` and `ListTabs` have no params.
-
-### Response Format
-
-```json
-{"ok":true,"result":{"type":"<ResultType>",...}}
-{"ok":false,"error":"error message"}
+# MCP server tests (direct file I/O path)
+cargo test -p rusthex-mcp
 ```
 
 ## Limitations
