@@ -426,6 +426,7 @@ impl HexEditor {
             }
 
             // Build row data
+            let address_chars = crate::ui::address_chars(document_len);
             let row_data = RenderCache::build_row_data(
                 row,
                 bytes_per_row,
@@ -434,6 +435,7 @@ impl HexEditor {
                 selection_range,
                 &self.tab().search_match_set,
                 current_search_range,
+                address_chars,
                 |idx| self.tab().document.get_byte(idx),
                 |idx| self.tab().document.is_modified(idx),
             );

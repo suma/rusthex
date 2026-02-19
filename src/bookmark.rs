@@ -7,8 +7,15 @@
 //! - Edit bookmark comments
 
 use crate::HexEditor;
+use crate::ui;
 
 impl HexEditor {
+    /// Format an address for status messages using the current document's address width
+    fn fmt_addr(&self, offset: usize) -> String {
+        let chars = ui::address_chars(self.tab().document.len());
+        format!("0x{}", ui::format_address(offset, chars))
+    }
+
     /// Toggle bookmark at current cursor position.
     /// If no bookmark exists, add one and enter comment editing mode.
     /// If a bookmark exists, remove it.
@@ -16,14 +23,14 @@ impl HexEditor {
         let pos = self.tab().cursor_position;
         if self.tab().bookmarks.contains_key(&pos) {
             self.tab_mut().bookmarks.remove(&pos);
-            self.save_message = Some(format!("Bookmark removed at 0x{:08X}", pos));
+            self.save_message = Some(format!("Bookmark removed at {}", self.fmt_addr(pos)));
         } else {
             self.tab_mut().bookmarks.insert(pos, String::new());
             // Enter comment editing mode for the new bookmark
             self.tab_mut().bookmark_comment_editing = true;
             self.tab_mut().bookmark_comment_text = String::new();
             self.tab_mut().bookmark_comment_position = pos;
-            self.save_message = Some(format!("Bookmark added at 0x{:08X} - enter comment", pos));
+            self.save_message = Some(format!("Bookmark added at {} - enter comment", self.fmt_addr(pos)));
         }
     }
 
@@ -56,19 +63,19 @@ impl HexEditor {
         if let Some((pos, comment)) = target {
             self.move_position(pos);
             if comment.is_empty() {
-                self.save_message = Some(format!("Jumped to bookmark at 0x{:08X}", pos));
+                self.save_message = Some(format!("Jumped to bookmark at {}", self.fmt_addr(pos)));
             } else {
                 self.save_message =
-                    Some(format!("Jumped to bookmark at 0x{:08X}: {}", pos, comment));
+                    Some(format!("Jumped to bookmark at {}: {}", self.fmt_addr(pos), comment));
             }
         } else if let Some((pos, comment)) = wrapped {
             self.move_position(pos);
             if comment.is_empty() {
-                self.save_message = Some(format!("Jumped to bookmark at 0x{:08X} (wrapped)", pos));
+                self.save_message = Some(format!("Jumped to bookmark at {} (wrapped)", self.fmt_addr(pos)));
             } else {
                 self.save_message = Some(format!(
-                    "Jumped to bookmark at 0x{:08X}: {} (wrapped)",
-                    pos, comment
+                    "Jumped to bookmark at {}: {} (wrapped)",
+                    self.fmt_addr(pos), comment
                 ));
             }
         }
@@ -103,19 +110,19 @@ impl HexEditor {
         if let Some((pos, comment)) = target {
             self.move_position(pos);
             if comment.is_empty() {
-                self.save_message = Some(format!("Jumped to bookmark at 0x{:08X}", pos));
+                self.save_message = Some(format!("Jumped to bookmark at {}", self.fmt_addr(pos)));
             } else {
                 self.save_message =
-                    Some(format!("Jumped to bookmark at 0x{:08X}: {}", pos, comment));
+                    Some(format!("Jumped to bookmark at {}: {}", self.fmt_addr(pos), comment));
             }
         } else if let Some((pos, comment)) = wrapped {
             self.move_position(pos);
             if comment.is_empty() {
-                self.save_message = Some(format!("Jumped to bookmark at 0x{:08X} (wrapped)", pos));
+                self.save_message = Some(format!("Jumped to bookmark at {} (wrapped)", self.fmt_addr(pos)));
             } else {
                 self.save_message = Some(format!(
-                    "Jumped to bookmark at 0x{:08X}: {} (wrapped)",
-                    pos, comment
+                    "Jumped to bookmark at {}: {} (wrapped)",
+                    self.fmt_addr(pos), comment
                 ));
             }
         }
@@ -135,7 +142,7 @@ impl HexEditor {
             self.tab_mut().bookmark_comment_editing = true;
             self.tab_mut().bookmark_comment_text = comment;
             self.tab_mut().bookmark_comment_position = pos;
-            self.save_message = Some(format!("Editing bookmark comment at 0x{:08X}", pos));
+            self.save_message = Some(format!("Editing bookmark comment at {}", self.fmt_addr(pos)));
         } else {
             self.save_message = Some("No bookmark at current position".to_string());
         }
@@ -148,10 +155,10 @@ impl HexEditor {
         if self.tab().bookmarks.contains_key(&pos) {
             self.tab_mut().bookmarks.insert(pos, text.clone());
             if text.is_empty() {
-                self.save_message = Some(format!("Bookmark comment cleared at 0x{:08X}", pos));
+                self.save_message = Some(format!("Bookmark comment cleared at {}", self.fmt_addr(pos)));
             } else {
                 self.save_message =
-                    Some(format!("Bookmark comment saved at 0x{:08X}: {}", pos, text));
+                    Some(format!("Bookmark comment saved at {}: {}", self.fmt_addr(pos), text));
             }
         }
         self.tab_mut().bookmark_comment_editing = false;

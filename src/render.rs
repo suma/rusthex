@@ -18,6 +18,7 @@ use std::sync::atomic::Ordering;
 pub(crate) struct RenderParams {
     pub font_name: String,
     pub address_width: f32,
+    pub address_chars: usize,
     pub render_start: usize,
     pub render_end: usize,
     pub row_count: usize,
@@ -305,7 +306,7 @@ impl HexEditor {
                         div()
                             .text_sm()
                             .text_color(t.bookmark_plain)
-                            .child(format!("0x{:08X}", pos)),
+                            .child(format!("0x{}", ui::format_address(pos, ui::address_chars(self.tab().document.len())))),
                     )
                     .child(
                         div()
@@ -368,7 +369,7 @@ impl HexEditor {
         // Calculate minimum width for hex/ASCII content area
         let char_width = self.cached_char_width;
         let bytes_per_row = self.bytes_per_row();
-        let address_col_width = char_width * 8.0 + 16.0; // 8 chars + bookmark indicator + padding
+        let address_col_width = char_width * params.address_chars as f32 + 16.0; // address chars + bookmark indicator + padding
         let hex_column_width =
             bytes_per_row as f32 * char_width * 2.0 + (bytes_per_row - 1) as f32 * 4.0; // 2 chars per byte + gaps
         let ascii_column_width = bytes_per_row as f32 * char_width + 8.0; // Dynamic based on char_width + padding
@@ -441,7 +442,7 @@ impl HexEditor {
                         let (address, is_cursor_row) = match &row_data {
                             Some(data) => (data.address.clone(), data.is_cursor_row),
                             None => {
-                                let addr = ui::format_address(row_start);
+                                let addr = ui::format_address(row_start, params.address_chars);
                                 let cursor_row = self.tab().cursor_position / bytes_per_row;
                                 (addr, row == cursor_row)
                             }
@@ -963,10 +964,10 @@ impl HexEditor {
                             div()
                                 .text_xs()
                                 .text_color(t_text_muted)
-                                .child(format!("Cursor: row {}, col {} (0x{:08X})",
+                                .child(format!("Cursor: row {}, col {} (0x{})",
                                     self.tab().cursor_position / bitmap_width_pixels,
                                     self.tab().cursor_position % bitmap_width_pixels,
-                                    self.tab().cursor_position
+                                    ui::format_address(self.tab().cursor_position, ui::address_chars(self.tab().document.len()))
                                 ))
                         )
                 )
@@ -1471,7 +1472,7 @@ impl HexEditor {
                                     (compare_render_start..compare_render_end)
                                         .map(|row| {
                                             let start = row * self.bytes_per_row();
-                                            let address = ui::format_address(start);
+                                            let address = ui::format_address(start, params.address_chars);
                                             let cursor_row = cursor_pos / self.bytes_per_row();
                                             let is_cursor_row = row == cursor_row;
 
@@ -1672,7 +1673,7 @@ impl HexEditor {
                             .child(
                                 div()
                                     .text_color(t.accent_success)
-                                    .child(ui::format_address(self.tab().cursor_position))
+                                    .child(ui::format_address(self.tab().cursor_position, ui::address_chars(self.tab().document.len())))
                             )
                     )
                     .child(
@@ -2000,7 +2001,7 @@ impl HexEditor {
                             .child(
                                 div()
                                     .text_color(t.text_muted)
-                                    .child(format!("@ 0x{:08X}", self.tab().cursor_position)),
+                                    .child(format!("@ 0x{}", ui::format_address(self.tab().cursor_position, ui::address_chars(self.tab().document.len())))),
                             ),
                     )
                     .child(
@@ -2438,8 +2439,9 @@ impl Render for HexEditor {
             Err(_) => f32::from(ascent) * 0.6, // Fallback approximation
         };
 
-        // Address column width: 8 characters for "00000000" format
-        let address_width = self.cached_char_width * 8.0;
+        // Address column width: dynamic based on document size
+        let address_chars = ui::address_chars(self.tab().document.len());
+        let address_width = self.cached_char_width * address_chars as f32;
 
         // text_xl (rems(1.25) = 20px at default rem 16px)
         self.cached_line_height_xl = (20.0 * PHI).round();
@@ -2553,6 +2555,7 @@ impl Render for HexEditor {
         let params = RenderParams {
             font_name: font_name.clone(),
             address_width,
+            address_chars,
             render_start,
             render_end,
             row_count,
@@ -2688,7 +2691,8 @@ impl Render for HexEditor {
                         // Calculate byte in row from X position
                         let mouse_x: f32 = event.position.x.into();
                         // hex column starts after: outer_padding + address_column + gap_4
-                        let address_width = char_width * 8.0;
+                        let addr_chars = crate::ui::address_chars(this.tab().document.len());
+                        let address_width = char_width * addr_chars as f32;
                         let hex_start = outer_padding + address_width + 16.0;
                         let gap = 16.0; // gap_4
                         let gap_1 = 4.0; // gap_1 between hex bytes

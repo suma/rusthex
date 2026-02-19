@@ -96,9 +96,25 @@ pub enum HexNibble {
     Low,
 }
 
-/// Format byte offset as 8-digit hexadecimal address
-pub fn format_address(offset: usize) -> String {
-    format!("{:08X}", offset)
+/// Calculate the number of hex characters needed to display addresses for a given document size.
+/// Returns 8 for files <= 4GB, 12 for files <= 16TB, 16 otherwise.
+pub fn address_chars(doc_len: usize) -> usize {
+    if doc_len <= 0xFFFF_FFFF {
+        8
+    } else if doc_len <= 0xFFFF_FFFF_FFFF {
+        12
+    } else {
+        16
+    }
+}
+
+/// Format byte offset as a hexadecimal address with the given number of digits.
+pub fn format_address(offset: usize, chars: usize) -> String {
+    match chars {
+        12 => format!("{:012X}", offset),
+        16 => format!("{:016X}", offset),
+        _ => format!("{:08X}", offset),
+    }
 }
 
 /// Calculate row count from document length

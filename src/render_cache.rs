@@ -112,6 +112,7 @@ impl RenderCache {
         selection_range: Option<(usize, usize)>,
         search_match_set: &HashSet<usize>,
         current_search_range: Option<(usize, usize)>,
+        address_chars: usize,
         get_byte: impl Fn(usize) -> Option<u8>,
         is_modified: impl Fn(usize) -> bool,
     ) -> RowRenderData {
@@ -119,7 +120,7 @@ impl RenderCache {
         let row_end = (row_start + bytes_per_row).min(document_len);
         let cursor_row = cursor_position / bytes_per_row;
 
-        let address = format!("{:08X}", row_start);
+        let address = crate::ui::format_address(row_start, address_chars);
 
         let bytes: Vec<ByteRenderData> = (row_start..row_end)
             .map(|byte_idx| {
