@@ -17,6 +17,7 @@ memmap2 = "0.9"
 memchr = "2.7"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+rusthex-ipc = { path = "../rusthex-ipc" }
 
 [dev-dependencies]
 tempfile = "3"

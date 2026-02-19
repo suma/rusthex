@@ -28,6 +28,7 @@ mod encoding;
 mod file_ops;
 mod input;
 mod inspector;
+mod ipc;
 mod keyboard;
 mod pattern;
 mod render;
@@ -474,6 +475,7 @@ fn main() {
 
         // Register global Quit action handler
         cx.on_action(|_: &actions::Quit, cx| {
+            ipc::cleanup_socket();
             cx.quit();
         });
 
@@ -586,6 +588,12 @@ fn main() {
                         HexEditor::with_sample_data(cx)
                     };
                     editor
+                });
+
+                // Start IPC server for rusthex-mcp communication
+                entity.update(cx, |editor, cx| {
+                    ipc::start_ipc_server(&cx.entity(), cx);
+                    let _ = editor; // suppress unused warning
                 });
 
                 // Set initial focus

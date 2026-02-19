@@ -4840,10 +4840,20 @@ dependencies = [
  "memchr",
  "memmap2",
  "pattern-lang",
+ "rusthex-ipc",
  "serde",
+ "serde_json",
  "smallvec",
  "tempfile",
  "toml 0.8.23",
+]
+
+[[package]]
+name = "rusthex-ipc"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -4853,6 +4863,7 @@ dependencies = [
  "memchr",
  "memmap2",
  "rmcp",
+ "rusthex-ipc",
  "schemars",
  "serde",
  "serde_json",

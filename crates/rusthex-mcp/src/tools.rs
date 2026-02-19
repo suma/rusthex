@@ -8,6 +8,7 @@ use rmcp::{
     model::{CallToolResult, Content, Implementation, ProtocolVersion, ServerCapabilities, ServerInfo},
     schemars, tool, tool_handler, tool_router,
 };
+use rusthex_ipc::{IpcRequest, IpcResult, send_request};
 use serde::Deserialize;
 
 type McpError = rmcp::ErrorData;
@@ -74,6 +75,31 @@ pub struct HexPatchParams {
     pub insert_data: Option<String>,
 }
 
+// GUI-only tool parameters
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct GuiListTabsParams {}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct GuiGotoParams {
+    #[schemars(description = "Path to the file (must be open in GUI)")]
+    pub path: String,
+    #[schemars(description = "Byte offset to navigate to")]
+    pub offset: u64,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct GuiUndoParams {
+    #[schemars(description = "Path to the file (must be open in GUI)")]
+    pub path: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct GuiRedoParams {
+    #[schemars(description = "Path to the file (must be open in GUI)")]
+    pub path: String,
+}
+
 // ---------------------------------------------------------------------------
 // HexServer
 // ---------------------------------------------------------------------------
@@ -91,13 +117,29 @@ impl HexServer {
         }
     }
 
-    #[tool(description = "Read bytes from a binary file as hex dump")]
+    #[tool(description = "Read bytes from a binary file as hex dump. If the file is open in rusthex GUI, reads in-memory state including unsaved edits.")]
     async fn hex_read(
         &self,
         Parameters(p): Parameters<HexReadParams>,
     ) -> Result<CallToolResult, McpError> {
         let offset = p.offset.unwrap_or(0);
         let length = p.length.unwrap_or(256).min(65536);
+
+        // Try GUI first
+        if let Some(resp) = send_request(&IpcRequest::ReadBytes {
+            path: p.path.clone(),
+            offset,
+            length,
+        }) {
+            if resp.ok {
+                if let Some(IpcResult::Bytes { data, .. }) = resp.result {
+                    return Ok(CallToolResult::success(vec![Content::text(
+                        format!("[via GUI] {}", data),
+                    )]));
+                }
+            }
+            // "file not open" error -> fall through to direct I/O
+        }
 
         let data = read_bytes_from_file(&p.path, offset, length)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
@@ -112,7 +154,7 @@ impl HexServer {
         Ok(CallToolResult::success(vec![Content::text(dump)]))
     }
 
-    #[tool(description = "Overwrite bytes at offset in a binary file")]
+    #[tool(description = "Overwrite bytes at offset in a binary file. If the file is open in rusthex GUI, writes to in-memory buffer with undo support.")]
     async fn hex_write(
         &self,
         Parameters(p): Parameters<HexWriteParams>,
@@ -122,6 +164,22 @@ impl HexServer {
 
         if bytes.is_empty() {
             return Err(McpError::invalid_params("hex_data is empty", None));
+        }
+
+        // Try GUI first
+        if let Some(resp) = send_request(&IpcRequest::WriteBytes {
+            path: p.path.clone(),
+            offset: p.offset,
+            data: bytes.clone(),
+        }) {
+            if resp.ok {
+                if let Some(IpcResult::WriteOk { bytes_written }) = resp.result {
+                    return Ok(CallToolResult::success(vec![Content::text(format!(
+                        "[via GUI] Wrote {} byte(s) at offset 0x{:X}. (undo available)",
+                        bytes_written, p.offset
+                    ))]));
+                }
+            }
         }
 
         write_bytes_to_file(&p.path, p.offset, &bytes)
@@ -134,13 +192,36 @@ impl HexServer {
         ))]))
     }
 
-    #[tool(description = "Search for byte pattern or ASCII string in a binary file")]
+    #[tool(description = "Search for byte pattern or ASCII string in a binary file. If the file is open in rusthex GUI, searches in-memory state.")]
     async fn hex_search(
         &self,
         Parameters(p): Parameters<HexSearchParams>,
     ) -> Result<CallToolResult, McpError> {
         let mode = p.mode.as_deref().unwrap_or("hex");
         let max_results = p.max_results.unwrap_or(20).min(1000);
+
+        // Try GUI first
+        if let Some(resp) = send_request(&IpcRequest::SearchBytes {
+            path: p.path.clone(),
+            pattern: p.pattern.clone(),
+            mode: Some(mode.to_string()),
+            max_results: Some(max_results),
+        }) {
+            if resp.ok {
+                if let Some(IpcResult::SearchResults { matches, total }) = resp.result {
+                    if matches.is_empty() {
+                        return Ok(CallToolResult::success(vec![Content::text(
+                            "[via GUI] No matches found.",
+                        )]));
+                    }
+                    let mut output = format!("[via GUI] Found {} match(es):\n", total);
+                    for offset in &matches {
+                        output.push_str(&format!("  0x{:08X}\n", offset));
+                    }
+                    return Ok(CallToolResult::success(vec![Content::text(output)]));
+                }
+            }
+        }
 
         let file_data = read_entire_file(&p.path)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
@@ -179,11 +260,38 @@ impl HexServer {
         Ok(CallToolResult::success(vec![Content::text(output)]))
     }
 
-    #[tool(description = "Get binary file metadata and preview")]
+    #[tool(description = "Get binary file metadata and preview. If the file is open in rusthex GUI, shows in-memory state including unsaved changes status.")]
     async fn hex_info(
         &self,
         Parameters(p): Parameters<HexInfoParams>,
     ) -> Result<CallToolResult, McpError> {
+        // Try GUI first
+        if let Some(resp) = send_request(&IpcRequest::FileInfo {
+            path: p.path.clone(),
+        }) {
+            if resp.ok {
+                if let Some(IpcResult::FileInfo {
+                    path,
+                    size,
+                    has_unsaved_changes,
+                    cursor_position,
+                }) = resp.result
+                {
+                    let mut output = format!("[via GUI] File: {}\n", path);
+                    output.push_str(&format!("Size: {} bytes", size));
+                    if size >= 1024 * 1024 {
+                        output.push_str(&format!(" ({:.2} MB)", size as f64 / (1024.0 * 1024.0)));
+                    } else if size >= 1024 {
+                        output.push_str(&format!(" ({:.1} KB)", size as f64 / 1024.0));
+                    }
+                    output.push('\n');
+                    output.push_str(&format!("Unsaved changes: {}\n", has_unsaved_changes));
+                    output.push_str(&format!("Cursor position: 0x{:X}\n", cursor_position));
+                    return Ok(CallToolResult::success(vec![Content::text(output)]));
+                }
+            }
+        }
+
         let metadata = fs::metadata(&p.path)
             .map_err(|e| McpError::internal_error(format!("Cannot stat file: {}", e), None))?;
 
@@ -215,11 +323,25 @@ impl HexServer {
         Ok(CallToolResult::success(vec![Content::text(output)]))
     }
 
-    #[tool(description = "Interpret bytes at offset as multiple typed values (u8, u16, u32, u64, i8, i16, i32, i64, f32, f64, ASCII, UTF-8)")]
+    #[tool(description = "Interpret bytes at offset as multiple typed values (u8, u16, u32, u64, i8, i16, i32, i64, f32, f64, ASCII, UTF-8). If the file is open in rusthex GUI, reads in-memory state.")]
     async fn hex_interpret(
         &self,
         Parameters(p): Parameters<HexInterpretParams>,
     ) -> Result<CallToolResult, McpError> {
+        // Try GUI first
+        if let Some(resp) = send_request(&IpcRequest::InterpretBytes {
+            path: p.path.clone(),
+            offset: p.offset,
+        }) {
+            if resp.ok {
+                if let Some(IpcResult::Interpretation { text }) = resp.result {
+                    return Ok(CallToolResult::success(vec![Content::text(
+                        format!("[via GUI] {}", text),
+                    )]));
+                }
+            }
+        }
+
         let data = read_bytes_from_file(&p.path, p.offset, 8)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
@@ -231,7 +353,7 @@ impl HexServer {
         Ok(CallToolResult::success(vec![Content::text(output)]))
     }
 
-    #[tool(description = "Patch file: delete and/or insert bytes at offset (creates .bak backup)")]
+    #[tool(description = "Patch file: delete and/or insert bytes at offset. If the file is open in rusthex GUI, applies edits with undo support. Otherwise creates .bak backup.")]
     async fn hex_patch(
         &self,
         Parameters(p): Parameters<HexPatchParams>,
@@ -247,6 +369,64 @@ impl HexServer {
                 "Nothing to do: delete_count is 0 and no insert_data",
                 None,
             ));
+        }
+
+        // Try GUI: delete then insert
+        let gui_available = send_request(&IpcRequest::FileInfo {
+            path: p.path.clone(),
+        })
+        .is_some_and(|r| r.ok);
+
+        if gui_available {
+            let mut msg = format!("[via GUI] Patched {}\n", p.path);
+
+            if p.delete_count > 0 {
+                match send_request(&IpcRequest::DeleteBytes {
+                    path: p.path.clone(),
+                    offset: p.offset,
+                    count: p.delete_count,
+                }) {
+                    Some(resp) if resp.ok => {
+                        msg.push_str(&format!(
+                            "  Deleted {} byte(s) at offset 0x{:X}\n",
+                            p.delete_count, p.offset
+                        ));
+                    }
+                    Some(resp) => {
+                        return Ok(CallToolResult::success(vec![Content::text(format!(
+                            "[via GUI] Delete failed: {}",
+                            resp.error.unwrap_or_default()
+                        ))]));
+                    }
+                    None => {} // GUI disconnected, fall through
+                }
+            }
+
+            if !insert_bytes.is_empty() {
+                match send_request(&IpcRequest::InsertBytes {
+                    path: p.path.clone(),
+                    offset: p.offset,
+                    data: insert_bytes.clone(),
+                }) {
+                    Some(resp) if resp.ok => {
+                        msg.push_str(&format!(
+                            "  Inserted {} byte(s) at offset 0x{:X}\n",
+                            insert_bytes.len(),
+                            p.offset
+                        ));
+                    }
+                    Some(resp) => {
+                        return Ok(CallToolResult::success(vec![Content::text(format!(
+                            "[via GUI] Insert failed: {}",
+                            resp.error.unwrap_or_default()
+                        ))]));
+                    }
+                    None => {}
+                }
+            }
+
+            msg.push_str("  (undo available)\n");
+            return Ok(CallToolResult::success(vec![Content::text(msg)]));
         }
 
         patch_file(&p.path, p.offset, p.delete_count, &insert_bytes)
@@ -269,6 +449,155 @@ impl HexServer {
 
         Ok(CallToolResult::success(vec![Content::text(msg)]))
     }
+
+    // -----------------------------------------------------------------------
+    // GUI-only tools
+    // -----------------------------------------------------------------------
+
+    #[tool(description = "List all tabs open in the rusthex GUI editor. Returns tab index, file path, name, size, and unsaved changes status. Requires rusthex GUI to be running.")]
+    async fn gui_list_tabs(
+        &self,
+        #[allow(unused_variables)]
+        Parameters(_p): Parameters<GuiListTabsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        match send_request(&IpcRequest::ListTabs) {
+            Some(resp) if resp.ok => {
+                if let Some(IpcResult::Tabs { tabs }) = resp.result {
+                    if tabs.is_empty() {
+                        return Ok(CallToolResult::success(vec![Content::text(
+                            "[via GUI] No tabs open.",
+                        )]));
+                    }
+                    let mut output = format!("[via GUI] {} tab(s) open:\n", tabs.len());
+                    for tab in &tabs {
+                        let active = if tab.is_active { " (active)" } else { "" };
+                        let modified = if tab.has_unsaved_changes { " [modified]" } else { "" };
+                        let path = tab
+                            .path
+                            .as_deref()
+                            .unwrap_or("(no file)");
+                        output.push_str(&format!(
+                            "  [{}] {}{}{} ({} bytes)\n      path: {}\n",
+                            tab.index, tab.name, active, modified, tab.size, path,
+                        ));
+                    }
+                    Ok(CallToolResult::success(vec![Content::text(output)]))
+                } else {
+                    Ok(CallToolResult::success(vec![Content::text(
+                        "[via GUI] Unexpected response format.",
+                    )]))
+                }
+            }
+            Some(resp) => Ok(CallToolResult::success(vec![Content::text(format!(
+                "GUI error: {}",
+                resp.error.unwrap_or_default()
+            ))])),
+            None => Ok(CallToolResult::success(vec![Content::text(
+                "rusthex GUI is not running. Start the GUI first to use this tool.",
+            )])),
+        }
+    }
+
+    #[tool(description = "Move the cursor to a specific byte offset in the rusthex GUI editor. Also switches to the tab containing the file. Requires rusthex GUI to be running.")]
+    async fn gui_goto(
+        &self,
+        Parameters(p): Parameters<GuiGotoParams>,
+    ) -> Result<CallToolResult, McpError> {
+        match send_request(&IpcRequest::Goto {
+            path: p.path.clone(),
+            offset: p.offset,
+        }) {
+            Some(resp) if resp.ok => {
+                if let Some(IpcResult::GotoOk { offset }) = resp.result {
+                    Ok(CallToolResult::success(vec![Content::text(format!(
+                        "[via GUI] Cursor moved to offset 0x{:X} in {}",
+                        offset, p.path
+                    ))]))
+                } else {
+                    Ok(CallToolResult::success(vec![Content::text(
+                        "[via GUI] Cursor moved.",
+                    )]))
+                }
+            }
+            Some(resp) => Ok(CallToolResult::success(vec![Content::text(format!(
+                "GUI error: {}",
+                resp.error.unwrap_or_default()
+            ))])),
+            None => Ok(CallToolResult::success(vec![Content::text(
+                "rusthex GUI is not running. Start the GUI first to use this tool.",
+            )])),
+        }
+    }
+
+    #[tool(description = "Undo the last edit operation in the rusthex GUI editor. Requires rusthex GUI to be running.")]
+    async fn gui_undo(
+        &self,
+        Parameters(p): Parameters<GuiUndoParams>,
+    ) -> Result<CallToolResult, McpError> {
+        match send_request(&IpcRequest::Undo {
+            path: p.path.clone(),
+        }) {
+            Some(resp) if resp.ok => {
+                if let Some(IpcResult::UndoOk { offset }) = resp.result {
+                    match offset {
+                        Some(off) => Ok(CallToolResult::success(vec![Content::text(format!(
+                            "[via GUI] Undo successful. Cursor at offset 0x{:X}",
+                            off
+                        ))])),
+                        None => Ok(CallToolResult::success(vec![Content::text(
+                            "[via GUI] Nothing to undo.",
+                        )])),
+                    }
+                } else {
+                    Ok(CallToolResult::success(vec![Content::text(
+                        "[via GUI] Undo completed.",
+                    )]))
+                }
+            }
+            Some(resp) => Ok(CallToolResult::success(vec![Content::text(format!(
+                "GUI error: {}",
+                resp.error.unwrap_or_default()
+            ))])),
+            None => Ok(CallToolResult::success(vec![Content::text(
+                "rusthex GUI is not running. Start the GUI first to use this tool.",
+            )])),
+        }
+    }
+
+    #[tool(description = "Redo the last undone edit operation in the rusthex GUI editor. Requires rusthex GUI to be running.")]
+    async fn gui_redo(
+        &self,
+        Parameters(p): Parameters<GuiRedoParams>,
+    ) -> Result<CallToolResult, McpError> {
+        match send_request(&IpcRequest::Redo {
+            path: p.path.clone(),
+        }) {
+            Some(resp) if resp.ok => {
+                if let Some(IpcResult::RedoOk { offset }) = resp.result {
+                    match offset {
+                        Some(off) => Ok(CallToolResult::success(vec![Content::text(format!(
+                            "[via GUI] Redo successful. Cursor at offset 0x{:X}",
+                            off
+                        ))])),
+                        None => Ok(CallToolResult::success(vec![Content::text(
+                            "[via GUI] Nothing to redo.",
+                        )])),
+                    }
+                } else {
+                    Ok(CallToolResult::success(vec![Content::text(
+                        "[via GUI] Redo completed.",
+                    )]))
+                }
+            }
+            Some(resp) => Ok(CallToolResult::success(vec![Content::text(format!(
+                "GUI error: {}",
+                resp.error.unwrap_or_default()
+            ))])),
+            None => Ok(CallToolResult::success(vec![Content::text(
+                "rusthex GUI is not running. Start the GUI first to use this tool.",
+            )])),
+        }
+    }
 }
 
 #[tool_handler]
@@ -282,7 +611,7 @@ impl ServerHandler for HexServer {
                 version: env!("CARGO_PKG_VERSION").into(),
                 ..Default::default()
             },
-            instructions: Some("Binary file analysis and editing tools for hex inspection, searching, interpreting, and patching.".to_string()),
+            instructions: Some("Binary file analysis and editing tools for hex inspection, searching, interpreting, and patching. When rusthex GUI is running, tools operate on in-memory state with undo support.".to_string()),
         }
     }
 }
