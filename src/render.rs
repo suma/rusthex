@@ -2695,7 +2695,8 @@ impl Render for HexEditor {
                         let mouse_x: f32 = event.position.x.into();
                         // hex column starts after: outer_padding + address_column + gap_4
                         let addr_chars = crate::ui::address_chars(this.tab().document.len());
-                        let address_width = char_width * addr_chars as f32;
+                        let bookmark_indicator = 12.0; // 8px dot + 4px margin, or 12px spacer
+                        let address_width = bookmark_indicator + char_width * addr_chars as f32;
                         let hex_start = outer_padding + address_width + 16.0;
                         let gap = 16.0; // gap_4
                         let gap_1 = 4.0; // gap_1 between hex bytes

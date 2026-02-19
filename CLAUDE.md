@@ -180,3 +180,26 @@ let hex_start = outer_padding + address_width + 16.0; // + gap_4
 // 間違い: 特定の char_width (10.0) を仮定
 let hex_start = 112.0; // 16 + 80 + 16
 ```
+
+### 描画レイアウト変更時はドラッグハンドラのX座標計算を必ず同期する
+
+行レイアウト（アドレスカラム・Hexカラム・ASCIIカラム）の描画部分に変更を加えた場合、**必ず** root div の `on_mouse_move` 内にあるドラッグハンドラのX座標→カーソル位置変換ロジックも同時に更新すること。Hex ペインと ASCII ペインの**両方**の計算パスを確認する必要がある。
+
+描画とドラッグハンドラで座標計算の前提が食い違うと、マウスドラッグ選択時にカーソル位置がずれるバグが発生する。
+
+確認すべき値の例：
+- アドレスカラム幅（ブックマークインジケータ 12px を含む）
+- Hexカラム幅（`char_width * 2 + gap_1` per byte）
+- カラム間の gap（`gap_4` = 16px）
+- ASCIIカラムの開始位置（上記すべての累積）
+
+```rust
+// 正しい: 描画と一致する全要素を含む
+let bookmark_indicator = 12.0;
+let address_width = bookmark_indicator + char_width * addr_chars as f32;
+let hex_start = outer_padding + address_width + 16.0; // + gap_4
+
+// 間違い: ブックマークインジケータ領域を忘れている
+let address_width = char_width * addr_chars as f32;
+let hex_start = outer_padding + address_width + 16.0;
+```
