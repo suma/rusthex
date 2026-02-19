@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/pattern-lang"]
+members = ["crates/pattern-lang", "crates/rusthex-mcp"]
 resolver = "2"
 
 [package]

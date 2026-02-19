@@ -277,7 +277,8 @@ rusthex/
 │   ├── encoding.rs     # Text encoding support (ASCII, UTF-8, SJIS, etc.)
 │   └── theme.rs        # Color theme definitions (Dark, Light, Monokai)
 ├── crates/
-│   └── pattern-lang/   # ImHex pattern language parser and evaluator
+│   ├── pattern-lang/   # ImHex pattern language parser and evaluator
+│   └── rusthex-mcp/    # MCP server for binary file operations
 ├── Cargo.toml
 ├── LICENSE-MIT
 ├── LICENSE-APACHE
@@ -340,6 +341,54 @@ cargo check
 ```
 
 See [`crates/pattern-lang/README.md`](crates/pattern-lang/README.md#testing) for details on pattern-lang test structure.
+
+## MCP Server (rusthex-mcp)
+
+RustHex includes a standalone MCP (Model Context Protocol) server that enables AI assistants like Claude Code to read, edit, search, and analyze binary files.
+
+### Setup
+
+Build the binary once:
+
+```bash
+cargo build -p rusthex-mcp --release
+```
+
+Then add the following to your Claude Code MCP settings (`.claude/settings.json` or project-level `.mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "rusthex": {
+      "command": "/absolute/path/to/rusthex/target/release/rusthex-mcp",
+      "args": []
+    }
+  }
+}
+```
+
+Replace the path with the actual absolute path to the built binary.
+
+### Available Tools
+
+| Tool | Description |
+|------|-------------|
+| `hex_read` | Read bytes from a binary file as hex dump |
+| `hex_write` | Overwrite bytes at a specified offset |
+| `hex_search` | Search for byte patterns (hex with `??` wildcards) or ASCII strings |
+| `hex_info` | Get file metadata, magic byte detection, and preview |
+| `hex_interpret` | Interpret bytes as multiple types (u8–f64 LE/BE, ASCII, UTF-8) |
+| `hex_patch` | Insert/delete/replace bytes with automatic `.bak` backup |
+
+### Examples
+
+Once configured, you can ask Claude Code to:
+
+- "Read the first 256 bytes of firmware.bin"
+- "Search for the MZ header in this executable"
+- "What type of file is output.dat?"
+- "Interpret the bytes at offset 0x100 in data.bin"
+- "Replace bytes 4D 5A at offset 0 with 00 00"
 
 ## Roadmap
 
