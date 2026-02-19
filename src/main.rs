@@ -17,6 +17,7 @@
 //! - `inspector` - Data Inspector panel
 //! - `tabs` - Tab management
 
+mod actions;
 mod bitmap;
 mod bookmark;
 mod compare;
@@ -42,8 +43,8 @@ use compare::CompareState;
 use config::Settings;
 use document::Document;
 use gpui::{
-    App, Application, Bounds, FocusHandle, Focusable, Timer, WindowBounds, WindowOptions,
-    prelude::*, px, size,
+    App, Application, Bounds, FocusHandle, Focusable, KeyBinding, Menu, MenuItem, OsAction,
+    SharedString, SystemMenuType, Timer, WindowBounds, WindowOptions, prelude::*, px, size,
 };
 use render_cache::{CacheState, RenderCache};
 pub use search::SearchMode;
@@ -163,8 +164,8 @@ impl HexEditor {
     /// Calculate header height based on phi-based line heights matching gpui's actual rendering.
     /// Header content + Tab bar (conditional) + Search bar (conditional)
     fn calculate_header_height(&self) -> f32 {
-        // Header div: text_xl + 3 * text_sm + pb_4(16) + border_b_1(1)
-        let base_header = self.cached_line_height_xl + 3.0 * self.cached_line_height_sm + 17.0;
+        // Header div: text_xl + text_sm + pb_4(16) + border_b_1(1)
+        let base_header = self.cached_line_height_xl + self.cached_line_height_sm + 17.0;
 
         // Tab bar: py_1(4+4) + text_sm + py_1(4+4) + border_b_1(1) = sm + 17
         let tab_bar = if self.tabs.len() > 1 {
@@ -466,8 +467,91 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
 
     Application::new().run(move |cx: &mut App| {
-        // Initialize gpui-component theme for Scrollbar support
-        gpui_component::theme::init(cx);
+        // Initialize gpui-component (theme, popup menu, etc.)
+        gpui_component::init(cx);
+
+        // Register global Quit action handler
+        cx.on_action(|_: &actions::Quit, cx| {
+            cx.quit();
+        });
+
+        // Register key bindings (for menu shortcut display)
+        cx.bind_keys([
+            // File
+            KeyBinding::new("cmd-o", actions::Open, None),
+            KeyBinding::new("cmd-s", actions::Save, None),
+            KeyBinding::new("cmd-shift-s", actions::SaveAs, None),
+            KeyBinding::new("cmd-t", actions::NewTab, None),
+            KeyBinding::new("cmd-w", actions::CloseTab, None),
+            KeyBinding::new("cmd-q", actions::Quit, None),
+            // Edit
+            KeyBinding::new("cmd-z", actions::Undo, None),
+            KeyBinding::new("cmd-y", actions::Redo, None),
+            KeyBinding::new("cmd-c", actions::Copy, None),
+            KeyBinding::new("cmd-v", actions::Paste, None),
+            KeyBinding::new("cmd-a", actions::SelectAll, None),
+            KeyBinding::new("cmd-shift-i", actions::ToggleInsertMode, None),
+            // View
+            KeyBinding::new("cmd-f", actions::ToggleSearch, None),
+            KeyBinding::new("cmd-i", actions::ToggleInspector, None),
+            KeyBinding::new("cmd-m", actions::ToggleBitmap, None),
+            KeyBinding::new("cmd-p", actions::TogglePatternPanel, None),
+            KeyBinding::new("cmd-k", actions::ToggleCompareMode, None),
+            KeyBinding::new("cmd-shift-e", actions::CycleEncoding, None),
+            // Search
+            KeyBinding::new("f3", actions::FindNext, None),
+            KeyBinding::new("shift-f3", actions::FindPrev, None),
+        ]);
+
+        // Set native menu bar
+        cx.set_menus(vec![
+            // Application menu (macOS displays the first menu as the app-name menu)
+            Menu {
+                name: SharedString::from("rusthex"),
+                items: vec![
+                    MenuItem::os_submenu("Services", SystemMenuType::Services),
+                    MenuItem::separator(),
+                    MenuItem::action("Quit rusthex", actions::Quit),
+                ],
+            },
+            Menu {
+                name: SharedString::from("File"),
+                items: vec![
+                    MenuItem::action("Open...", actions::Open),
+                    MenuItem::separator(),
+                    MenuItem::action("Save", actions::Save),
+                    MenuItem::action("Save As...", actions::SaveAs),
+                    MenuItem::separator(),
+                    MenuItem::action("New Tab", actions::NewTab),
+                    MenuItem::action("Close Tab", actions::CloseTab),
+                ],
+            },
+            Menu {
+                name: SharedString::from("Edit"),
+                items: vec![
+                    MenuItem::os_action("Undo", actions::Undo, OsAction::Undo),
+                    MenuItem::os_action("Redo", actions::Redo, OsAction::Redo),
+                    MenuItem::separator(),
+                    MenuItem::os_action("Copy", actions::Copy, OsAction::Copy),
+                    MenuItem::os_action("Paste", actions::Paste, OsAction::Paste),
+                    MenuItem::os_action("Select All", actions::SelectAll, OsAction::SelectAll),
+                    MenuItem::separator(),
+                    MenuItem::action("Toggle Insert Mode", actions::ToggleInsertMode),
+                ],
+            },
+            Menu {
+                name: SharedString::from("View"),
+                items: vec![
+                    MenuItem::action("Search", actions::ToggleSearch),
+                    MenuItem::action("Data Inspector", actions::ToggleInspector),
+                    MenuItem::action("Bitmap", actions::ToggleBitmap),
+                    MenuItem::action("Pattern", actions::TogglePatternPanel),
+                    MenuItem::action("Compare", actions::ToggleCompareMode),
+                    MenuItem::separator(),
+                    MenuItem::action("Cycle Encoding", actions::CycleEncoding),
+                ],
+            },
+        ]);
 
         // Load settings for window size
         let settings = Settings::load();

@@ -1,5 +1,6 @@
 use crate::HexEditor;
 use crate::SearchMode;
+use crate::actions;
 use crate::encoding::{DisplayChar, decode_for_display};
 use crate::keyboard;
 use crate::pattern;
@@ -8,6 +9,7 @@ use gpui::{
     ExternalPaths, Font, FontFeatures, FontStyle, FontWeight, Pixels, SharedString, Window,
     deferred, div, img, prelude::*, px, rgb,
 };
+use gpui_component::menu::ContextMenuExt;
 use gpui_component::scroll::{Scrollbar, ScrollbarShow};
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
@@ -26,7 +28,7 @@ pub(crate) struct RenderParams {
 }
 
 impl HexEditor {
-    /// Header area (title, file info, shortcut hints)
+    /// Header area (title, file info)
     pub(crate) fn render_header(&self, title: &str) -> impl IntoElement {
         let t = &self.theme;
         div()
@@ -52,23 +54,6 @@ impl HexEditor {
                         self.tab().document.len(),
                         if self.tab().document.has_unsaved_changes() { " (modified)" } else { "" }
                     ))
-            )
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(t.text_muted)
-                    .child(format!("Edit Mode: {} | Tab: switch | Shift+Arrow: select | Ctrl+A: select all",
-                        match self.tab().edit_pane {
-                            EditPane::Hex => "HEX",
-                            EditPane::Ascii => "ASCII",
-                            EditPane::Bitmap => "HEX",
-                        }))
-            )
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(t.text_muted)
-                    .child("Ctrl+O: open | Ctrl+S: save | Ctrl+T: new tab | Ctrl+W: close | Ctrl+K: compare | Ctrl+Z/Y: undo/redo")
             )
     }
 
@@ -422,6 +407,14 @@ impl HexEditor {
                             .on_scroll_wheel(cx.listener(|this, _event: &gpui::ScrollWheelEvent, _window, _cx| {
                                 this.user_scrolled = true;
                             }))
+                            .context_menu(|menu, _window, _cx| {
+                                menu.menu("Copy", Box::new(actions::Copy))
+                                    .menu("Paste", Box::new(actions::Paste))
+                                    .separator()
+                                    .menu("Select All", Box::new(actions::SelectAll))
+                                    .separator()
+                                    .menu("Toggle Inspector", Box::new(actions::ToggleInspector))
+                            })
                             .pr(px(24.0))
                             .child(
                                 div()
@@ -2733,6 +2726,102 @@ impl Render for HexEditor {
                     }
                 }),
             )
+            // Action handlers (dispatched from menu bar and key bindings)
+            .on_action(cx.listener(|this, _: &actions::Open, _window, cx| {
+                this.open_file_dialog(cx);
+            }))
+            .on_action(cx.listener(|this, _: &actions::Save, window, cx| {
+                this.save_with_confirmation(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &actions::SaveAs, _window, cx| {
+                this.save_as_dialog(cx);
+            }))
+            .on_action(cx.listener(|this, _: &actions::NewTab, _window, cx| {
+                this.new_tab();
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &actions::CloseTab, _window, cx| {
+                this.close_tab();
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &actions::Undo, _window, cx| {
+                if let Some(offset) = this.tab_mut().document.undo() {
+                    this.move_position(offset);
+                    this.save_message = Some("Undo".to_string());
+                }
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &actions::Redo, _window, cx| {
+                if let Some(offset) = this.tab_mut().document.redo() {
+                    this.move_position(offset);
+                    this.save_message = Some("Redo".to_string());
+                }
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &actions::Copy, _window, cx| {
+                this.copy_selection(cx);
+            }))
+            .on_action(cx.listener(|this, _: &actions::Paste, _window, cx| {
+                this.paste_from_clipboard(cx);
+            }))
+            .on_action(cx.listener(|this, _: &actions::SelectAll, _window, cx| {
+                if this.tab().document.len() > 0 {
+                    this.tab_mut().selection_start = Some(0);
+                    let end_pos = this.tab().document.len().saturating_sub(1);
+                    this.tab_mut().cursor_position = end_pos;
+                    this.save_message = Some("Selected all".to_string());
+                }
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &actions::ToggleInsertMode, _window, cx| {
+                this.tab_mut().edit_mode = match this.tab().edit_mode {
+                    EditMode::Overwrite => EditMode::Insert,
+                    EditMode::Insert => EditMode::Overwrite,
+                };
+                this.tab_mut().hex_nibble = HexNibble::High;
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &actions::ToggleSearch, _window, cx| {
+                let visible = !this.tab().search_visible;
+                this.tab_mut().search_visible = visible;
+                if !visible {
+                    this.tab_mut().search_results.clear();
+                    this.tab_mut().current_search_index = None;
+                }
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &actions::ToggleInspector, _window, cx| {
+                this.toggle_inspector();
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &actions::ToggleBitmap, _window, cx| {
+                this.toggle_bitmap();
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &actions::TogglePatternPanel, _window, cx| {
+                this.toggle_pattern_panel();
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &actions::ToggleCompareMode, _window, cx| {
+                if this.compare.mode {
+                    this.exit_compare_mode();
+                } else {
+                    this.start_compare_mode();
+                }
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &actions::CycleEncoding, _window, cx| {
+                this.cycle_encoding();
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &actions::FindNext, _window, cx| {
+                this.next_search_result();
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &actions::FindPrev, _window, cx| {
+                this.prev_search_result();
+                cx.notify();
+            }))
             .on_key_down(cx.listener(keyboard::handle_key_event))
             .on_drop(cx.listener(|editor, paths: &ExternalPaths, _window, cx| {
                 editor.handle_file_drop(paths, cx);

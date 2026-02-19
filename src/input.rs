@@ -5,6 +5,8 @@
 //! - ASCII input
 //! - Pane toggling and selection management
 
+use gpui::{ClipboardItem, Context};
+
 use crate::HexEditor;
 use crate::ui::{EditMode, EditPane, HexNibble};
 
@@ -141,5 +143,71 @@ impl HexEditor {
     /// Clear the current selection
     pub fn clear_selection(&mut self) {
         self.tab_mut().selection_start = None;
+    }
+
+    /// Copy selected bytes to clipboard as hex string
+    pub fn copy_selection(&mut self, cx: &mut Context<Self>) {
+        let (start, end) = if let Some(range) = self.selection_range() {
+            range
+        } else {
+            // No selection: copy single byte at cursor
+            let pos = self.tab().cursor_position;
+            if pos >= self.tab().document.len() {
+                return;
+            }
+            (pos, pos)
+        };
+
+        let mut hex_parts = Vec::new();
+        for i in start..=end {
+            if let Some(byte) = self.tab().document.get_byte(i) {
+                hex_parts.push(format!("{:02X}", byte));
+            }
+        }
+        let hex_string = hex_parts.join(" ");
+        cx.write_to_clipboard(ClipboardItem::new_string(hex_string.clone()));
+        self.save_message = Some(format!("Copied {} byte(s)", end - start + 1));
+    }
+
+    /// Paste hex string from clipboard
+    pub fn paste_from_clipboard(&mut self, cx: &mut Context<Self>) {
+        let clipboard = cx.read_from_clipboard();
+        let text = match clipboard.as_ref().and_then(|item| item.text()) {
+            Some(t) => t.to_string(),
+            None => return,
+        };
+
+        // Parse hex bytes from clipboard text (e.g. "4A 6F 68 6E" or "4A6F686E")
+        let bytes: Vec<u8> = text
+            .split(|c: char| c.is_whitespace() || c == ',')
+            .filter(|s| !s.is_empty())
+            .filter_map(|s| u8::from_str_radix(s.trim(), 16).ok())
+            .collect();
+
+        if bytes.is_empty() {
+            return;
+        }
+
+        let cursor_pos = self.tab().cursor_position;
+        if self.tab().edit_mode == EditMode::Insert {
+            if let Err(e) = self.tab_mut().document.insert_bytes(cursor_pos, &bytes) {
+                eprintln!("Failed to paste bytes: {}", e);
+                return;
+            }
+            self.invalidate_render_cache();
+        } else {
+            // Overwrite mode: overwrite bytes starting at cursor
+            for (i, &byte) in bytes.iter().enumerate() {
+                let pos = cursor_pos + i;
+                if pos >= self.tab().document.len() {
+                    break;
+                }
+                if let Err(e) = self.tab_mut().document.set_byte(pos, byte) {
+                    eprintln!("Failed to paste byte: {}", e);
+                    break;
+                }
+            }
+        }
+        self.save_message = Some(format!("Pasted {} byte(s)", bytes.len()));
     }
 }

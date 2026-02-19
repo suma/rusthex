@@ -1,0 +1,33 @@
+//! Action definitions for menu bar and keyboard shortcut integration
+
+use gpui::actions;
+
+actions!(
+    rusthex,
+    [
+        // File
+        Open,
+        Save,
+        SaveAs,
+        NewTab,
+        CloseTab,
+        Quit,
+        // Edit
+        Undo,
+        Redo,
+        SelectAll,
+        Copy,
+        Paste,
+        ToggleInsertMode,
+        // View
+        ToggleSearch,
+        ToggleInspector,
+        ToggleBitmap,
+        TogglePatternPanel,
+        ToggleCompareMode,
+        CycleEncoding,
+        // Search
+        FindNext,
+        FindPrev,
+    ]
+);
