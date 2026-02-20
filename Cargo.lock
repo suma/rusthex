@@ -4840,12 +4840,14 @@ dependencies = [
  "memchr",
  "memmap2",
  "pattern-lang",
+ "raw-window-handle",
  "rusthex-ipc",
  "serde",
  "serde_json",
  "smallvec",
  "tempfile",
  "toml 0.8.23",
+ "windows 0.61.3",
 ]
 
 [[package]]

@@ -2416,6 +2416,17 @@ impl HexEditor {
 
 impl Render for HexEditor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Drain pending actions from Windows native menu and dispatch on next frame
+        #[cfg(target_os = "windows")]
+        {
+            let actions = crate::windows_menu::drain_pending_actions();
+            for action in actions {
+                window.on_next_frame(move |window, cx| {
+                    window.dispatch_action(action, cx);
+                });
+            }
+        }
+
         // Calculate and cache font metrics for different text sizes
         let font = Font {
             family: self.settings.display.font_name.clone().into(),

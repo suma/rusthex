@@ -38,6 +38,8 @@ mod tab;
 mod tabs;
 mod theme;
 mod ui;
+#[cfg(target_os = "windows")]
+mod windows_menu;
 
 use bitmap::BitmapState;
 use compare::CompareState;
@@ -507,58 +509,8 @@ fn main() {
             KeyBinding::new("shift-f3", actions::FindPrev, None),
         ]);
 
-        // Set native menu bar
-        cx.set_menus(vec![
-            // Application menu (macOS displays the first menu as the app-name menu)
-            Menu {
-                name: SharedString::from("rusthex"),
-                items: vec![
-                    MenuItem::os_submenu("Services", SystemMenuType::Services),
-                    MenuItem::separator(),
-                    MenuItem::action("Quit rusthex", actions::Quit),
-                ],
-            },
-            Menu {
-                name: SharedString::from("File"),
-                items: vec![
-                    MenuItem::action("Open...", actions::Open),
-                    MenuItem::separator(),
-                    MenuItem::action("Save", actions::Save),
-                    MenuItem::action("Save As...", actions::SaveAs),
-                    MenuItem::separator(),
-                    MenuItem::action("New Tab", actions::NewTab),
-                    MenuItem::action("Close Tab", actions::CloseTab),
-                ],
-            },
-            Menu {
-                name: SharedString::from("Edit"),
-                items: vec![
-                    MenuItem::os_action("Undo", actions::Undo, OsAction::Undo),
-                    MenuItem::os_action("Redo", actions::Redo, OsAction::Redo),
-                    MenuItem::separator(),
-                    MenuItem::os_action("Copy", actions::Copy, OsAction::Copy),
-                    MenuItem::action("Copy as ASCII Text", actions::CopyAsAscii),
-                    MenuItem::action("Copy as Hex String", actions::CopyAsHexString),
-                    MenuItem::action("Copy as C Array", actions::CopyAsCArray),
-                    MenuItem::os_action("Paste", actions::Paste, OsAction::Paste),
-                    MenuItem::os_action("Select All", actions::SelectAll, OsAction::SelectAll),
-                    MenuItem::separator(),
-                    MenuItem::action("Toggle Insert Mode", actions::ToggleInsertMode),
-                ],
-            },
-            Menu {
-                name: SharedString::from("View"),
-                items: vec![
-                    MenuItem::action("Search", actions::ToggleSearch),
-                    MenuItem::action("Data Inspector", actions::ToggleInspector),
-                    MenuItem::action("Bitmap", actions::ToggleBitmap),
-                    MenuItem::action("Pattern", actions::TogglePatternPanel),
-                    MenuItem::action("Compare", actions::ToggleCompareMode),
-                    MenuItem::separator(),
-                    MenuItem::action("Cycle Encoding", actions::CycleEncoding),
-                ],
-            },
-        ]);
+        // Set native menu bar (works on macOS; on Windows, stored but not rendered by gpui)
+        cx.set_menus(build_menus());
 
         // Load settings for window size
         let settings = Settings::load();
@@ -589,6 +541,10 @@ fn main() {
                     };
                     editor
                 });
+
+                // Install Win32 native menu bar (gpui's set_menus doesn't create HMENU on Windows)
+                #[cfg(target_os = "windows")]
+                windows_menu::install_native_menu(window, &build_menus());
 
                 // Start IPC server for rusthex-mcp communication
                 entity.update(cx, |editor, cx| {
@@ -634,4 +590,59 @@ fn main() {
         .unwrap();
         cx.activate(true);
     });
+}
+
+/// Build the application menu definition shared by macOS (NSMenu) and Windows (HMENU).
+fn build_menus() -> Vec<Menu> {
+    vec![
+        // Application menu (macOS displays the first menu as the app-name menu)
+        Menu {
+            name: SharedString::from("rusthex"),
+            items: vec![
+                MenuItem::os_submenu("Services", SystemMenuType::Services),
+                MenuItem::separator(),
+                MenuItem::action("Quit rusthex", actions::Quit),
+            ],
+        },
+        Menu {
+            name: SharedString::from("File"),
+            items: vec![
+                MenuItem::action("Open...", actions::Open),
+                MenuItem::separator(),
+                MenuItem::action("Save", actions::Save),
+                MenuItem::action("Save As...", actions::SaveAs),
+                MenuItem::separator(),
+                MenuItem::action("New Tab", actions::NewTab),
+                MenuItem::action("Close Tab", actions::CloseTab),
+            ],
+        },
+        Menu {
+            name: SharedString::from("Edit"),
+            items: vec![
+                MenuItem::os_action("Undo", actions::Undo, OsAction::Undo),
+                MenuItem::os_action("Redo", actions::Redo, OsAction::Redo),
+                MenuItem::separator(),
+                MenuItem::os_action("Copy", actions::Copy, OsAction::Copy),
+                MenuItem::action("Copy as ASCII Text", actions::CopyAsAscii),
+                MenuItem::action("Copy as Hex String", actions::CopyAsHexString),
+                MenuItem::action("Copy as C Array", actions::CopyAsCArray),
+                MenuItem::os_action("Paste", actions::Paste, OsAction::Paste),
+                MenuItem::os_action("Select All", actions::SelectAll, OsAction::SelectAll),
+                MenuItem::separator(),
+                MenuItem::action("Toggle Insert Mode", actions::ToggleInsertMode),
+            ],
+        },
+        Menu {
+            name: SharedString::from("View"),
+            items: vec![
+                MenuItem::action("Search", actions::ToggleSearch),
+                MenuItem::action("Data Inspector", actions::ToggleInspector),
+                MenuItem::action("Bitmap", actions::ToggleBitmap),
+                MenuItem::action("Pattern", actions::TogglePatternPanel),
+                MenuItem::action("Compare", actions::ToggleCompareMode),
+                MenuItem::separator(),
+                MenuItem::action("Cycle Encoding", actions::CycleEncoding),
+            ],
+        },
+    ]
 }
