@@ -167,6 +167,13 @@ impl HexEditor {
     /// Calculate header height based on phi-based line heights matching gpui's actual rendering.
     /// Header content + Tab bar (conditional) + Search bar (conditional)
     fn calculate_header_height(&self) -> f32 {
+        // Menu bar (Windows only): py_0.5(2+2) + text_sm + border_b_1(1) = sm + 5
+        let menu_bar = if cfg!(target_os = "windows") {
+            self.cached_line_height_sm + 5.0
+        } else {
+            0.0
+        };
+
         // Header div: text_xl + text_sm + pb_4(16) + border_b_1(1)
         let base_header = self.cached_line_height_xl + self.cached_line_height_sm + 17.0;
 
@@ -191,7 +198,7 @@ impl HexEditor {
             0.0
         };
 
-        base_header + tab_bar + search_bar + bookmark_bar
+        menu_bar + base_header + tab_bar + search_bar + bookmark_bar
     }
 
     /// Get current active tab

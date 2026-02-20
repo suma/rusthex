@@ -58,6 +58,46 @@ impl HexEditor {
             )
     }
 
+    /// Menu bar rendered in gpui (Windows only).
+    ///
+    /// Win32 HMENU is invisible under gpui's DirectComposition topmost visual,
+    /// so the menu bar is drawn as a gpui div and popups are shown via
+    /// `TrackPopupMenu` on click.
+    #[cfg(target_os = "windows")]
+    pub(crate) fn render_menu_bar(&self, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+        let labels = crate::windows_menu::menu_labels();
+        let bg_elevated = self.theme.bg_elevated;
+        let border_primary = self.theme.border_primary;
+        let text_muted = self.theme.text_muted;
+        let text_primary = self.theme.text_primary;
+        let bg_hover = self.theme.bg_hover;
+
+        div()
+            .flex()
+            .items_center()
+            .bg(bg_elevated)
+            .border_b_1()
+            .border_color(border_primary)
+            .children(labels.into_iter().enumerate().map(move |(i, label)| {
+                div()
+                    .id(("menu", i))
+                    .px_2()
+                    .py_0p5()
+                    .text_sm()
+                    .text_color(text_muted)
+                    .cursor_pointer()
+                    .hover(move |h| h.bg(bg_hover).text_color(text_primary))
+                    .on_mouse_down(
+                        gpui::MouseButton::Left,
+                        cx.listener(move |_this, _event: &gpui::MouseDownEvent, _window, cx| {
+                            crate::windows_menu::show_popup_menu(i);
+                            cx.notify();
+                        }),
+                    )
+                    .child(label)
+            }))
+    }
+
     /// Tab bar (shown only when multiple tabs exist)
     pub(crate) fn render_tab_bar(&self, cx: &mut gpui::Context<Self>) -> impl IntoElement {
         let t = &self.theme;
@@ -2579,7 +2619,7 @@ impl Render for HexEditor {
             viewport_bounds,
         };
 
-        div()
+        let root = div()
             .flex()
             .flex_col()
             .bg(self.theme.bg_primary)
@@ -2853,8 +2893,13 @@ impl Render for HexEditor {
             .on_key_down(cx.listener(keyboard::handle_key_event))
             .on_drop(cx.listener(|editor, paths: &ExternalPaths, _window, cx| {
                 editor.handle_file_drop(paths, cx);
-            }))
-            .child(self.render_header(&title))
+            }));
+
+        // Windows: custom-rendered menu bar (DirectComposition covers Win32 HMENU)
+        #[cfg(target_os = "windows")]
+        let root = root.child(self.render_menu_bar(cx));
+
+        root.child(self.render_header(&title))
             .when(self.tabs.len() > 1, |parent| {
                 parent.child(self.render_tab_bar(cx))
             })
