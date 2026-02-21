@@ -1994,7 +1994,7 @@ impl HexEditor {
     }
 
     /// Log panel for displaying accumulated status messages
-    pub(crate) fn render_log_panel(&self, font_name: &String) -> impl IntoElement {
+    pub(crate) fn render_log_panel(&self, cx: &mut gpui::Context<Self>, font_name: &String) -> impl IntoElement {
         let t = &self.theme;
         let entry_count = self.log_panel.entries.len();
 
@@ -2035,9 +2035,10 @@ impl HexEditor {
                             .hover(|s| s.text_color(t.accent_primary))
                             .cursor_pointer()
                             .child("Clear")
-                            .on_click(|_event, _window, cx| {
-                                cx.dispatch_action(&actions::ClearLog);
-                            }),
+                            .on_click(cx.listener(|this, _event, _window, cx| {
+                                this.log_panel.clear();
+                                cx.notify();
+                            })),
                     ),
             )
             // Log entries (last 5 visible)
@@ -2990,8 +2991,12 @@ impl Render for HexEditor {
                 parent.child(self.render_compare_mode(&params))
             })
             .child(self.render_status_bar(cx, &params.font_name))
-            .when(self.log_panel.visible, |parent| {
-                parent.child(self.render_log_panel(&params.font_name))
+            .map(|parent| {
+                if self.log_panel.visible {
+                    parent.child(self.render_log_panel(cx, &params.font_name))
+                } else {
+                    parent
+                }
             })
             .when(self.inspector_visible, |parent| {
                 parent.child(self.render_data_inspector(&params.font_name))
