@@ -1,6 +1,7 @@
 use memmap2::Mmap;
 use std::cell::Cell;
 use std::fs::File;
+use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 
 /// Data source for background search operations
@@ -52,6 +53,14 @@ impl OriginalBuffer {
         match self {
             OriginalBuffer::InMemory(data) => data.get(offset).copied(),
             OriginalBuffer::MemoryMapped { mmap, .. } => mmap.get(offset).copied(),
+        }
+    }
+
+    /// Get a slice of the backing data
+    fn as_bytes(&self) -> &[u8] {
+        match self {
+            OriginalBuffer::InMemory(data) => data,
+            OriginalBuffer::MemoryMapped { mmap, .. } => mmap,
         }
     }
 
@@ -209,12 +218,24 @@ impl Document {
 
     /// Save document to specified path
     pub fn save_as(&mut self, path: PathBuf) -> std::io::Result<()> {
-        let data = self.to_vec();
-        std::fs::write(&path, &data)?;
+        {
+            let file = File::create(&path)?;
+            let mut writer = BufWriter::new(file);
+            self.write_to(&mut writer)?;
+            writer.flush()?;
+        }
 
         self.file_path = Some(path.clone());
         self.load(path)?;
 
+        Ok(())
+    }
+
+    /// Write document contents to a writer without materializing into Vec
+    pub fn write_to<W: Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        for piece in &self.pieces {
+            writer.write_all(self.piece_slice(piece))?;
+        }
         Ok(())
     }
 
@@ -229,6 +250,15 @@ impl Document {
             PieceSource::Original => self.original.get(source_offset),
             PieceSource::Add => self.add_buffer.get(source_offset).copied(),
         }
+    }
+
+    /// Get the backing byte slice for a piece
+    fn piece_slice(&self, piece: &Piece) -> &[u8] {
+        let buf = match piece.source {
+            PieceSource::Original => self.original.as_bytes(),
+            PieceSource::Add => &self.add_buffer,
+        };
+        &buf[piece.start..piece.start + piece.length]
     }
 
     /// Find the piece containing the given logical offset.
@@ -350,13 +380,43 @@ impl Document {
         self.get_byte_from_source(&self.pieces[piece_idx], offset_in_piece)
     }
 
-    /// Get slice of data
+    /// Get slice of data by walking pieces directly
     #[allow(dead_code)]
     pub fn get_slice(&self, range: std::ops::Range<usize>) -> Option<Vec<u8>> {
-        let mut result = Vec::with_capacity(range.len());
-        for i in range {
-            result.push(self.get_byte(i)?);
+        if range.is_empty() {
+            return Some(Vec::new());
         }
+        if range.end > self.cached_length {
+            return None;
+        }
+
+        let mut result = Vec::with_capacity(range.len());
+        let mut remaining_start = range.start;
+        let remaining_end = range.end;
+
+        let mut logical_pos = 0;
+        for piece in &self.pieces {
+            let piece_end = logical_pos + piece.length;
+
+            // Skip pieces entirely before range
+            if piece_end <= remaining_start {
+                logical_pos = piece_end;
+                continue;
+            }
+            // Stop if we've passed the range
+            if logical_pos >= remaining_end {
+                break;
+            }
+
+            let slice = self.piece_slice(piece);
+            let copy_start = remaining_start.saturating_sub(logical_pos);
+            let copy_end = (remaining_end - logical_pos).min(piece.length);
+            result.extend_from_slice(&slice[copy_start..copy_end]);
+
+            remaining_start = piece_end;
+            logical_pos = piece_end;
+        }
+
         Some(result)
     }
 
@@ -514,13 +574,8 @@ impl Document {
             ));
         }
 
-        // Collect deleted bytes for undo
-        let mut deleted_bytes = Vec::with_capacity(count);
-        for i in offset..end {
-            if let Some(b) = self.get_byte(i) {
-                deleted_bytes.push(b);
-            }
-        }
+        // Collect deleted bytes for undo (bulk copy via piece table)
+        let deleted_bytes = self.get_slice(offset..end).unwrap_or_default();
 
         // Save snapshot for undo
         let undo_record = UndoRecord {
@@ -633,13 +688,8 @@ impl Document {
             return Ok(());
         }
 
-        // Collect old bytes for undo
-        let mut old_bytes = Vec::with_capacity(count);
-        for i in offset..end {
-            if let Some(b) = self.get_byte(i) {
-                old_bytes.push(b);
-            }
-        }
+        // Collect old bytes for undo (bulk copy via piece table)
+        let old_bytes = self.get_slice(offset..end).unwrap_or_default();
 
         // Save snapshot for undo
         let undo_record = UndoRecord {
@@ -1346,5 +1396,88 @@ mod tests {
 
         doc.undo();
         assert!(!doc.has_unsaved_changes());
+    }
+
+    // =========================================
+    // get_slice (bulk read)
+    // =========================================
+
+    #[test]
+    fn test_get_slice_single_piece() {
+        let doc = Document::with_data(vec![0x01, 0x02, 0x03, 0x04, 0x05]);
+        assert_eq!(doc.get_slice(1..4), Some(vec![0x02, 0x03, 0x04]));
+    }
+
+    #[test]
+    fn test_get_slice_spanning_pieces() {
+        let mut doc = Document::with_data(vec![0x01, 0x02, 0x03, 0x04, 0x05]);
+        doc.set_byte(2, 0xFF).unwrap();
+        // pieces: [orig 0..2], [add FF], [orig 3..5]
+        assert_eq!(
+            doc.get_slice(0..5),
+            Some(vec![0x01, 0x02, 0xFF, 0x04, 0x05])
+        );
+        // Partial span across piece boundaries
+        assert_eq!(doc.get_slice(1..4), Some(vec![0x02, 0xFF, 0x04]));
+    }
+
+    #[test]
+    fn test_get_slice_empty_range() {
+        let doc = Document::with_data(vec![0x01, 0x02]);
+        assert_eq!(doc.get_slice(1..1), Some(vec![]));
+    }
+
+    #[test]
+    fn test_get_slice_out_of_bounds() {
+        let doc = Document::with_data(vec![0x01, 0x02, 0x03]);
+        assert_eq!(doc.get_slice(0..5), None);
+    }
+
+    #[test]
+    fn test_get_slice_after_insert() {
+        let mut doc = Document::with_data(vec![0x01, 0x04, 0x05]);
+        doc.insert_bytes(1, &[0x02, 0x03]).unwrap();
+        // [0x01, 0x02, 0x03, 0x04, 0x05]
+        assert_eq!(
+            doc.get_slice(0..5),
+            Some(vec![0x01, 0x02, 0x03, 0x04, 0x05])
+        );
+    }
+
+    #[test]
+    fn test_get_slice_matches_to_vec() {
+        let mut doc = Document::with_data(vec![0; 100]);
+        for i in (0..100).step_by(3) {
+            doc.set_byte(i, (i as u8).wrapping_mul(7)).unwrap();
+        }
+        doc.insert_bytes(50, &[0xAA, 0xBB, 0xCC]).unwrap();
+        let full = doc.to_vec();
+        // get_slice of the entire document should match to_vec
+        assert_eq!(doc.get_slice(0..doc.len()), Some(full.clone()));
+        // Sub-ranges should match too
+        assert_eq!(doc.get_slice(10..60), Some(full[10..60].to_vec()));
+    }
+
+    // =========================================
+    // write_to (streaming write)
+    // =========================================
+
+    #[test]
+    fn test_write_to_matches_to_vec() {
+        let mut doc = Document::with_data(vec![0x01, 0x02, 0x03, 0x04, 0x05]);
+        doc.set_byte(2, 0xFF).unwrap();
+        doc.insert_bytes(3, &[0xAA, 0xBB]).unwrap();
+
+        let mut buf = Vec::new();
+        doc.write_to(&mut buf).unwrap();
+        assert_eq!(buf, doc.to_vec());
+    }
+
+    #[test]
+    fn test_write_to_empty_doc() {
+        let doc = Document::new();
+        let mut buf = Vec::new();
+        doc.write_to(&mut buf).unwrap();
+        assert!(buf.is_empty());
     }
 }
