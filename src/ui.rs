@@ -658,17 +658,32 @@ impl HitTestLayout {
     /// gap_1 = 4px between hex bytes
     const GAP_1: f32 = 4.0;
 
+    /// Rendered width of a hex byte div.
+    ///
+    /// gpui applies `.ceil()` to text element widths (text.rs line 419),
+    /// so each hex byte div ("AB") is `ceil(char_width * 2)` pixels wide.
+    fn hex_byte_rendered_width(&self) -> f32 {
+        (self.char_width * 2.0).ceil()
+    }
+
+    /// Rendered width of the address text div.
+    ///
+    /// gpui applies `.ceil()` to text element widths.
+    fn address_text_rendered_width(&self) -> f32 {
+        (self.char_width * self.addr_chars as f32).ceil()
+    }
+
     /// X coordinate where the hex column starts
     fn hex_start_x(&self) -> f32 {
-        let address_width = Self::BOOKMARK_INDICATOR + self.char_width * self.addr_chars as f32;
+        let address_width = Self::BOOKMARK_INDICATOR + self.address_text_rendered_width();
         self.outer_padding + address_width + Self::GAP_4
     }
 
     /// X coordinate where the ASCII column starts
     fn ascii_start_x(&self) -> f32 {
         let hex_start = self.hex_start_x();
-        // Hex column width: each byte is 2 chars wide, with gap_1 between bytes (not after last)
-        let hex_column_width = self.bytes_per_row as f32 * self.char_width * 2.0
+        let hex_byte_w = self.hex_byte_rendered_width();
+        let hex_column_width = self.bytes_per_row as f32 * hex_byte_w
             + (self.bytes_per_row.saturating_sub(1)) as f32 * Self::GAP_1;
         hex_start + hex_column_width + Self::GAP_4
     }
@@ -693,11 +708,12 @@ impl HitTestLayout {
     /// Returns a value in `0..bytes_per_row` (clamped).
     pub fn byte_in_row_from_mouse_x_hex(&self, mouse_x: f32) -> usize {
         let hex_start = self.hex_start_x();
-        let hex_byte_width = self.char_width * 2.0 + Self::GAP_1;
+        // Each hex byte slot = ceil(char_width * 2) + gap_1
+        let hex_byte_slot = self.hex_byte_rendered_width() + Self::GAP_1;
         if mouse_x < hex_start {
             0
         } else {
-            let col = ((mouse_x - hex_start) / hex_byte_width) as usize;
+            let col = ((mouse_x - hex_start) / hex_byte_slot) as usize;
             col.min(self.bytes_per_row.saturating_sub(1))
         }
     }
@@ -705,12 +721,16 @@ impl HitTestLayout {
     /// Convert mouse X coordinate to byte-in-row index for ASCII pane.
     ///
     /// Returns a value in `0..bytes_per_row` (clamped).
+    ///
+    /// Each ASCII character div's rendered width is `ceil(char_width)` due to
+    /// gpui's text element ceil() rounding, same as hex byte divs.
     pub fn byte_in_row_from_mouse_x_ascii(&self, mouse_x: f32) -> usize {
         let ascii_start = self.ascii_start_x();
+        let ascii_char_width = self.char_width.ceil();
         if mouse_x < ascii_start {
             0
         } else {
-            let col = ((mouse_x - ascii_start) / self.char_width) as usize;
+            let col = ((mouse_x - ascii_start) / ascii_char_width) as usize;
             col.min(self.bytes_per_row.saturating_sub(1))
         }
     }
@@ -884,5 +904,61 @@ mod tests {
         let mut layout = default_layout();
         layout.doc_len = 0;
         assert_eq!(layout.byte_position_from_mouse(200.0, 200.0, EditPane::Hex), 0);
+    }
+
+    // -- ceil() correction for fractional char_width --
+
+    /// Layout with fractional char_width (like real fonts) to test ceil() correction.
+    /// char_width=10.2, so ceil(10.2*2)=21 per hex byte, ceil(10.2*8)=82 for address.
+    fn fractional_layout() -> HitTestLayout {
+        HitTestLayout {
+            outer_padding: 16.0,
+            header_height: 50.0,
+            content_top_padding: 16.0,
+            scroll_offset: 0.0,
+            row_height: 30.0,
+            char_width: 10.2,
+            bytes_per_row: 16,
+            doc_len: 256,
+            addr_chars: 8,
+        }
+    }
+
+    #[test]
+    fn fractional_hex_start_accounts_for_ceil() {
+        let layout = fractional_layout();
+        // address_text_rendered = ceil(10.2 * 8) = ceil(81.6) = 82
+        // hex_start = 16 + (12 + 82) + 16 = 126
+        assert_eq!(layout.hex_start_x(), 126.0);
+    }
+
+    #[test]
+    fn fractional_ascii_start_accounts_for_ceil() {
+        let layout = fractional_layout();
+        // hex_byte_rendered = ceil(10.2 * 2) = ceil(20.4) = 21
+        // hex_column_width = 16 * 21 + 15 * 4 = 336 + 60 = 396
+        // ascii_start = 126 + 396 + 16 = 538
+        assert_eq!(layout.ascii_start_x(), 538.0);
+    }
+
+    #[test]
+    fn fractional_hex_byte_slot_uses_ceil() {
+        let layout = fractional_layout();
+        // hex_byte_slot = ceil(20.4) + 4 = 21 + 4 = 25
+        // At hex_start (126), byte 0; at 126 + 25, byte 1
+        assert_eq!(layout.byte_in_row_from_mouse_x_hex(126.0), 0);
+        assert_eq!(layout.byte_in_row_from_mouse_x_hex(151.0), 1);
+    }
+
+    #[test]
+    fn fractional_ascii_first_byte_at_corrected_start() {
+        let layout = fractional_layout();
+        // ascii_start = 538, so clicking at 538 => byte 0
+        assert_eq!(layout.byte_in_row_from_mouse_x_ascii(538.0), 0);
+        // Each ASCII char rendered width = ceil(10.2) = 11
+        // clicking at 538 + 11 => byte 1
+        assert_eq!(layout.byte_in_row_from_mouse_x_ascii(549.0), 1);
+        // byte 13 at 538 + 13*11 = 681
+        assert_eq!(layout.byte_in_row_from_mouse_x_ascii(681.0), 13);
     }
 }

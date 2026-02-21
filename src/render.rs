@@ -2570,7 +2570,6 @@ impl Render for HexEditor {
             Ok(advance) => f32::from(advance),
             Err(_) => f32::from(ascent) * 0.6, // Fallback approximation
         };
-
         // Address column width: dynamic based on document size
         let address_chars = ui::address_chars(self.tab().document.len());
         let address_width = self.cached_char_width * address_chars as f32;
