@@ -630,3 +630,259 @@ pub fn calculate_spacer_heights(
         (px(top_height), px(bottom_height))
     }
 }
+
+/// Parameters for hit-testing mouse coordinates to byte positions.
+///
+/// This struct captures all layout parameters needed to convert mouse (x, y)
+/// coordinates into a byte offset within the document. Extracted as a pure
+/// function to enable unit testing independent of the rendering system.
+pub struct HitTestLayout {
+    pub outer_padding: f32,
+    pub header_height: f32,
+    pub content_top_padding: f32,
+    /// Positive scroll offset (already negated from the raw negative value)
+    pub scroll_offset: f32,
+    pub row_height: f32,
+    pub char_width: f32,
+    pub bytes_per_row: usize,
+    pub doc_len: usize,
+    /// Number of hex characters for address display (from `address_chars()`)
+    pub addr_chars: usize,
+}
+
+impl HitTestLayout {
+    /// Bookmark indicator width: 8px dot + 4px margin (or 12px spacer)
+    const BOOKMARK_INDICATOR: f32 = 12.0;
+    /// gap_4 = 16px
+    const GAP_4: f32 = 16.0;
+    /// gap_1 = 4px between hex bytes
+    const GAP_1: f32 = 4.0;
+
+    /// X coordinate where the hex column starts
+    fn hex_start_x(&self) -> f32 {
+        let address_width = Self::BOOKMARK_INDICATOR + self.char_width * self.addr_chars as f32;
+        self.outer_padding + address_width + Self::GAP_4
+    }
+
+    /// X coordinate where the ASCII column starts
+    fn ascii_start_x(&self) -> f32 {
+        let hex_start = self.hex_start_x();
+        // Hex column width: each byte is 2 chars wide, with gap_1 between bytes (not after last)
+        let hex_column_width = self.bytes_per_row as f32 * self.char_width * 2.0
+            + (self.bytes_per_row.saturating_sub(1)) as f32 * Self::GAP_1;
+        hex_start + hex_column_width + Self::GAP_4
+    }
+
+    /// Convert mouse Y coordinate to row index.
+    ///
+    /// The result is unbounded on the upper end — callers are responsible
+    /// for clamping to the valid row range when converting to byte offsets.
+    pub fn row_from_mouse_y(&self, mouse_y: f32) -> usize {
+        let content_top =
+            self.outer_padding + self.header_height + self.content_top_padding;
+        let relative_y = mouse_y - content_top + self.scroll_offset;
+        if relative_y < 0.0 {
+            0
+        } else {
+            (relative_y / self.row_height) as usize
+        }
+    }
+
+    /// Convert mouse X coordinate to byte-in-row index for Hex pane.
+    ///
+    /// Returns a value in `0..bytes_per_row` (clamped).
+    pub fn byte_in_row_from_mouse_x_hex(&self, mouse_x: f32) -> usize {
+        let hex_start = self.hex_start_x();
+        let hex_byte_width = self.char_width * 2.0 + Self::GAP_1;
+        if mouse_x < hex_start {
+            0
+        } else {
+            let col = ((mouse_x - hex_start) / hex_byte_width) as usize;
+            col.min(self.bytes_per_row.saturating_sub(1))
+        }
+    }
+
+    /// Convert mouse X coordinate to byte-in-row index for ASCII pane.
+    ///
+    /// Returns a value in `0..bytes_per_row` (clamped).
+    pub fn byte_in_row_from_mouse_x_ascii(&self, mouse_x: f32) -> usize {
+        let ascii_start = self.ascii_start_x();
+        if mouse_x < ascii_start {
+            0
+        } else {
+            let col = ((mouse_x - ascii_start) / self.char_width) as usize;
+            col.min(self.bytes_per_row.saturating_sub(1))
+        }
+    }
+
+    /// Convert mouse coordinates to a byte position (main entry point).
+    ///
+    /// The returned value is clamped to `0..doc_len`.
+    pub fn byte_position_from_mouse(&self, mouse_x: f32, mouse_y: f32, pane: EditPane) -> usize {
+        if self.doc_len == 0 {
+            return 0;
+        }
+        let row = self.row_from_mouse_y(mouse_y);
+        let row_start = row * self.bytes_per_row;
+        let byte_in_row = match pane {
+            EditPane::Hex => self.byte_in_row_from_mouse_x_hex(mouse_x),
+            EditPane::Ascii => self.byte_in_row_from_mouse_x_ascii(mouse_x),
+            EditPane::Bitmap => 0,
+        };
+        (row_start + byte_in_row).min(self.doc_len.saturating_sub(1))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Create a HitTestLayout with typical defaults for testing.
+    /// char_width=10, row_height=30, bytes_per_row=16, doc_len=256, addr_chars=8
+    fn default_layout() -> HitTestLayout {
+        HitTestLayout {
+            outer_padding: 16.0,
+            header_height: 50.0,
+            content_top_padding: 16.0,
+            scroll_offset: 0.0,
+            row_height: 30.0,
+            char_width: 10.0,
+            bytes_per_row: 16,
+            doc_len: 256,
+            addr_chars: 8,
+        }
+    }
+
+    // -- row_from_mouse_y --
+
+    #[test]
+    fn row_from_mouse_y_first_row() {
+        let layout = default_layout();
+        // content_top = 16 + 50 + 16 = 82
+        // mouse_y = 82 => relative_y = 0 => row 0
+        assert_eq!(layout.row_from_mouse_y(82.0), 0);
+    }
+
+    #[test]
+    fn row_from_mouse_y_second_row() {
+        let layout = default_layout();
+        // mouse_y = 82 + 30 = 112 => relative_y = 30 => row 1
+        assert_eq!(layout.row_from_mouse_y(112.0), 1);
+    }
+
+    #[test]
+    fn row_from_mouse_y_negative_clamps_to_zero() {
+        let layout = default_layout();
+        // mouse_y = 0 => relative_y = -82 => clamped to row 0
+        assert_eq!(layout.row_from_mouse_y(0.0), 0);
+    }
+
+    #[test]
+    fn row_from_mouse_y_with_scroll_offset() {
+        let mut layout = default_layout();
+        layout.scroll_offset = 60.0; // scrolled down 2 rows
+        // mouse_y = 82 => relative_y = 0 + 60 = 60 => row 2
+        assert_eq!(layout.row_from_mouse_y(82.0), 2);
+    }
+
+    // -- byte_in_row_from_mouse_x_hex --
+
+    #[test]
+    fn hex_first_byte() {
+        let layout = default_layout();
+        // hex_start = 16 + (12 + 10*8) + 16 = 16 + 92 + 16 = 124
+        let hex_start = 124.0;
+        assert_eq!(layout.byte_in_row_from_mouse_x_hex(hex_start), 0);
+    }
+
+    #[test]
+    fn hex_second_byte() {
+        let layout = default_layout();
+        // hex_byte_width = 10*2 + 4 = 24
+        let hex_start = 124.0;
+        assert_eq!(layout.byte_in_row_from_mouse_x_hex(hex_start + 24.0), 1);
+    }
+
+    #[test]
+    fn hex_left_of_column_clamps_to_zero() {
+        let layout = default_layout();
+        assert_eq!(layout.byte_in_row_from_mouse_x_hex(0.0), 0);
+    }
+
+    #[test]
+    fn hex_right_overflow_clamps_to_last_byte() {
+        let layout = default_layout();
+        assert_eq!(layout.byte_in_row_from_mouse_x_hex(9999.0), 15);
+    }
+
+    // -- byte_in_row_from_mouse_x_ascii --
+
+    #[test]
+    fn ascii_first_byte() {
+        let layout = default_layout();
+        // hex_start = 124
+        // hex_column_width = 16*10*2 + 15*4 = 320 + 60 = 380
+        // ascii_start = 124 + 380 + 16 = 520
+        let ascii_start = 520.0;
+        assert_eq!(layout.byte_in_row_from_mouse_x_ascii(ascii_start), 0);
+    }
+
+    #[test]
+    fn ascii_second_byte() {
+        let layout = default_layout();
+        let ascii_start = 520.0;
+        assert_eq!(layout.byte_in_row_from_mouse_x_ascii(ascii_start + 10.0), 1);
+    }
+
+    #[test]
+    fn ascii_left_of_column_clamps_to_zero() {
+        let layout = default_layout();
+        assert_eq!(layout.byte_in_row_from_mouse_x_ascii(0.0), 0);
+    }
+
+    #[test]
+    fn ascii_right_overflow_clamps_to_last_byte() {
+        let layout = default_layout();
+        assert_eq!(layout.byte_in_row_from_mouse_x_ascii(9999.0), 15);
+    }
+
+    // -- byte_position_from_mouse (integration) --
+
+    #[test]
+    fn byte_position_hex_first_byte() {
+        let layout = default_layout();
+        // row 0, byte 0 => offset 0
+        assert_eq!(layout.byte_position_from_mouse(124.0, 82.0, EditPane::Hex), 0);
+    }
+
+    #[test]
+    fn byte_position_hex_second_row_third_byte() {
+        let layout = default_layout();
+        // row 1 (y=112), byte 2 (x = 124 + 24*2 = 172) => offset 16+2 = 18
+        assert_eq!(layout.byte_position_from_mouse(172.0, 112.0, EditPane::Hex), 18);
+    }
+
+    #[test]
+    fn byte_position_ascii_pane() {
+        let layout = default_layout();
+        // row 0, byte 0
+        assert_eq!(layout.byte_position_from_mouse(520.0, 82.0, EditPane::Ascii), 0);
+        // row 0, byte 5 (x = 520 + 10*5 = 570)
+        assert_eq!(layout.byte_position_from_mouse(570.0, 82.0, EditPane::Ascii), 5);
+    }
+
+    #[test]
+    fn byte_position_clamps_to_doc_end() {
+        let mut layout = default_layout();
+        layout.doc_len = 20; // only 20 bytes
+        // row 10, byte 0 => would be 160, clamped to 19
+        assert_eq!(layout.byte_position_from_mouse(124.0, 382.0, EditPane::Hex), 19);
+    }
+
+    #[test]
+    fn byte_position_empty_doc_returns_zero() {
+        let mut layout = default_layout();
+        layout.doc_len = 0;
+        assert_eq!(layout.byte_position_from_mouse(200.0, 200.0, EditPane::Hex), 0);
+    }
+}

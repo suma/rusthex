@@ -2807,81 +2807,32 @@ impl Render for HexEditor {
 
                     // Handle hex/ASCII drag selection at root level
                     // Root-level handler ensures events fire even when mouse moves outside hex-content div
-                    if (this.drag_pane == Some(EditPane::Hex)
-                        || this.drag_pane == Some(EditPane::Ascii))
-                        && this.is_dragging
-                    {
-                        let bytes_per_row = this.bytes_per_row();
-                        let doc_len = this.tab().document.len();
-                        if doc_len == 0 {
-                            return;
-                        }
-                        let scroll_offset_f32: f32 =
-                            (-f32::from(this.tab().scroll_offset)).max(0.0);
-
-                        let row_height = this.cached_row_height;
-                        let char_width = this.cached_char_width;
-                        // Hex byte: 2 chars + gap_1 (4px)
-                        let hex_byte_width = char_width * 2.0 + 4.0;
-
-                        // Calculate row from Y position
-                        // event.position is in window coordinates
-                        let mouse_y: f32 = event.position.y.into();
-
-                        // Content area offset: outer padding + header height + content top padding
-                        let outer_padding = 16.0; // p_4
-                        let content_top_padding = 16.0; // pt_4
-                        let content_top =
-                            outer_padding + this.calculate_header_height() + content_top_padding;
-                        let relative_y = mouse_y - content_top + scroll_offset_f32;
-
-                        let row = if relative_y < 0.0 {
-                            0
-                        } else {
-                            (relative_y / row_height) as usize
-                        };
-
-                        let row_start = row * bytes_per_row;
-
-                        // Calculate byte in row from X position
-                        let mouse_x: f32 = event.position.x.into();
-                        // hex column starts after: outer_padding + address_column + gap_4
-                        let addr_chars = crate::ui::address_chars(this.tab().document.len());
-                        let bookmark_indicator = 12.0; // 8px dot + 4px margin, or 12px spacer
-                        let address_width = bookmark_indicator + char_width * addr_chars as f32;
-                        let hex_start = outer_padding + address_width + 16.0;
-                        let gap = 16.0; // gap_4
-                        let gap_1 = 4.0; // gap_1 between hex bytes
-                        let byte_in_row = match this.drag_pane {
-                            Some(EditPane::Hex) => {
-                                if mouse_x < hex_start {
-                                    0
-                                } else {
-                                    ((mouse_x - hex_start) / hex_byte_width) as usize
-                                }
+                    if let Some(pane @ (EditPane::Hex | EditPane::Ascii)) = this.drag_pane {
+                        if this.is_dragging {
+                            let doc_len = this.tab().document.len();
+                            if doc_len == 0 {
+                                return;
                             }
-                            Some(EditPane::Ascii) => {
-                                // Hex column: each byte is 2 chars, with gap_1 between bytes (not after last)
-                                let hex_column_width = bytes_per_row as f32 * char_width * 2.0
-                                    + (bytes_per_row - 1) as f32 * gap_1;
-                                let ascii_start = hex_start + hex_column_width + gap;
-                                if mouse_x < ascii_start {
-                                    0
-                                } else {
-                                    // ASCII column: each character is char_width, no gaps
-                                    ((mouse_x - ascii_start) / char_width) as usize
-                                }
+                            let layout = ui::HitTestLayout {
+                                outer_padding: 16.0, // p_4
+                                header_height: this.calculate_header_height(),
+                                content_top_padding: 16.0, // pt_4
+                                scroll_offset: (-f32::from(this.tab().scroll_offset)).max(0.0),
+                                row_height: this.cached_row_height,
+                                char_width: this.cached_char_width,
+                                bytes_per_row: this.bytes_per_row(),
+                                doc_len,
+                                addr_chars: ui::address_chars(doc_len),
+                            };
+                            let mouse_x: f32 = event.position.x.into();
+                            let mouse_y: f32 = event.position.y.into();
+                            let new_cursor = layout.byte_position_from_mouse(mouse_x, mouse_y, pane);
+
+                            if this.tab().cursor_position != new_cursor {
+                                this.tab_mut().cursor_position = new_cursor;
+                                this.ensure_cursor_visible_by_row();
+                                cx.notify();
                             }
-                            _ => 0,
-                        };
-
-                        let byte_in_row = byte_in_row.min(bytes_per_row - 1);
-                        let new_cursor = (row_start + byte_in_row).min(doc_len.saturating_sub(1));
-
-                        if this.tab().cursor_position != new_cursor {
-                            this.tab_mut().cursor_position = new_cursor;
-                            this.ensure_cursor_visible_by_row();
-                            cx.notify();
                         }
                     }
                 }),
