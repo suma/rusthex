@@ -18,6 +18,10 @@ A modern hex editor built with Rust and [gpui](https://www.gpui.rs/), featuring 
 
 ### Navigation & Selection
 - **Keyboard Navigation**: Arrow keys, Page Up/Down, Home/End, Ctrl+Home/End
+- **Cursor History**: Navigate back/forward through jump history
+  - Cmd+[ / Cmd+] (macOS), Alt+Left / Alt+Right (Windows/Linux)
+  - Records position before search jumps, bookmark navigation, page up/down, file start/end, undo/redo
+  - Per-tab history with 1,024-entry limit
 - **Mouse Support**: Click to position cursor, drag to select ranges
 - **Selection**: Shift+Arrow keys or mouse drag to select byte ranges
 - **Select All**: Ctrl+A / Cmd+A
@@ -42,7 +46,7 @@ A modern hex editor built with Rust and [gpui](https://www.gpui.rs/), featuring 
 - **Endianness toggle**: Little/Big endian (Ctrl+E)
 
 ### Text Encoding Support
-- **Multiple Encodings**: ASCII, Latin-1, UTF-8, Shift-JIS, EUC-JP
+- **Multiple Encodings**: ASCII, Latin-1, UTF-8, Shift-JIS, EUC-JP, UTF-16 BE/LE, UTF-32 BE/LE
 - **Display Only**: Encoding affects text display, editing remains byte-based
 - **Quick Switch**: Ctrl+Shift+E to cycle through encodings, or click in status bar
 - **Multi-byte Display**: First byte shows character, continuation bytes show `·`
@@ -142,6 +146,8 @@ include_dirs = [                            # Additional directories for #includ
 | Page Up / Page Down | Move by page |
 | Home / End | Go to start/end of row |
 | Ctrl+Home / Ctrl+End | Go to start/end of file |
+| Cmd+[ / Alt+Left | Navigate back in cursor history |
+| Cmd+] / Alt+Right | Navigate forward in cursor history |
 | Shift+Arrow / Shift+Page | Extend selection |
 | Ctrl+A / Cmd+A | Select all |
 | **Editing** ||
