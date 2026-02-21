@@ -61,6 +61,7 @@ impl HexEditor {
         };
 
         if let Some((pos, comment)) = target {
+            self.push_cursor_history();
             self.move_position(pos);
             if comment.is_empty() {
                 self.save_message = Some(format!("Jumped to bookmark at {}", self.fmt_addr(pos)));
@@ -69,6 +70,7 @@ impl HexEditor {
                     Some(format!("Jumped to bookmark at {}: {}", self.fmt_addr(pos), comment));
             }
         } else if let Some((pos, comment)) = wrapped {
+            self.push_cursor_history();
             self.move_position(pos);
             if comment.is_empty() {
                 self.save_message = Some(format!("Jumped to bookmark at {} (wrapped)", self.fmt_addr(pos)));
@@ -108,6 +110,7 @@ impl HexEditor {
         };
 
         if let Some((pos, comment)) = target {
+            self.push_cursor_history();
             self.move_position(pos);
             if comment.is_empty() {
                 self.save_message = Some(format!("Jumped to bookmark at {}", self.fmt_addr(pos)));
@@ -116,6 +119,7 @@ impl HexEditor {
                     Some(format!("Jumped to bookmark at {}: {}", self.fmt_addr(pos), comment));
             }
         } else if let Some((pos, comment)) = wrapped {
+            self.push_cursor_history();
             self.move_position(pos);
             if comment.is_empty() {
                 self.save_message = Some(format!("Jumped to bookmark at {} (wrapped)", self.fmt_addr(pos)));

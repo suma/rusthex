@@ -51,6 +51,9 @@ pub struct EditorTab {
     pub pattern: PatternState,
     // Logical first visible row for programmatic scroll (bypass f32 precision loss)
     pub scroll_logical_row: Option<usize>,
+    // Cursor navigation history (back/forward)
+    pub cursor_history: Vec<usize>,
+    pub cursor_history_index: usize,
 }
 
 impl EditorTab {
@@ -84,6 +87,8 @@ impl EditorTab {
             bookmark_comment_position: 0,
             pattern: PatternState::new(),
             scroll_logical_row: None,
+            cursor_history: Vec::new(),
+            cursor_history_index: 0,
         }
     }
 
@@ -92,6 +97,62 @@ impl EditorTab {
             document,
             ..Self::new()
         }
+    }
+
+    /// Maximum number of cursor history entries
+    const MAX_CURSOR_HISTORY: usize = 1024;
+
+    /// Push a position onto the navigation history.
+    /// Discards any forward entries if not at the front.
+    pub fn push_history(&mut self, pos: usize) {
+        // If we're not at the front of the history, discard forward entries
+        if self.cursor_history_index > 0 {
+            self.cursor_history.drain(0..self.cursor_history_index);
+            self.cursor_history_index = 0;
+        }
+
+        // Don't push duplicate of current front
+        if self.cursor_history.first() == Some(&pos) {
+            return;
+        }
+
+        self.cursor_history.insert(0, pos);
+
+        // Enforce maximum size
+        if self.cursor_history.len() > Self::MAX_CURSOR_HISTORY {
+            self.cursor_history.truncate(Self::MAX_CURSOR_HISTORY);
+        }
+    }
+
+    /// Navigate back in cursor history. Returns target position if available.
+    pub fn history_back(&mut self) -> Option<usize> {
+        if self.cursor_history_index >= self.cursor_history.len() {
+            return None;
+        }
+
+        // If at front, save current position first so we can return to it
+        if self.cursor_history_index == 0 {
+            let pos = self.cursor_position;
+            if self.cursor_history.first() != Some(&pos) {
+                self.cursor_history.insert(0, pos);
+            }
+        }
+
+        self.cursor_history_index += 1;
+        if self.cursor_history_index >= self.cursor_history.len() {
+            self.cursor_history_index = self.cursor_history.len() - 1;
+        }
+        Some(self.cursor_history[self.cursor_history_index])
+    }
+
+    /// Navigate forward in cursor history. Returns target position if available.
+    pub fn history_forward(&mut self) -> Option<usize> {
+        if self.cursor_history_index == 0 {
+            return None;
+        }
+
+        self.cursor_history_index -= 1;
+        Some(self.cursor_history[self.cursor_history_index])
     }
 
     /// Get display name for the tab
@@ -117,5 +178,116 @@ impl EditorTab {
 impl Default for EditorTab {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_push_history_basic() {
+        let mut tab = EditorTab::new();
+        tab.push_history(100);
+        tab.push_history(200);
+        tab.push_history(300);
+        assert_eq!(tab.cursor_history, vec![300, 200, 100]);
+        assert_eq!(tab.cursor_history_index, 0);
+    }
+
+    #[test]
+    fn test_push_history_no_duplicate() {
+        let mut tab = EditorTab::new();
+        tab.push_history(100);
+        tab.push_history(100); // duplicate
+        assert_eq!(tab.cursor_history, vec![100]);
+    }
+
+    #[test]
+    fn test_navigate_back_and_forward() {
+        let mut tab = EditorTab::new();
+        tab.cursor_position = 0;
+        tab.push_history(0);
+        tab.cursor_position = 100;
+        tab.push_history(100);
+        tab.cursor_position = 200;
+        tab.push_history(200);
+        tab.cursor_position = 300;
+
+        // history: [200, 100, 0], cursor at 300
+
+        // Go back: should save current pos (300) and move to 200
+        let target = tab.history_back();
+        assert_eq!(target, Some(200));
+        tab.cursor_position = 200;
+
+        // Go back again: move to 100
+        let target = tab.history_back();
+        assert_eq!(target, Some(100));
+        tab.cursor_position = 100;
+
+        // Go forward: move to 200
+        let target = tab.history_forward();
+        assert_eq!(target, Some(200));
+        tab.cursor_position = 200;
+
+        // Go forward: move to 300
+        let target = tab.history_forward();
+        assert_eq!(target, Some(300));
+        tab.cursor_position = 300;
+
+        // Go forward again: should return None (already at front)
+        let target = tab.history_forward();
+        assert_eq!(target, None);
+    }
+
+    #[test]
+    fn test_new_jump_clears_forward_history() {
+        let mut tab = EditorTab::new();
+        tab.cursor_position = 0;
+        tab.push_history(0);
+        tab.cursor_position = 100;
+        tab.push_history(100);
+        tab.cursor_position = 200;
+
+        // Go back to 100
+        let target = tab.history_back();
+        assert_eq!(target, Some(100));
+        tab.cursor_position = 100;
+
+        // Now jump to a new position 500 — forward history (200) should be discarded
+        tab.push_history(100); // current pos before jump
+        tab.cursor_position = 500;
+
+        // Go back: should go to 100, not 200
+        let target = tab.history_back();
+        assert_eq!(target, Some(100));
+    }
+
+    #[test]
+    fn test_history_max_limit() {
+        let mut tab = EditorTab::new();
+        for i in 0..2000 {
+            tab.push_history(i);
+        }
+        assert_eq!(tab.cursor_history.len(), EditorTab::MAX_CURSOR_HISTORY);
+        // Most recent should be at front
+        assert_eq!(tab.cursor_history[0], 1999);
+    }
+
+    #[test]
+    fn test_navigate_back_empty_history() {
+        let mut tab = EditorTab::new();
+        tab.cursor_position = 42;
+        let target = tab.history_back();
+        assert_eq!(target, None);
+    }
+
+    #[test]
+    fn test_navigate_forward_at_front() {
+        let mut tab = EditorTab::new();
+        tab.cursor_position = 42;
+        let target = tab.history_forward();
+        assert_eq!(target, None);
     }
 }

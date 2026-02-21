@@ -183,6 +183,7 @@ impl HexEditor {
             if !self.tab().search_results.is_empty() {
                 self.tab_mut().current_search_index = Some(0);
                 let first_result = self.tab().search_results[0];
+                self.push_cursor_history();
                 self.move_position(first_result);
             }
             return true;
@@ -202,6 +203,7 @@ impl HexEditor {
             self.tab_mut().current_search_index = Some(next_idx);
             let result_pos = self.tab().search_results[next_idx];
             self.is_dragging = false;
+            self.push_cursor_history();
             self.move_position(result_pos);
         }
     }
@@ -221,6 +223,7 @@ impl HexEditor {
             self.tab_mut().current_search_index = Some(prev_idx);
             let result_pos = self.tab().search_results[prev_idx];
             self.is_dragging = false;
+            self.push_cursor_history();
             self.move_position(result_pos);
         }
     }

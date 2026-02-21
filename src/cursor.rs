@@ -185,4 +185,26 @@ impl HexEditor {
         let end_pos = self.tab().document.len().saturating_sub(1);
         self.move_position(end_pos);
     }
+
+    /// Push the current cursor position onto the navigation history.
+    /// Called before a "big jump" (search, bookmark, page up/down, etc.)
+    /// so the user can navigate back to it later.
+    pub fn push_cursor_history(&mut self) {
+        let pos = self.tab().cursor_position;
+        self.tab_mut().push_history(pos);
+    }
+
+    /// Navigate back in cursor history
+    pub fn navigate_back(&mut self) {
+        if let Some(target) = self.tab_mut().history_back() {
+            self.move_position(target);
+        }
+    }
+
+    /// Navigate forward in cursor history
+    pub fn navigate_forward(&mut self) {
+        if let Some(target) = self.tab_mut().history_forward() {
+            self.move_position(target);
+        }
+    }
 }

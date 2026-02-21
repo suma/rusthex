@@ -30,6 +30,9 @@ actions!(
         TogglePatternPanel,
         ToggleCompareMode,
         CycleEncoding,
+        // Navigation
+        NavigateBack,
+        NavigateForward,
         // Search
         FindNext,
         FindPrev,

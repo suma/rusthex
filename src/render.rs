@@ -922,6 +922,7 @@ impl HexEditor {
                                                     let byte_offset = byte_offset.min(click_doc_len.saturating_sub(1));
 
                                                     // Move cursor to clicked position and clear selection
+                                                    this.push_cursor_history();
                                                     this.tab_mut().cursor_position = byte_offset;
                                                     this.tab_mut().hex_nibble = ui::HexNibble::High;
                                                     this.tab_mut().selection_start = None;
@@ -2805,6 +2806,7 @@ impl Render for HexEditor {
             }))
             .on_action(cx.listener(|this, _: &actions::Undo, _window, cx| {
                 if let Some(offset) = this.tab_mut().document.undo() {
+                    this.push_cursor_history();
                     this.move_position(offset);
                     this.save_message = Some("Undo".to_string());
                 }
@@ -2812,6 +2814,7 @@ impl Render for HexEditor {
             }))
             .on_action(cx.listener(|this, _: &actions::Redo, _window, cx| {
                 if let Some(offset) = this.tab_mut().document.redo() {
+                    this.push_cursor_history();
                     this.move_position(offset);
                     this.save_message = Some("Redo".to_string());
                 }

@@ -117,23 +117,34 @@ fn handle_command_shortcuts(
         ("p", false) => editor.toggle_pattern_panel(),
         ("z", false) => {
             if let Some(offset) = editor.tab_mut().document.undo() {
+                editor.push_cursor_history();
                 editor.move_position(offset);
                 editor.save_message = Some("Undo".to_string());
             }
         }
         ("z", true) | ("y", _) => {
             if let Some(offset) = editor.tab_mut().document.redo() {
+                editor.push_cursor_history();
                 editor.move_position(offset);
                 editor.save_message = Some("Redo".to_string());
             }
         }
         ("home", _) => {
             update_selection(editor, shift);
+            editor.push_cursor_history();
             editor.move_cursor_file_start();
         }
         ("end", _) => {
             update_selection(editor, shift);
+            editor.push_cursor_history();
             editor.move_cursor_file_end();
+        }
+        // Cmd+[ / Cmd+] for back/forward navigation (macOS)
+        ("[", _) => {
+            editor.navigate_back();
+        }
+        ("]", _) => {
+            editor.navigate_forward();
         }
         _ => return false,
     }
@@ -227,8 +238,18 @@ fn handle_navigation_and_input(
 ) {
     let key = event.keystroke.key.as_str();
     let shift = event.keystroke.modifiers.shift;
+    let alt = event.keystroke.modifiers.alt;
 
     match key {
+        // Alt+Left/Right: navigate back/forward in cursor history
+        "left" if alt => {
+            editor.navigate_back();
+            cx.notify();
+        }
+        "right" if alt => {
+            editor.navigate_forward();
+            cx.notify();
+        }
         "up" | "down" | "left" | "right" | "pageup" | "pagedown" | "home" | "end" => {
             if editor.pattern_dropdown_open && (key == "up" || key == "down") {
                 // Navigate within filtered pattern list
@@ -258,8 +279,14 @@ fn handle_navigation_and_input(
                     "down" => editor.move_cursor_down(),
                     "left" => editor.move_cursor_left(),
                     "right" => editor.move_cursor_right(),
-                    "pageup" => editor.move_cursor_page_up(PAGE_ROWS),
-                    "pagedown" => editor.move_cursor_page_down(PAGE_ROWS),
+                    "pageup" => {
+                        editor.push_cursor_history();
+                        editor.move_cursor_page_up(PAGE_ROWS);
+                    }
+                    "pagedown" => {
+                        editor.push_cursor_history();
+                        editor.move_cursor_page_down(PAGE_ROWS);
+                    }
                     "home" => editor.move_cursor_home(),
                     "end" => editor.move_cursor_end(),
                     _ => unreachable!(),
