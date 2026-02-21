@@ -164,6 +164,29 @@ let content_height = viewport_height.max(px(20.0));
 let content_height = px((viewport_height - non_content_height).max(20.0));
 ```
 
+### gpuiのテキスト要素幅は `.ceil()` で切り上げられる
+
+gpui 0.2.2 の `elements/text.rs` (419行目) では、テキスト要素のサイズ計算時に幅が `.ceil()` される：
+
+```rust
+size.width = size.width.max(line_size.width).ceil();
+```
+
+**明示的な `.w()` を持たない div がテキストのみを含む場合、その描画幅は `ceil(text_layout_width)` になる。** `em_advance * N` と一致しないため、座標のヒットテスト計算でずれが生じる。
+
+```rust
+// 正しい: gpuiの実際のdiv幅に一致
+let hex_byte_width = (char_width * 2.0).ceil();       // "AB" → ceil(20.4) = 21px
+let address_width = (char_width * addr_chars).ceil();  // "00000000" → ceil(81.6) = 82px
+let ascii_char_width = char_width.ceil();              // "A" → ceil(10.2) = 11px
+
+// 間違い: em_advance × 文字数で計算（実際の描画幅より小さい）
+let hex_byte_width = char_width * 2.0;     // 20.4px（実際は21px）
+let address_width = char_width * addr_chars; // 81.6px（実際は82px）
+```
+
+この差は1要素あたり小さいが、16バイト行で累積すると `0.6px × 16 = 9.6px` のずれとなり、ASCIIカラムのドラッグ選択位置が1〜2バイトずれる原因になる。`HitTestLayout` 構造体（`src/ui.rs`）に座標変換が集約されているので、修正箇所はそこに限定される。
+
 ### ソースコード中のコメントとgitコミットメッセージは英語で記述する
 
 ソースコード内のコメント（`//` や `/* */`）およびgitのコミットメッセージは**英語**で記述すること。CLAUDE.mdの説明文やユーザーとの会話は日本語のままでよい。
@@ -188,18 +211,18 @@ let hex_start = 112.0; // 16 + 80 + 16
 描画とドラッグハンドラで座標計算の前提が食い違うと、マウスドラッグ選択時にカーソル位置がずれるバグが発生する。
 
 確認すべき値の例：
-- アドレスカラム幅（ブックマークインジケータ 12px を含む）
-- Hexカラム幅（`char_width * 2 + gap_1` per byte）
+- アドレスカラム幅（ブックマークインジケータ 12px + `ceil(char_width * addr_chars)`）
+- Hexバイト幅（`ceil(char_width * 2) + gap_1` per byte）
 - カラム間の gap（`gap_4` = 16px）
 - ASCIIカラムの開始位置（上記すべての累積）
+- ASCII文字幅（`ceil(char_width)` per char）
+
+現在はこれらの計算は `HitTestLayout` 構造体（`src/ui.rs`）に集約されており、`render.rs` のドラッグハンドラは `HitTestLayout::byte_position_from_mouse()` を呼ぶだけでよい。
 
 ```rust
-// 正しい: 描画と一致する全要素を含む
-let bookmark_indicator = 12.0;
-let address_width = bookmark_indicator + char_width * addr_chars as f32;
-let hex_start = outer_padding + address_width + 16.0; // + gap_4
+// 正しい: HitTestLayout を構築して座標変換を委譲
+let layout = ui::HitTestLayout { outer_padding, header_height, ... };
+let byte_pos = layout.byte_position_from_mouse(mouse_x, mouse_y, pane);
 
-// 間違い: ブックマークインジケータ領域を忘れている
-let address_width = char_width * addr_chars as f32;
-let hex_start = outer_padding + address_width + 16.0;
+// 間違い: render.rs 内にインラインで座標計算を書く（描画と乖離しやすい）
 ```
