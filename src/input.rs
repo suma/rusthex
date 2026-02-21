@@ -157,12 +157,7 @@ impl HexEditor {
             (pos, pos)
         };
 
-        let mut bytes = Vec::with_capacity(end - start + 1);
-        for i in start..=end {
-            if let Some(byte) = self.tab().document.get_byte(i) {
-                bytes.push(byte);
-            }
-        }
+        let bytes = self.tab().document.get_slice(start..end + 1)?;
         if bytes.is_empty() {
             None
         } else {

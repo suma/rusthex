@@ -7,6 +7,7 @@
 //! - Unsaved changes management
 
 use gpui::{Context, ExternalPaths, PathPromptOptions, PromptLevel, SharedString, Window};
+use std::io::Write;
 use std::path::PathBuf;
 
 use crate::HexEditor;
@@ -222,16 +223,13 @@ impl HexEditor {
             }
         };
 
-        let bytes = match self.get_selected_bytes() {
-            Some((_offset, bytes)) => bytes,
-            None => {
-                self.save_message = Some("No bytes in selection".to_string());
-                cx.notify();
-                return;
-            }
-        };
-
         let byte_count = end - start + 1;
+        if byte_count == 0 || end >= self.tab().document.len() {
+            self.save_message = Some("No bytes in selection".to_string());
+            cx.notify();
+            return;
+        }
+
         let directory = if let Some(path) = self.tab().document.file_path() {
             path.parent()
                 .map(|p| p.to_path_buf())
@@ -245,7 +243,16 @@ impl HexEditor {
         cx.spawn(async move |entity, cx| {
             if let Ok(Ok(Some(path))) = receiver.await {
                 let _ = entity.update(cx, |editor, cx| {
-                    match std::fs::write(&path, &bytes) {
+                    let result = (|| {
+                        let file = std::fs::File::create(&path)?;
+                        let mut writer = std::io::BufWriter::new(file);
+                        editor
+                            .tab()
+                            .document
+                            .write_range_to(start..start + byte_count, &mut writer)?;
+                        writer.flush()
+                    })();
+                    match result {
                         Ok(_) => {
                             editor.save_message = Some(format!(
                                 "Saved {} bytes to {}",

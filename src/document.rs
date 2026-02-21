@@ -239,6 +239,47 @@ impl Document {
         Ok(())
     }
 
+    /// Write a range of document contents to a writer without materializing into Vec
+    pub fn write_range_to<W: Write>(
+        &self,
+        range: std::ops::Range<usize>,
+        writer: &mut W,
+    ) -> std::io::Result<()> {
+        if range.is_empty() {
+            return Ok(());
+        }
+        if range.end > self.cached_length {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "Range {}..{} out of bounds (size: {})",
+                    range.start, range.end, self.cached_length
+                ),
+            ));
+        }
+
+        let mut logical_pos = 0;
+        for piece in &self.pieces {
+            let piece_end = logical_pos + piece.length;
+
+            if piece_end <= range.start {
+                logical_pos = piece_end;
+                continue;
+            }
+            if logical_pos >= range.end {
+                break;
+            }
+
+            let slice = self.piece_slice(piece);
+            let copy_start = range.start.saturating_sub(logical_pos);
+            let copy_end = (range.end - logical_pos).min(piece.length);
+            writer.write_all(&slice[copy_start..copy_end])?;
+
+            logical_pos = piece_end;
+        }
+        Ok(())
+    }
+
     // =====================================================
     // Piece Table core operations
     // =====================================================
@@ -1479,5 +1520,46 @@ mod tests {
         let mut buf = Vec::new();
         doc.write_to(&mut buf).unwrap();
         assert!(buf.is_empty());
+    }
+
+    // =========================================
+    // write_range_to (streaming range write)
+    // =========================================
+
+    #[test]
+    fn test_write_range_to_matches_get_slice() {
+        let mut doc = Document::with_data(vec![0x01, 0x02, 0x03, 0x04, 0x05]);
+        doc.set_byte(2, 0xFF).unwrap();
+        doc.insert_bytes(3, &[0xAA, 0xBB]).unwrap();
+
+        let mut buf = Vec::new();
+        doc.write_range_to(1..5, &mut buf).unwrap();
+        assert_eq!(buf, doc.get_slice(1..5).unwrap());
+    }
+
+    #[test]
+    fn test_write_range_to_full_range() {
+        let mut doc = Document::with_data(vec![0; 50]);
+        for i in (0..50).step_by(5) {
+            doc.set_byte(i, 0xAA).unwrap();
+        }
+        let mut buf = Vec::new();
+        doc.write_range_to(0..doc.len(), &mut buf).unwrap();
+        assert_eq!(buf, doc.to_vec());
+    }
+
+    #[test]
+    fn test_write_range_to_empty_range() {
+        let doc = Document::with_data(vec![0x01, 0x02]);
+        let mut buf = Vec::new();
+        doc.write_range_to(1..1, &mut buf).unwrap();
+        assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn test_write_range_to_out_of_bounds() {
+        let doc = Document::with_data(vec![0x01, 0x02, 0x03]);
+        let mut buf = Vec::new();
+        assert!(doc.write_range_to(0..10, &mut buf).is_err());
     }
 }
