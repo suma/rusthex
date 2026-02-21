@@ -34,10 +34,8 @@ pub struct LogPanel {
     pub start_time: Instant,
     /// Current panel height in pixels
     pub panel_height: f32,
-    /// Y position at drag start (None when not dragging)
-    pub drag_start_y: Option<f32>,
-    /// Panel height at drag start
-    pub drag_start_height: Option<f32>,
+    /// Drag state: (start_y, start_height), None when not dragging
+    pub drag_state: Option<(f32, f32)>,
 }
 
 impl LogPanel {
@@ -48,8 +46,7 @@ impl LogPanel {
             max_entries: 1000,
             start_time: Instant::now(),
             panel_height: DEFAULT_HEIGHT,
-            drag_start_y: None,
-            drag_start_height: None,
+            drag_state: None,
         }
     }
 
@@ -169,8 +166,7 @@ mod tests {
     fn test_default_panel_height() {
         let panel = LogPanel::new();
         assert_eq!(panel.panel_height, DEFAULT_HEIGHT);
-        assert!(panel.drag_start_y.is_none());
-        assert!(panel.drag_start_height.is_none());
+        assert!(panel.drag_state.is_none());
     }
 
     #[test]

@@ -2013,8 +2013,7 @@ impl HexEditor {
                         gpui::MouseButton::Left,
                         cx.listener(|this, event: &gpui::MouseDownEvent, _window, _cx| {
                             let mouse_y: f32 = event.position.y.into();
-                            this.log_panel.drag_start_y = Some(mouse_y);
-                            this.log_panel.drag_start_height = Some(this.log_panel.panel_height);
+                            this.log_panel.drag_state = Some((mouse_y, this.log_panel.panel_height));
                         }),
                     ),
             )
@@ -2714,9 +2713,8 @@ impl Render for HexEditor {
             .on_mouse_up(
                 gpui::MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
-                    if this.log_panel.drag_start_y.is_some() {
-                        this.log_panel.drag_start_y = None;
-                        this.log_panel.drag_start_height = None;
+                    if this.log_panel.drag_state.is_some() {
+                        this.log_panel.drag_state = None;
                         cx.notify();
                     }
                     if this.is_dragging {
@@ -2741,17 +2739,14 @@ impl Render for HexEditor {
                     }
 
                     // Cancel log panel resize if mouse button was released outside
-                    if this.log_panel.drag_start_y.is_some() && !event.dragging() {
-                        this.log_panel.drag_start_y = None;
-                        this.log_panel.drag_start_height = None;
+                    if this.log_panel.drag_state.is_some() && !event.dragging() {
+                        this.log_panel.drag_state = None;
                         cx.notify();
                         return;
                     }
 
                     // Handle log panel resize drag
-                    if let (Some(start_y), Some(start_height)) =
-                        (this.log_panel.drag_start_y, this.log_panel.drag_start_height)
-                    {
+                    if let Some((start_y, start_height)) = this.log_panel.drag_state {
                         let mouse_y: f32 = event.position.y.into();
                         // Dragging up increases height (panel grows upward)
                         let delta_y = start_y - mouse_y;
