@@ -23,14 +23,14 @@ impl HexEditor {
         let pos = self.tab().cursor_position;
         if self.tab().bookmarks.contains_key(&pos) {
             self.tab_mut().bookmarks.remove(&pos);
-            self.save_message = Some(format!("Bookmark removed at {}", self.fmt_addr(pos)));
+            self.log(crate::log_panel::LogLevel::Info, format!("Bookmark removed at {}", self.fmt_addr(pos)));
         } else {
             self.tab_mut().bookmarks.insert(pos, String::new());
             // Enter comment editing mode for the new bookmark
             self.tab_mut().bookmark_comment_editing = true;
             self.tab_mut().bookmark_comment_text = String::new();
             self.tab_mut().bookmark_comment_position = pos;
-            self.save_message = Some(format!("Bookmark added at {} - enter comment", self.fmt_addr(pos)));
+            self.log(crate::log_panel::LogLevel::Info, format!("Bookmark added at {} - enter comment", self.fmt_addr(pos)));
         }
     }
 
@@ -39,7 +39,7 @@ impl HexEditor {
         let current = self.tab().cursor_position;
 
         if self.tab().bookmarks.is_empty() {
-            self.save_message = Some("No bookmarks set".to_string());
+            self.log(crate::log_panel::LogLevel::Info, "No bookmarks set");
             return;
         }
 
@@ -64,18 +64,17 @@ impl HexEditor {
             self.push_cursor_history();
             self.move_position(pos);
             if comment.is_empty() {
-                self.save_message = Some(format!("Jumped to bookmark at {}", self.fmt_addr(pos)));
+                self.log(crate::log_panel::LogLevel::Info, format!("Jumped to bookmark at {}", self.fmt_addr(pos)));
             } else {
-                self.save_message =
-                    Some(format!("Jumped to bookmark at {}: {}", self.fmt_addr(pos), comment));
+                self.log(crate::log_panel::LogLevel::Info, format!("Jumped to bookmark at {}: {}", self.fmt_addr(pos), comment));
             }
         } else if let Some((pos, comment)) = wrapped {
             self.push_cursor_history();
             self.move_position(pos);
             if comment.is_empty() {
-                self.save_message = Some(format!("Jumped to bookmark at {} (wrapped)", self.fmt_addr(pos)));
+                self.log(crate::log_panel::LogLevel::Info, format!("Jumped to bookmark at {} (wrapped)", self.fmt_addr(pos)));
             } else {
-                self.save_message = Some(format!(
+                self.log(crate::log_panel::LogLevel::Info, format!(
                     "Jumped to bookmark at {}: {} (wrapped)",
                     self.fmt_addr(pos), comment
                 ));
@@ -88,7 +87,7 @@ impl HexEditor {
         let current = self.tab().cursor_position;
 
         if self.tab().bookmarks.is_empty() {
-            self.save_message = Some("No bookmarks set".to_string());
+            self.log(crate::log_panel::LogLevel::Info, "No bookmarks set");
             return;
         }
 
@@ -113,18 +112,17 @@ impl HexEditor {
             self.push_cursor_history();
             self.move_position(pos);
             if comment.is_empty() {
-                self.save_message = Some(format!("Jumped to bookmark at {}", self.fmt_addr(pos)));
+                self.log(crate::log_panel::LogLevel::Info, format!("Jumped to bookmark at {}", self.fmt_addr(pos)));
             } else {
-                self.save_message =
-                    Some(format!("Jumped to bookmark at {}: {}", self.fmt_addr(pos), comment));
+                self.log(crate::log_panel::LogLevel::Info, format!("Jumped to bookmark at {}: {}", self.fmt_addr(pos), comment));
             }
         } else if let Some((pos, comment)) = wrapped {
             self.push_cursor_history();
             self.move_position(pos);
             if comment.is_empty() {
-                self.save_message = Some(format!("Jumped to bookmark at {} (wrapped)", self.fmt_addr(pos)));
+                self.log(crate::log_panel::LogLevel::Info, format!("Jumped to bookmark at {} (wrapped)", self.fmt_addr(pos)));
             } else {
-                self.save_message = Some(format!(
+                self.log(crate::log_panel::LogLevel::Info, format!(
                     "Jumped to bookmark at {}: {} (wrapped)",
                     self.fmt_addr(pos), comment
                 ));
@@ -136,7 +134,7 @@ impl HexEditor {
     pub fn clear_bookmarks(&mut self) {
         let count = self.tab().bookmarks.len();
         self.tab_mut().bookmarks.clear();
-        self.save_message = Some(format!("Cleared {} bookmark(s)", count));
+        self.log(crate::log_panel::LogLevel::Info, format!("Cleared {} bookmark(s)", count));
     }
 
     /// Enter comment editing mode for the bookmark at current cursor position
@@ -146,9 +144,9 @@ impl HexEditor {
             self.tab_mut().bookmark_comment_editing = true;
             self.tab_mut().bookmark_comment_text = comment;
             self.tab_mut().bookmark_comment_position = pos;
-            self.save_message = Some(format!("Editing bookmark comment at {}", self.fmt_addr(pos)));
+            self.log(crate::log_panel::LogLevel::Info, format!("Editing bookmark comment at {}", self.fmt_addr(pos)));
         } else {
-            self.save_message = Some("No bookmark at current position".to_string());
+            self.log(crate::log_panel::LogLevel::Info, "No bookmark at current position");
         }
     }
 
@@ -159,10 +157,9 @@ impl HexEditor {
         if self.tab().bookmarks.contains_key(&pos) {
             self.tab_mut().bookmarks.insert(pos, text.clone());
             if text.is_empty() {
-                self.save_message = Some(format!("Bookmark comment cleared at {}", self.fmt_addr(pos)));
+                self.log(crate::log_panel::LogLevel::Info, format!("Bookmark comment cleared at {}", self.fmt_addr(pos)));
             } else {
-                self.save_message =
-                    Some(format!("Bookmark comment saved at {}: {}", self.fmt_addr(pos), text));
+                self.log(crate::log_panel::LogLevel::Info, format!("Bookmark comment saved at {}: {}", self.fmt_addr(pos), text));
             }
         }
         self.tab_mut().bookmark_comment_editing = false;
@@ -173,6 +170,6 @@ impl HexEditor {
     pub fn cancel_bookmark_comment(&mut self) {
         self.tab_mut().bookmark_comment_editing = false;
         self.tab_mut().bookmark_comment_text.clear();
-        self.save_message = Some("Bookmark comment editing cancelled".to_string());
+        self.log(crate::log_panel::LogLevel::Info, "Bookmark comment editing cancelled");
     }
 }

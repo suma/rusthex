@@ -29,7 +29,7 @@ impl HexEditor {
     /// Start compare mode - show tab selection dialog
     pub fn start_compare_mode(&mut self) {
         if self.tabs.len() < 2 {
-            self.save_message = Some("Compare mode requires 2 or more tabs".to_string());
+            self.log(crate::log_panel::LogLevel::Warning, "Compare mode requires 2 or more tabs");
             return;
         }
         self.compare.selection_visible = true;
@@ -48,7 +48,7 @@ impl HexEditor {
     /// Select a tab for comparison
     pub fn select_compare_tab(&mut self, index: usize) {
         if index == self.active_tab {
-            self.save_message = Some("Please select a different tab".to_string());
+            self.log(crate::log_panel::LogLevel::Warning, "Please select a different tab");
             return;
         }
         if index >= self.tabs.len() {
@@ -57,7 +57,7 @@ impl HexEditor {
         self.compare.tab_index = Some(index);
         self.compare.mode = true;
         self.compare.selection_visible = false;
-        self.save_message = Some("Compare mode: Press Esc to exit".to_string());
+        self.log(crate::log_panel::LogLevel::Info, "Compare mode: Press Esc to exit");
     }
 
     /// Get compare tab reference

@@ -31,6 +31,8 @@ actions!(
         TogglePatternPanel,
         ToggleCompareMode,
         CycleEncoding,
+        ToggleLogPanel,
+        ClearLog,
         // Navigation
         NavigateBack,
         NavigateForward,

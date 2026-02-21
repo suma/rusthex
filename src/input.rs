@@ -182,7 +182,7 @@ impl HexEditor {
                 .collect::<Vec<_>>()
                 .join(" ");
             cx.write_to_clipboard(ClipboardItem::new_string(hex_string));
-            self.save_message = Some(format!("Copied {} byte(s) as hex", bytes.len()));
+            self.log(crate::log_panel::LogLevel::Info, format!("Copied {} byte(s) as hex", bytes.len()));
         }
     }
 
@@ -194,7 +194,7 @@ impl HexEditor {
                 .map(|&b| if (0x20..=0x7E).contains(&b) { b as char } else { '.' })
                 .collect();
             cx.write_to_clipboard(ClipboardItem::new_string(ascii));
-            self.save_message = Some(format!("Copied {} byte(s) as ASCII", bytes.len()));
+            self.log(crate::log_panel::LogLevel::Info, format!("Copied {} byte(s) as ASCII", bytes.len()));
         }
     }
 
@@ -208,7 +208,7 @@ impl HexEditor {
                 .join(", ");
             let c_array = format!("{{ {} }}", items);
             cx.write_to_clipboard(ClipboardItem::new_string(c_array));
-            self.save_message = Some(format!("Copied {} byte(s) as C array", bytes.len()));
+            self.log(crate::log_panel::LogLevel::Info, format!("Copied {} byte(s) as C array", bytes.len()));
         }
     }
 
@@ -251,6 +251,6 @@ impl HexEditor {
                 }
             }
         }
-        self.save_message = Some(format!("Pasted {} byte(s)", bytes.len()));
+        self.log(crate::log_panel::LogLevel::Info, format!("Pasted {} byte(s)", bytes.len()));
     }
 }

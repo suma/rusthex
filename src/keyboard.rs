@@ -108,25 +108,26 @@ fn handle_command_shortcuts(
                 editor.tab_mut().selection_start = Some(0);
                 let end_pos = editor.tab().document.len().saturating_sub(1);
                 editor.tab_mut().cursor_position = end_pos;
-                editor.save_message = Some("Selected all".to_string());
+                editor.log(crate::log_panel::LogLevel::Info, "Selected all");
             }
         }
         ("b", false) => editor.toggle_bookmark(),
         ("b", true) => editor.edit_bookmark_comment(),
         ("m", false) => editor.toggle_bitmap(),
         ("p", false) => editor.toggle_pattern_panel(),
+        ("l", false) => editor.toggle_log_panel(),
         ("z", false) => {
             if let Some(offset) = editor.tab_mut().document.undo() {
                 editor.push_cursor_history();
                 editor.move_position(offset);
-                editor.save_message = Some("Undo".to_string());
+                editor.log(crate::log_panel::LogLevel::Info, "Undo");
             }
         }
         ("z", true) | ("y", _) => {
             if let Some(offset) = editor.tab_mut().document.redo() {
                 editor.push_cursor_history();
                 editor.move_position(offset);
-                editor.save_message = Some("Redo".to_string());
+                editor.log(crate::log_panel::LogLevel::Info, "Redo");
             }
         }
         ("home", _) => {

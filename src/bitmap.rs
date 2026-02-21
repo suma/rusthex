@@ -235,32 +235,32 @@ impl HexEditor {
     pub(crate) fn toggle_bitmap(&mut self) {
         self.bitmap.visible = !self.bitmap.visible;
         if self.bitmap.visible {
-            self.save_message = Some(format!(
+            self.log(crate::log_panel::LogLevel::Info, format!(
                 "Bitmap: {} ({}px wide)",
                 self.bitmap.color_mode.label(),
                 self.bitmap.width
             ));
         } else {
-            self.save_message = Some("Bitmap view closed".to_string());
+            self.log(crate::log_panel::LogLevel::Info, "Bitmap view closed");
         }
     }
 
     /// Cycle bitmap color mode
     pub(crate) fn cycle_bitmap_color_mode(&mut self) {
         self.bitmap.color_mode = self.bitmap.color_mode.next();
-        self.save_message = Some(format!("Bitmap mode: {}", self.bitmap.color_mode.label()));
+        self.log(crate::log_panel::LogLevel::Info, format!("Bitmap mode: {}", self.bitmap.color_mode.label()));
     }
 
     /// Increase bitmap width
     pub(crate) fn increase_bitmap_width(&mut self) {
         self.bitmap.width = next_width(self.bitmap.width);
-        self.save_message = Some(format!("Bitmap width: {}px", self.bitmap.width));
+        self.log(crate::log_panel::LogLevel::Info, format!("Bitmap width: {}px", self.bitmap.width));
     }
 
     /// Decrease bitmap width
     pub(crate) fn decrease_bitmap_width(&mut self) {
         self.bitmap.width = prev_width(self.bitmap.width);
-        self.save_message = Some(format!("Bitmap width: {}px", self.bitmap.width));
+        self.log(crate::log_panel::LogLevel::Info, format!("Bitmap width: {}px", self.bitmap.width));
     }
 }
 

@@ -462,6 +462,8 @@ impl HexEditor {
                                         .menu("Select All", Box::new(actions::SelectAll))
                                         .separator()
                                         .menu("Toggle Inspector", Box::new(actions::ToggleInspector))
+                                        .menu("Toggle Log Panel", Box::new(actions::ToggleLogPanel))
+                                        .menu("Clear Log", Box::new(actions::ClearLog))
                                 }
                             })
                             .pr(px(24.0))
@@ -1988,22 +1990,75 @@ impl HexEditor {
                                 )
                         )
                     })
-                    // Save/status messages
-                    .when_some(self.save_message.clone(), |el, msg| {
-                        el.child(
-                            div()
-                                .text_color(t_accent_success)
-                                .child(msg)
-                        )
-                    })
-                    // Default message when nothing else to show
-                    .when(!self.tab().is_searching && !self.tab().search_visible && self.save_message.is_none(), |el| {
-                        el.child(
-                            div()
-                                .text_color(t.text_dim)
-                                .child("Ready")
-                        )
-                    })
+            )
+    }
+
+    /// Log panel for displaying accumulated status messages
+    pub(crate) fn render_log_panel(&self, font_name: &String) -> impl IntoElement {
+        let t = &self.theme;
+        let entry_count = self.log_panel.entries.len();
+
+        div()
+            .flex()
+            .flex_col()
+            .py_1()
+            .px_4()
+            .bg(t.bg_secondary)
+            .border_t_1()
+            .border_color(t.border_primary)
+            .text_xs()
+            .font_family(font_name)
+            // Header row
+            .child(
+                div()
+                    .flex()
+                    .justify_between()
+                    .pb_1()
+                    .mb_1()
+                    .border_b_1()
+                    .border_color(t.border_secondary)
+                    .child(
+                        div()
+                            .flex()
+                            .gap_2()
+                            .child(div().text_color(t.accent_primary).child("Log"))
+                            .child(
+                                div()
+                                    .text_color(t.text_muted)
+                                    .child(format!("{} entries", entry_count)),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .id("clear-log-btn")
+                            .text_color(t.text_muted)
+                            .hover(|s| s.text_color(t.accent_primary))
+                            .cursor_pointer()
+                            .child("Clear")
+                            .on_click(|_event, _window, cx| {
+                                cx.dispatch_action(&actions::ClearLog);
+                            }),
+                    ),
+            )
+            // Log entries (last 5 visible)
+            .child(
+                div()
+                    .id("log-entries")
+                    .flex()
+                    .flex_col()
+                    .h(px(5.0 * 19.0)) // 5 rows * text_xs line height
+                    .overflow_y_scroll()
+                    .children(self.log_panel.entries.iter().map(|entry| {
+                        let color = match entry.level {
+                            crate::log_panel::LogLevel::Info => t.text_secondary,
+                            crate::log_panel::LogLevel::Warning => t.text_warning,
+                            crate::log_panel::LogLevel::Error => t.text_error,
+                        };
+                        let ts = self.log_panel.format_timestamp(entry.timestamp);
+                        div()
+                            .text_color(color)
+                            .child(format!("[{}] {}", ts, entry.message))
+                    })),
             )
     }
 
@@ -2816,7 +2871,7 @@ impl Render for HexEditor {
                 if let Some(offset) = this.tab_mut().document.undo() {
                     this.push_cursor_history();
                     this.move_position(offset);
-                    this.save_message = Some("Undo".to_string());
+                    this.log(crate::log_panel::LogLevel::Info, "Undo");
                 }
                 cx.notify();
             }))
@@ -2824,7 +2879,7 @@ impl Render for HexEditor {
                 if let Some(offset) = this.tab_mut().document.redo() {
                     this.push_cursor_history();
                     this.move_position(offset);
-                    this.save_message = Some("Redo".to_string());
+                    this.log(crate::log_panel::LogLevel::Info, "Redo");
                 }
                 cx.notify();
             }))
@@ -2848,7 +2903,7 @@ impl Render for HexEditor {
                     this.tab_mut().selection_start = Some(0);
                     let end_pos = this.tab().document.len().saturating_sub(1);
                     this.tab_mut().cursor_position = end_pos;
-                    this.save_message = Some("Selected all".to_string());
+                    this.log(crate::log_panel::LogLevel::Info, "Selected all");
                 }
                 cx.notify();
             }))
@@ -2893,6 +2948,14 @@ impl Render for HexEditor {
                 this.cycle_encoding();
                 cx.notify();
             }))
+            .on_action(cx.listener(|this, _: &actions::ToggleLogPanel, _window, cx| {
+                this.toggle_log_panel();
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &actions::ClearLog, _window, cx| {
+                this.log_panel.clear();
+                cx.notify();
+            }))
             .on_action(cx.listener(|this, _: &actions::FindNext, _window, cx| {
                 this.next_search_result();
                 cx.notify();
@@ -2927,6 +2990,9 @@ impl Render for HexEditor {
                 parent.child(self.render_compare_mode(&params))
             })
             .child(self.render_status_bar(cx, &params.font_name))
+            .when(self.log_panel.visible, |parent| {
+                parent.child(self.render_log_panel(&params.font_name))
+            })
             .when(self.inspector_visible, |parent| {
                 parent.child(self.render_data_inspector(&params.font_name))
             })

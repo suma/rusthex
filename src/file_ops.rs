@@ -25,7 +25,7 @@ impl HexEditor {
     pub fn save_file(&mut self) -> std::io::Result<()> {
         self.tab_mut().document.save()?;
         if let Some(path) = self.tab().document.file_path() {
-            self.save_message = Some(format!("Saved to {}", path.display()));
+            self.log(crate::log_panel::LogLevel::Info, format!("Saved to {}", path.display()));
         }
         Ok(())
     }
@@ -33,7 +33,7 @@ impl HexEditor {
     /// Save file to a new path
     pub fn save_file_as(&mut self, path: PathBuf) -> std::io::Result<()> {
         self.tab_mut().document.save_as(path.clone())?;
-        self.save_message = Some(format!("Saved to {}", path.display()));
+        self.log(crate::log_panel::LogLevel::Info, format!("Saved to {}", path.display()));
         Ok(())
     }
 
@@ -41,7 +41,7 @@ impl HexEditor {
     pub fn save_with_confirmation(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // Check if there are unsaved changes
         if !self.tab().document.has_unsaved_changes() {
-            self.save_message = Some("No changes to save".to_string());
+            self.log(crate::log_panel::LogLevel::Info, "No changes to save");
             cx.notify();
             return;
         }
@@ -73,7 +73,7 @@ impl HexEditor {
                             }
                             Err(e) => {
                                 eprintln!("Failed to save file: {}", e);
-                                editor.save_message = Some(format!("Error: {}", e));
+                                editor.log(crate::log_panel::LogLevel::Error, format!("Error: {}", e));
                             }
                         }
                         cx.notify();
@@ -163,11 +163,10 @@ impl HexEditor {
                     let _ = entity.update(cx, |editor, cx| {
                         match editor.open_file_in_new_tab(path.clone()) {
                             Ok(_) => {
-                                editor.save_message =
-                                    Some(format!("Opened in new tab: {}", path.display()));
+                                editor.log(crate::log_panel::LogLevel::Info, format!("Opened in new tab: {}", path.display()));
                             }
                             Err(e) => {
-                                editor.save_message = Some(format!("Error: {}", e));
+                                editor.log(crate::log_panel::LogLevel::Error, format!("Error: {}", e));
                             }
                         }
                         cx.notify();
@@ -199,10 +198,10 @@ impl HexEditor {
                 let _ = entity.update(cx, |editor, cx| {
                     match editor.save_file_as(path.clone()) {
                         Ok(_) => {
-                            editor.save_message = Some(format!("Saved as: {}", path.display()));
+                            editor.log(crate::log_panel::LogLevel::Info, format!("Saved as: {}", path.display()));
                         }
                         Err(e) => {
-                            editor.save_message = Some(format!("Error: {}", e));
+                            editor.log(crate::log_panel::LogLevel::Error, format!("Error: {}", e));
                         }
                     }
                     cx.notify();
@@ -217,7 +216,7 @@ impl HexEditor {
         let (start, end) = match self.selection_range() {
             Some(range) => range,
             None => {
-                self.save_message = Some("No selection to save".to_string());
+                self.log(crate::log_panel::LogLevel::Info, "No selection to save");
                 cx.notify();
                 return;
             }
@@ -225,7 +224,7 @@ impl HexEditor {
 
         let byte_count = end - start + 1;
         if byte_count == 0 || end >= self.tab().document.len() {
-            self.save_message = Some("No bytes in selection".to_string());
+            self.log(crate::log_panel::LogLevel::Info, "No bytes in selection");
             cx.notify();
             return;
         }
@@ -254,14 +253,14 @@ impl HexEditor {
                     })();
                     match result {
                         Ok(_) => {
-                            editor.save_message = Some(format!(
+                            editor.log(crate::log_panel::LogLevel::Info, format!(
                                 "Saved {} bytes to {}",
                                 byte_count,
                                 path.display()
                             ));
                         }
                         Err(e) => {
-                            editor.save_message = Some(format!("Error: {}", e));
+                            editor.log(crate::log_panel::LogLevel::Error, format!("Error: {}", e));
                         }
                     }
                     cx.notify();
@@ -276,10 +275,10 @@ impl HexEditor {
         if let Some(path) = paths.paths().first() {
             match self.open_file_in_new_tab(path.clone()) {
                 Ok(_) => {
-                    self.save_message = Some(format!("Opened: {}", path.display()));
+                    self.log(crate::log_panel::LogLevel::Info, format!("Opened: {}", path.display()));
                 }
                 Err(e) => {
-                    self.save_message = Some(format!("Error: {}", e));
+                    self.log(crate::log_panel::LogLevel::Error, format!("Error: {}", e));
                 }
             }
             cx.notify();

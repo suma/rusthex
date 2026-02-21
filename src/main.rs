@@ -30,6 +30,7 @@ mod input;
 mod inspector;
 mod ipc;
 mod keyboard;
+mod log_panel;
 mod pattern;
 mod render;
 mod render_cache;
@@ -63,7 +64,7 @@ struct HexEditor {
     active_tab: usize,
     settings: Settings,
     focus_handle: FocusHandle,
-    save_message: Option<String>,
+    log_panel: log_panel::LogPanel,
     content_view_rows: usize,
     is_dragging: bool,
     drag_pane: Option<EditPane>,
@@ -124,7 +125,7 @@ impl HexEditor {
             active_tab: 0,
             settings,
             focus_handle: cx.focus_handle(),
-            save_message: None,
+            log_panel: log_panel::LogPanel::new(),
             content_view_rows: 20,
             is_dragging: false,
             drag_pane: None,
@@ -289,6 +290,16 @@ impl HexEditor {
                 .expanded_nodes
                 .insert(path.to_string());
         }
+    }
+
+    /// Add a message to the log panel
+    fn log(&mut self, level: log_panel::LogLevel, message: impl Into<String>) {
+        self.log_panel.push(level, message);
+    }
+
+    /// Toggle log panel visibility
+    fn toggle_log_panel(&mut self) {
+        self.log_panel.visible = !self.log_panel.visible;
     }
 
     // Selection, file operations, cursor, and input methods are in separate modules:
@@ -511,6 +522,7 @@ fn main() {
             KeyBinding::new("cmd-p", actions::TogglePatternPanel, None),
             KeyBinding::new("cmd-k", actions::ToggleCompareMode, None),
             KeyBinding::new("cmd-shift-e", actions::CycleEncoding, None),
+            KeyBinding::new("cmd-l", actions::ToggleLogPanel, None),
             // Search
             KeyBinding::new("f3", actions::FindNext, None),
             KeyBinding::new("shift-f3", actions::FindPrev, None),
