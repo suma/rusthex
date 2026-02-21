@@ -40,6 +40,14 @@ pub enum TextEncoding {
     ShiftJis,
     /// EUC-JP (Japanese, 1-3 bytes per character)
     EucJp,
+    /// UTF-16 Big-Endian (2 or 4 bytes per character)
+    Utf16Be,
+    /// UTF-16 Little-Endian (2 or 4 bytes per character)
+    Utf16Le,
+    /// UTF-32 Big-Endian (4 bytes per character)
+    Utf32Be,
+    /// UTF-32 Little-Endian (4 bytes per character)
+    Utf32Le,
 }
 
 impl TextEncoding {
@@ -51,6 +59,10 @@ impl TextEncoding {
             TextEncoding::Utf8 => "UTF-8",
             TextEncoding::ShiftJis => "SJIS",
             TextEncoding::EucJp => "EUC",
+            TextEncoding::Utf16Be => "UTF16BE",
+            TextEncoding::Utf16Le => "UTF16LE",
+            TextEncoding::Utf32Be => "UTF32BE",
+            TextEncoding::Utf32Le => "UTF32LE",
         }
     }
 
@@ -62,6 +74,10 @@ impl TextEncoding {
             TextEncoding::Utf8,
             TextEncoding::ShiftJis,
             TextEncoding::EucJp,
+            TextEncoding::Utf16Be,
+            TextEncoding::Utf16Le,
+            TextEncoding::Utf32Be,
+            TextEncoding::Utf32Le,
         ]
     }
 
@@ -72,7 +88,11 @@ impl TextEncoding {
             TextEncoding::Latin1 => TextEncoding::Utf8,
             TextEncoding::Utf8 => TextEncoding::ShiftJis,
             TextEncoding::ShiftJis => TextEncoding::EucJp,
-            TextEncoding::EucJp => TextEncoding::Ascii,
+            TextEncoding::EucJp => TextEncoding::Utf16Be,
+            TextEncoding::Utf16Be => TextEncoding::Utf16Le,
+            TextEncoding::Utf16Le => TextEncoding::Utf32Be,
+            TextEncoding::Utf32Be => TextEncoding::Utf32Le,
+            TextEncoding::Utf32Le => TextEncoding::Ascii,
         }
     }
 }

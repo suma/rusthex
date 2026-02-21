@@ -54,6 +54,10 @@ pub fn decode_for_display(data: &[u8], encoding: TextEncoding) -> Vec<DisplayCha
         TextEncoding::Utf8 => decode_utf8(data),
         TextEncoding::ShiftJis => decode_with_encoding_rs(data, SHIFT_JIS),
         TextEncoding::EucJp => decode_with_encoding_rs(data, EUC_JP),
+        TextEncoding::Utf16Be => decode_utf16(data, true),
+        TextEncoding::Utf16Le => decode_utf16(data, false),
+        TextEncoding::Utf32Be => decode_utf32(data, true),
+        TextEncoding::Utf32Le => decode_utf32(data, false),
     }
 }
 
@@ -270,6 +274,131 @@ fn decode_utf8_into(data: &[u8], result: &mut [DisplayChar]) {
     }
 }
 
+/// Decode as UTF-16 (BE or LE)
+fn decode_utf16(data: &[u8], is_big_endian: bool) -> Vec<DisplayChar> {
+    let mut result = vec![DisplayChar::Invalid; data.len()];
+    let mut i = 0;
+
+    while i < data.len() {
+        // Need at least 2 bytes for a code unit
+        if i + 1 >= data.len() {
+            result[i] = DisplayChar::Invalid;
+            break;
+        }
+
+        let code_unit = if is_big_endian {
+            u16::from_be_bytes([data[i], data[i + 1]])
+        } else {
+            u16::from_le_bytes([data[i], data[i + 1]])
+        };
+
+        // Check for surrogate pair
+        if (0xD800..=0xDBFF).contains(&code_unit) {
+            // High surrogate - need low surrogate
+            if i + 3 >= data.len() {
+                // Not enough data for low surrogate
+                result[i] = DisplayChar::Invalid;
+                result[i + 1] = DisplayChar::Continuation;
+                i += 2;
+                continue;
+            }
+
+            let low = if is_big_endian {
+                u16::from_be_bytes([data[i + 2], data[i + 3]])
+            } else {
+                u16::from_le_bytes([data[i + 2], data[i + 3]])
+            };
+
+            if !(0xDC00..=0xDFFF).contains(&low) {
+                // Orphan high surrogate
+                result[i] = DisplayChar::Invalid;
+                result[i + 1] = DisplayChar::Continuation;
+                i += 2;
+                continue;
+            }
+
+            // Decode surrogate pair
+            let cp = 0x10000 + ((code_unit as u32 - 0xD800) << 10) + (low as u32 - 0xDC00);
+            if let Some(c) = char::from_u32(cp) {
+                if c.is_control() {
+                    result[i] = DisplayChar::NonPrintable;
+                } else {
+                    result[i] = DisplayChar::Char(c);
+                }
+                result[i + 1] = DisplayChar::Continuation;
+                result[i + 2] = DisplayChar::Continuation;
+                result[i + 3] = DisplayChar::Continuation;
+                i += 4;
+            } else {
+                result[i] = DisplayChar::Invalid;
+                result[i + 1] = DisplayChar::Continuation;
+                i += 2;
+            }
+        } else if (0xDC00..=0xDFFF).contains(&code_unit) {
+            // Orphan low surrogate
+            result[i] = DisplayChar::Invalid;
+            result[i + 1] = DisplayChar::Continuation;
+            i += 2;
+        } else {
+            // BMP character
+            if let Some(c) = char::from_u32(code_unit as u32) {
+                if c.is_control() {
+                    result[i] = DisplayChar::NonPrintable;
+                } else {
+                    result[i] = DisplayChar::Char(c);
+                }
+                result[i + 1] = DisplayChar::Continuation;
+            } else {
+                result[i] = DisplayChar::Invalid;
+                result[i + 1] = DisplayChar::Continuation;
+            }
+            i += 2;
+        }
+    }
+
+    result
+}
+
+/// Decode as UTF-32 (BE or LE)
+fn decode_utf32(data: &[u8], is_big_endian: bool) -> Vec<DisplayChar> {
+    let mut result = vec![DisplayChar::Invalid; data.len()];
+    let mut i = 0;
+
+    while i < data.len() {
+        // Need at least 4 bytes
+        if i + 3 >= data.len() {
+            // Mark remaining bytes as Invalid
+            for j in i..data.len() {
+                result[j] = DisplayChar::Invalid;
+            }
+            break;
+        }
+
+        let cp = if is_big_endian {
+            u32::from_be_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]])
+        } else {
+            u32::from_le_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]])
+        };
+
+        if let Some(c) = char::from_u32(cp) {
+            if c.is_control() {
+                result[i] = DisplayChar::NonPrintable;
+            } else {
+                result[i] = DisplayChar::Char(c);
+            }
+        } else {
+            result[i] = DisplayChar::Invalid;
+        }
+
+        result[i + 1] = DisplayChar::Continuation;
+        result[i + 2] = DisplayChar::Continuation;
+        result[i + 3] = DisplayChar::Continuation;
+        i += 4;
+    }
+
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -319,5 +448,52 @@ mod tests {
         let result = decode_for_display(data, TextEncoding::Latin1);
         assert_eq!(result[0].to_char(), 'À');
         assert_eq!(result[1].to_char(), 'é');
+    }
+
+    #[test]
+    fn test_utf16be_bmp() {
+        // "あ" (U+3042) in UTF-16BE: 30 42
+        let data = &[0x30, 0x42];
+        let result = decode_for_display(data, TextEncoding::Utf16Be);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].to_char(), 'あ');
+        assert!(result[1].is_continuation());
+    }
+
+    #[test]
+    fn test_utf16le_surrogate() {
+        // U+1F600 (😀) in UTF-16LE: surrogate pair D83D DE00
+        // LE bytes: 3D D8 00 DE
+        let data = &[0x3D, 0xD8, 0x00, 0xDE];
+        let result = decode_for_display(data, TextEncoding::Utf16Le);
+        assert_eq!(result.len(), 4);
+        assert_eq!(result[0].to_char(), '😀');
+        assert!(result[1].is_continuation());
+        assert!(result[2].is_continuation());
+        assert!(result[3].is_continuation());
+    }
+
+    #[test]
+    fn test_utf32be_decode() {
+        // "あ" (U+3042) in UTF-32BE: 00 00 30 42
+        let data = &[0x00, 0x00, 0x30, 0x42];
+        let result = decode_for_display(data, TextEncoding::Utf32Be);
+        assert_eq!(result.len(), 4);
+        assert_eq!(result[0].to_char(), 'あ');
+        assert!(result[1].is_continuation());
+        assert!(result[2].is_continuation());
+        assert!(result[3].is_continuation());
+    }
+
+    #[test]
+    fn test_utf32le_decode() {
+        // "A" (U+0041) in UTF-32LE: 41 00 00 00
+        let data = &[0x41, 0x00, 0x00, 0x00];
+        let result = decode_for_display(data, TextEncoding::Utf32Le);
+        assert_eq!(result.len(), 4);
+        assert_eq!(result[0].to_char(), 'A');
+        assert!(result[1].is_continuation());
+        assert!(result[2].is_continuation());
+        assert!(result[3].is_continuation());
     }
 }
