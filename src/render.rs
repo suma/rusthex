@@ -448,16 +448,21 @@ impl HexEditor {
                             .on_scroll_wheel(cx.listener(|this, _event: &gpui::ScrollWheelEvent, _window, _cx| {
                                 this.user_scrolled = true;
                             }))
-                            .context_menu(|menu, _window, _cx| {
-                                menu.menu("Copy", Box::new(actions::Copy))
-                                    .menu("Copy as ASCII Text", Box::new(actions::CopyAsAscii))
-                                    .menu("Copy as Hex String", Box::new(actions::CopyAsHexString))
-                                    .menu("Copy as C Array", Box::new(actions::CopyAsCArray))
-                                    .menu("Paste", Box::new(actions::Paste))
-                                    .separator()
-                                    .menu("Select All", Box::new(actions::SelectAll))
-                                    .separator()
-                                    .menu("Toggle Inspector", Box::new(actions::ToggleInspector))
+                            .context_menu({
+                                let has_selection = self.has_selection();
+                                move |menu, _window, _cx| {
+                                    menu.menu("Copy", Box::new(actions::Copy))
+                                        .menu("Copy as ASCII Text", Box::new(actions::CopyAsAscii))
+                                        .menu("Copy as Hex String", Box::new(actions::CopyAsHexString))
+                                        .menu("Copy as C Array", Box::new(actions::CopyAsCArray))
+                                        .menu("Paste", Box::new(actions::Paste))
+                                        .separator()
+                                        .menu_with_enable("Save Selection As...", Box::new(actions::SaveSelectionAs), has_selection)
+                                        .separator()
+                                        .menu("Select All", Box::new(actions::SelectAll))
+                                        .separator()
+                                        .menu("Toggle Inspector", Box::new(actions::ToggleInspector))
+                                }
                             })
                             .pr(px(24.0))
                             .child(
@@ -2795,6 +2800,9 @@ impl Render for HexEditor {
             }))
             .on_action(cx.listener(|this, _: &actions::SaveAs, _window, cx| {
                 this.save_as_dialog(cx);
+            }))
+            .on_action(cx.listener(|this, _: &actions::SaveSelectionAs, _window, cx| {
+                this.save_selection_as_dialog(cx);
             }))
             .on_action(cx.listener(|this, _: &actions::NewTab, _window, cx| {
                 this.new_tab();

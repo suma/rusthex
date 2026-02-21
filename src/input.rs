@@ -146,7 +146,7 @@ impl HexEditor {
     }
 
     /// Get selected bytes with start offset. Returns None if no valid selection.
-    fn get_selected_bytes(&self) -> Option<(usize, Vec<u8>)> {
+    pub(crate) fn get_selected_bytes(&self) -> Option<(usize, Vec<u8>)> {
         let (start, end) = if let Some(range) = self.selection_range() {
             range
         } else {

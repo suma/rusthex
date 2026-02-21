@@ -618,6 +618,7 @@ fn build_menus() -> Vec<Menu> {
                 MenuItem::separator(),
                 MenuItem::action("Save", actions::Save),
                 MenuItem::action("Save As...", actions::SaveAs),
+                MenuItem::action("Save Selection As...", actions::SaveSelectionAs),
                 MenuItem::separator(),
                 MenuItem::action("New Tab", actions::NewTab),
                 MenuItem::action("Close Tab", actions::CloseTab),

@@ -219,6 +219,7 @@ fn shortcut_for_action(action_name: &str) -> Option<&'static str> {
         "rusthex::Open" => Some("Ctrl+O"),
         "rusthex::Save" => Some("Ctrl+S"),
         "rusthex::SaveAs" => Some("Ctrl+Shift+S"),
+        "rusthex::SaveSelectionAs" => None,
         "rusthex::NewTab" => Some("Ctrl+T"),
         "rusthex::CloseTab" => Some("Ctrl+W"),
         "rusthex::Quit" => Some("Ctrl+Q"),

@@ -211,6 +211,59 @@ impl HexEditor {
         .detach();
     }
 
+    /// Save selection to a new file
+    pub fn save_selection_as_dialog(&mut self, cx: &mut Context<Self>) {
+        let (start, end) = match self.selection_range() {
+            Some(range) => range,
+            None => {
+                self.save_message = Some("No selection to save".to_string());
+                cx.notify();
+                return;
+            }
+        };
+
+        let bytes = match self.get_selected_bytes() {
+            Some((_offset, bytes)) => bytes,
+            None => {
+                self.save_message = Some("No bytes in selection".to_string());
+                cx.notify();
+                return;
+            }
+        };
+
+        let byte_count = end - start + 1;
+        let directory = if let Some(path) = self.tab().document.file_path() {
+            path.parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| PathBuf::from("."))
+        } else {
+            PathBuf::from(".")
+        };
+
+        let receiver = cx.prompt_for_new_path(&directory, Some("selection.bin"));
+
+        cx.spawn(async move |entity, cx| {
+            if let Ok(Ok(Some(path))) = receiver.await {
+                let _ = entity.update(cx, |editor, cx| {
+                    match std::fs::write(&path, &bytes) {
+                        Ok(_) => {
+                            editor.save_message = Some(format!(
+                                "Saved {} bytes to {}",
+                                byte_count,
+                                path.display()
+                            ));
+                        }
+                        Err(e) => {
+                            editor.save_message = Some(format!("Error: {}", e));
+                        }
+                    }
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
+
     /// Handle file drop event - open in new tab
     pub fn handle_file_drop(&mut self, paths: &ExternalPaths, cx: &mut Context<Self>) {
         if let Some(path) = paths.paths().first() {
