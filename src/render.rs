@@ -1997,10 +1997,27 @@ impl HexEditor {
     pub(crate) fn render_log_panel(&self, cx: &mut gpui::Context<Self>, font_name: &String) -> impl IntoElement {
         let t = &self.theme;
         let entry_count = self.log_panel.entries.len();
+        let panel_height = self.log_panel.panel_height;
 
         div()
             .flex()
             .flex_col()
+            // Resize handle at top
+            .child(
+                div()
+                    .id("log-resize-handle")
+                    .h(px(4.0))
+                    .w_full()
+                    .cursor_row_resize()
+                    .on_mouse_down(
+                        gpui::MouseButton::Left,
+                        cx.listener(|this, event: &gpui::MouseDownEvent, _window, _cx| {
+                            let mouse_y: f32 = event.position.y.into();
+                            this.log_panel.drag_start_y = Some(mouse_y);
+                            this.log_panel.drag_start_height = Some(this.log_panel.panel_height);
+                        }),
+                    ),
+            )
             .py_1()
             .px_4()
             .bg(t.bg_secondary)
@@ -2041,13 +2058,13 @@ impl HexEditor {
                             })),
                     ),
             )
-            // Log entries (last 5 visible)
+            // Log entries with dynamic height
             .child(
                 div()
                     .id("log-entries")
                     .flex()
                     .flex_col()
-                    .h(px(5.0 * 19.0)) // 5 rows * text_xs line height
+                    .h(px(panel_height))
                     .overflow_y_scroll()
                     .children(self.log_panel.entries.iter().map(|entry| {
                         let color = match entry.level {
@@ -2697,6 +2714,11 @@ impl Render for HexEditor {
             .on_mouse_up(
                 gpui::MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
+                    if this.log_panel.drag_start_y.is_some() {
+                        this.log_panel.drag_start_y = None;
+                        this.log_panel.drag_start_height = None;
+                        cx.notify();
+                    }
                     if this.is_dragging {
                         this.is_dragging = false;
                         this.drag_pane = None;
@@ -2714,6 +2736,28 @@ impl Render for HexEditor {
                         this.drag_pane = None;
                         this.bitmap.drag_start_y = None;
                         this.bitmap.drag_start_row = None;
+                        cx.notify();
+                        return;
+                    }
+
+                    // Cancel log panel resize if mouse button was released outside
+                    if this.log_panel.drag_start_y.is_some() && !event.dragging() {
+                        this.log_panel.drag_start_y = None;
+                        this.log_panel.drag_start_height = None;
+                        cx.notify();
+                        return;
+                    }
+
+                    // Handle log panel resize drag
+                    if let (Some(start_y), Some(start_height)) =
+                        (this.log_panel.drag_start_y, this.log_panel.drag_start_height)
+                    {
+                        let mouse_y: f32 = event.position.y.into();
+                        // Dragging up increases height (panel grows upward)
+                        let delta_y = start_y - mouse_y;
+                        let new_height = (start_height + delta_y)
+                            .clamp(crate::log_panel::MIN_HEIGHT, crate::log_panel::MAX_HEIGHT);
+                        this.log_panel.panel_height = new_height;
                         cx.notify();
                         return;
                     }

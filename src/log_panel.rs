@@ -19,12 +19,25 @@ pub struct LogEntry {
     pub timestamp: Instant,
 }
 
+/// Minimum log panel height in pixels (2 rows)
+pub const MIN_HEIGHT: f32 = 38.0;
+/// Maximum log panel height in pixels (25 rows)
+pub const MAX_HEIGHT: f32 = 475.0;
+/// Default log panel height in pixels (5 rows)
+pub const DEFAULT_HEIGHT: f32 = 95.0;
+
 /// Scrollable log panel that accumulates status messages
 pub struct LogPanel {
     pub entries: VecDeque<LogEntry>,
     pub visible: bool,
     pub max_entries: usize,
     pub start_time: Instant,
+    /// Current panel height in pixels
+    pub panel_height: f32,
+    /// Y position at drag start (None when not dragging)
+    pub drag_start_y: Option<f32>,
+    /// Panel height at drag start
+    pub drag_start_height: Option<f32>,
 }
 
 impl LogPanel {
@@ -34,6 +47,9 @@ impl LogPanel {
             visible: true,
             max_entries: 1000,
             start_time: Instant::now(),
+            panel_height: DEFAULT_HEIGHT,
+            drag_start_y: None,
+            drag_start_height: None,
         }
     }
 
@@ -147,5 +163,22 @@ mod tests {
         // Simulate a timestamp 125 seconds after start
         let ts = panel.start_time + std::time::Duration::from_secs(125);
         assert_eq!(panel.format_timestamp(ts), "02:05");
+    }
+
+    #[test]
+    fn test_default_panel_height() {
+        let panel = LogPanel::new();
+        assert_eq!(panel.panel_height, DEFAULT_HEIGHT);
+        assert!(panel.drag_start_y.is_none());
+        assert!(panel.drag_start_height.is_none());
+    }
+
+    #[test]
+    fn test_height_constants() {
+        assert!(MIN_HEIGHT < DEFAULT_HEIGHT);
+        assert!(DEFAULT_HEIGHT < MAX_HEIGHT);
+        assert_eq!(MIN_HEIGHT, 38.0);
+        assert_eq!(MAX_HEIGHT, 475.0);
+        assert_eq!(DEFAULT_HEIGHT, 95.0);
     }
 }
