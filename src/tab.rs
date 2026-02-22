@@ -4,7 +4,6 @@
 //! with its own document and state.
 
 use gpui::{Pixels, ScrollHandle, px};
-use gpui_component::scroll::ScrollbarState;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::{Arc, Mutex};
@@ -20,7 +19,6 @@ pub struct EditorTab {
     pub document: Document,
     pub cursor_position: usize,
     pub scroll_handle: ScrollHandle,
-    pub scrollbar_state: ScrollbarState,
     pub scroll_offset: Pixels,
     pub selection_start: Option<usize>,
     pub edit_pane: EditPane,
@@ -62,7 +60,6 @@ impl EditorTab {
             document: Document::new(),
             cursor_position: 0,
             scroll_handle: ScrollHandle::new(),
-            scrollbar_state: ScrollbarState::default(),
             scroll_offset: px(0.0),
             selection_start: None,
             edit_pane: EditPane::Hex,

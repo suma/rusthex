@@ -8,7 +8,6 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use gpui::ScrollHandle;
-use gpui_component::scroll::ScrollbarState;
 use pattern_lang::error::EvalError;
 use pattern_lang::preprocessor::IncludeResolver;
 use pattern_lang::{DataSource, PatternEngine, PatternNode, PatternValue};
@@ -108,7 +107,6 @@ pub struct PatternState {
     pub result: Option<PatternResult>,
     /// Tree view scroll state
     pub scroll_handle: ScrollHandle,
-    pub scrollbar_state: ScrollbarState,
     /// Expanded tree nodes (by dot-separated path, e.g. "header.magic")
     pub expanded_nodes: HashSet<String>,
 }
@@ -120,7 +118,6 @@ impl PatternState {
             selected_index: None,
             result: None,
             scroll_handle: ScrollHandle::new(),
-            scrollbar_state: ScrollbarState::default(),
             expanded_nodes: HashSet::new(),
         }
     }

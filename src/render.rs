@@ -739,7 +739,7 @@ impl HexEditor {
                             .w(px(12.0))
                             .bg(t_bg_elevated)
                             .child(
-                                Scrollbar::vertical(&self.tab().scrollbar_state, &self.tab().scroll_handle)
+                                Scrollbar::vertical(&self.tab().scroll_handle)
                                     .scrollbar_show(ScrollbarShow::Always)
                             )
                             // Add search result markers on scrollbar
@@ -1005,7 +1005,7 @@ impl HexEditor {
                                         .h_full()
                                         .bg(t_bg_elevated)
                                         .child(
-                                            Scrollbar::vertical(&self.bitmap.scrollbar_state, &self.bitmap.scroll_handle)
+                                            Scrollbar::vertical(&self.bitmap.scroll_handle)
                                                 .scrollbar_show(ScrollbarShow::Always)
                                         )
                                 )

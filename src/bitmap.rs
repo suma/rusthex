@@ -18,7 +18,6 @@ pub(crate) struct BitmapState {
     pub drag_start_y: Option<f32>,
     pub drag_start_row: Option<usize>,
     pub scroll_handle: gpui::ScrollHandle,
-    pub scrollbar_state: gpui_component::scroll::ScrollbarState,
     pub cached_image: Option<Arc<RenderImage>>,
     pub cached_params: Option<BitmapCacheParams>,
 }
@@ -33,7 +32,6 @@ impl BitmapState {
             drag_start_y: None,
             drag_start_row: None,
             scroll_handle: gpui::ScrollHandle::new(),
-            scrollbar_state: gpui_component::scroll::ScrollbarState::default(),
             cached_image: None,
             cached_params: None,
         }
