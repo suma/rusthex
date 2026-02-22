@@ -31,8 +31,8 @@ pub struct LogEntry {
 pub const MIN_HEIGHT: f32 = 38.0;
 /// Maximum log panel height in pixels (25 rows)
 pub const MAX_HEIGHT: f32 = 475.0;
-/// Default log panel height in pixels (5 rows)
-pub const DEFAULT_HEIGHT: f32 = 95.0;
+/// Default log panel height in pixels (3 rows)
+pub const DEFAULT_HEIGHT: f32 = 49.0;
 
 /// Scrollable log panel that accumulates status messages
 pub struct LogPanel {
@@ -186,7 +186,7 @@ mod tests {
         assert!(DEFAULT_HEIGHT < MAX_HEIGHT);
         assert_eq!(MIN_HEIGHT, 38.0);
         assert_eq!(MAX_HEIGHT, 475.0);
-        assert_eq!(DEFAULT_HEIGHT, 95.0);
+        assert_eq!(DEFAULT_HEIGHT, 49.0);
     }
 
     #[test]
