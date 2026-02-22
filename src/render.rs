@@ -2441,6 +2441,29 @@ impl HexEditor {
                                             ),
                                     )
                                 }),
+                        )
+                        // Binary column
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .flex()
+                                        .gap_2()
+                                        .child(
+                                            div()
+                                                .w(px(60.0))
+                                                .text_color(t.text_muted)
+                                                .child("Bin8:"),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_color(t.accent_primary)
+                                                .child(format!("{:04b} {:04b}", vals.uint8 >> 4, vals.uint8 & 0x0F)),
+                                        ),
+                                ),
                         ),
                 )
             })
