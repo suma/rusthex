@@ -1907,12 +1907,8 @@ impl HexEditor {
                             })
                     )
                     .child(
-                        // File size (right aligned)
-                        div()
-                            .flex_1()
-                            .text_right()
-                            .text_color(t.text_muted)
-                            .child(format!("Size: {}", ui::format_file_size(self.tab().document.len())))
+                        // Spacer to keep layout balanced
+                        div().flex_1()
                     )
             )
             // Second line: search status, messages
