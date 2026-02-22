@@ -1785,7 +1785,7 @@ impl HexEditor {
                         div().flex_1()
                     )
             )
-            // Second line: search status, messages
+            // Second line: Enc / Theme dropdowns
             .child(
                 div()
                     .flex()
@@ -1793,75 +1793,6 @@ impl HexEditor {
                     .py_1()
                     .border_t_1()
                     .border_color(t.border_secondary)
-                    // Search status with progress
-                    .when(self.tab().is_searching, |el| {
-                        let current = self.tab().search_progress.load(Ordering::Relaxed);
-                        let total = self.tab().search_total;
-                        let percent = if total > 0 {
-                            (current as f64 / total as f64 * 100.0) as usize
-                        } else {
-                            0
-                        };
-                        el.child(
-                            div()
-                                .flex()
-                                .gap_2()
-                                .text_color(t_text_warning)
-                                .child("Searching...")
-                                .child(
-                                    div()
-                                        .text_color(t_text_muted)
-                                        .child(format!("\"{}\"", self.tab().search_query))
-                                )
-                                .child(
-                                    div()
-                                        .text_color(t_accent_primary)
-                                        .child(format!("{}/{} ({}%)",
-                                            ui::format_file_size(current),
-                                            ui::format_file_size(total),
-                                            percent
-                                        ))
-                                )
-                        )
-                    })
-                    // Search results info (when not searching)
-                    .when(!self.tab().is_searching && self.tab().search_visible && !self.tab().search_query.is_empty(), |el| {
-                        let result_count = self.tab().search_results.len();
-                        let current_pos = self.tab().current_search_index.map(|i| i + 1).unwrap_or(0);
-                        let mode_str = match self.tab().search_mode {
-                            SearchMode::Ascii => "ASCII",
-                            SearchMode::Hex => "Hex",
-                        };
-                        el.child(
-                            div()
-                                .flex()
-                                .gap_2()
-                                .child(
-                                    div()
-                                        .text_color(t_text_muted)
-                                        .child(format!("Search ({}):", mode_str))
-                                )
-                                .child(
-                                    div()
-                                        .text_color(t_accent_primary)
-                                        .child(format!("\"{}\"", self.tab().search_query))
-                                )
-                                .child(
-                                    div()
-                                        .text_color(if result_count > 0 { t_accent_success } else { t_text_diff })
-                                        .child(if result_count > 0 {
-                                            if self.tab().search_truncated {
-                                                format!("{}/{}+ matches (truncated)", current_pos, result_count)
-                                            } else {
-                                                format!("{}/{} matches", current_pos, result_count)
-                                            }
-                                        } else {
-                                            "No matches".to_string()
-                                        })
-                                )
-                        )
-                    })
-                    // Spacer to push dropdowns right
                     .child(div().flex_1())
                     .child(
                         // Text encoding dropdown selector
@@ -1995,6 +1926,83 @@ impl HexEditor {
                                 )
                             })
                     )
+            )
+            // Third line: search status, messages
+            .child(
+                div()
+                    .flex()
+                    .gap_4()
+                    .py_1()
+                    .border_t_1()
+                    .border_color(t.border_secondary)
+                    // Search status with progress
+                    .when(self.tab().is_searching, |el| {
+                        let current = self.tab().search_progress.load(Ordering::Relaxed);
+                        let total = self.tab().search_total;
+                        let percent = if total > 0 {
+                            (current as f64 / total as f64 * 100.0) as usize
+                        } else {
+                            0
+                        };
+                        el.child(
+                            div()
+                                .flex()
+                                .gap_2()
+                                .text_color(t_text_warning)
+                                .child("Searching...")
+                                .child(
+                                    div()
+                                        .text_color(t_text_muted)
+                                        .child(format!("\"{}\"", self.tab().search_query))
+                                )
+                                .child(
+                                    div()
+                                        .text_color(t_accent_primary)
+                                        .child(format!("{}/{} ({}%)",
+                                            ui::format_file_size(current),
+                                            ui::format_file_size(total),
+                                            percent
+                                        ))
+                                )
+                        )
+                    })
+                    // Search results info (when not searching)
+                    .when(!self.tab().is_searching && self.tab().search_visible && !self.tab().search_query.is_empty(), |el| {
+                        let result_count = self.tab().search_results.len();
+                        let current_pos = self.tab().current_search_index.map(|i| i + 1).unwrap_or(0);
+                        let mode_str = match self.tab().search_mode {
+                            SearchMode::Ascii => "ASCII",
+                            SearchMode::Hex => "Hex",
+                        };
+                        el.child(
+                            div()
+                                .flex()
+                                .gap_2()
+                                .child(
+                                    div()
+                                        .text_color(t_text_muted)
+                                        .child(format!("Search ({}):", mode_str))
+                                )
+                                .child(
+                                    div()
+                                        .text_color(t_accent_primary)
+                                        .child(format!("\"{}\"", self.tab().search_query))
+                                )
+                                .child(
+                                    div()
+                                        .text_color(if result_count > 0 { t_accent_success } else { t_text_diff })
+                                        .child(if result_count > 0 {
+                                            if self.tab().search_truncated {
+                                                format!("{}/{}+ matches (truncated)", current_pos, result_count)
+                                            } else {
+                                                format!("{}/{} matches", current_pos, result_count)
+                                            }
+                                        } else {
+                                            "No matches".to_string()
+                                        })
+                                )
+                        )
+                    })
             )
     }
 
