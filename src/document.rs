@@ -115,6 +115,8 @@ pub struct Document {
 
     /// File metadata
     file_path: Option<PathBuf>,
+    /// Display name override (used for tabs without a file path)
+    display_name: Option<String>,
     /// Change tracking
     has_unsaved_changes: bool,
 
@@ -138,6 +140,7 @@ impl Document {
             cached_length: 0,
             access_cache: Cell::new(None),
             file_path: None,
+            display_name: None,
             has_unsaved_changes: false,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
@@ -864,12 +867,20 @@ impl Document {
         self.file_path.as_ref()
     }
 
-    /// Get file name
+    /// Get file name (display_name takes priority if set)
     pub fn file_name(&self) -> Option<&str> {
+        if let Some(name) = &self.display_name {
+            return Some(name.as_str());
+        }
         self.file_path
             .as_ref()
             .and_then(|p| p.file_name())
             .and_then(|n| n.to_str())
+    }
+
+    /// Set display name override
+    pub fn set_display_name(&mut self, name: String) {
+        self.display_name = Some(name);
     }
 
     /// Get number of modified bytes (approximation: number of add_buffer pieces)
@@ -1561,5 +1572,32 @@ mod tests {
         let doc = Document::with_data(vec![0x01, 0x02, 0x03]);
         let mut buf = Vec::new();
         assert!(doc.write_range_to(0..10, &mut buf).is_err());
+    }
+
+    // =========================================
+    // display_name
+    // =========================================
+
+    #[test]
+    fn test_file_name_returns_none_for_new_document() {
+        let doc = Document::new();
+        assert_eq!(doc.file_name(), None);
+    }
+
+    #[test]
+    fn test_display_name_overrides_file_name() {
+        let mut doc = Document::with_data(vec![0x01, 0x02]);
+        doc.set_display_name("test [0x0-0x1]".to_string());
+        assert_eq!(doc.file_name(), Some("test [0x0-0x1]"));
+    }
+
+    #[test]
+    fn test_display_name_with_data() {
+        let mut doc = Document::with_data(vec![0xDE, 0xAD, 0xBE, 0xEF]);
+        assert_eq!(doc.file_name(), None);
+        doc.set_display_name("selection.bin".to_string());
+        assert_eq!(doc.file_name(), Some("selection.bin"));
+        assert_eq!(doc.len(), 4);
+        assert_eq!(doc.get_byte(0), Some(0xDE));
     }
 }

@@ -88,4 +88,15 @@ impl HexEditor {
         self.active_tab = self.tabs.len() - 1;
         Ok(())
     }
+
+    /// Open in-memory data in a new tab with a display name
+    pub fn open_data_in_new_tab(&mut self, data: Vec<u8>, name: String) {
+        let mut doc = Document::with_data(data);
+        doc.set_display_name(name);
+        let mut tab = EditorTab::with_document(doc);
+        tab.pattern.available_patterns =
+            pattern::scan_hexpat_dir(&self.settings.pattern.hexpat_dir);
+        self.tabs.push(tab);
+        self.active_tab = self.tabs.len() - 1;
+    }
 }

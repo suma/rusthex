@@ -5,7 +5,7 @@
 //! - ASCII input
 //! - Pane toggling and selection management
 
-use gpui::{ClipboardItem, Context};
+use gpui::{ClipboardItem, Context, PromptLevel, Window};
 
 use crate::HexEditor;
 use crate::ui::{EditMode, EditPane, HexNibble};
@@ -252,5 +252,74 @@ impl HexEditor {
             }
         }
         self.log(crate::log_panel::LogLevel::Info, format!("Pasted {} byte(s)", bytes.len()));
+    }
+
+    /// Open selected bytes in a new tab
+    pub fn open_selection_in_new_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (start, end) = match self.selection_range() {
+            Some(range) => range,
+            None => {
+                self.log(crate::log_panel::LogLevel::Info, "No selection to open");
+                return;
+            }
+        };
+
+        let byte_count = end - start + 1;
+        let base_name = self
+            .tab()
+            .document
+            .file_name()
+            .unwrap_or("untitled")
+            .to_string();
+        let name = format!("{} [0x{:X}-0x{:X}]", base_name, start, end);
+
+        const LARGE_SELECTION_THRESHOLD: usize = 100 * 1024 * 1024; // 100 MiB
+
+        if byte_count >= LARGE_SELECTION_THRESHOLD {
+            let size_mib = byte_count as f64 / (1024.0 * 1024.0);
+            let receiver = window.prompt(
+                PromptLevel::Warning,
+                "Large Selection",
+                Some(&format!(
+                    "The selection is {:.1} MiB. Opening it in a new tab will use additional memory.\n\nDo you want to continue?",
+                    size_mib
+                )),
+                &["Open", "Cancel"],
+                cx,
+            );
+
+            cx.spawn_in(window, async move |entity, cx| {
+                if let Ok(answer) = receiver.await {
+                    if answer == 0 {
+                        let _ = entity.update(cx, |editor, cx| {
+                            let bytes = match editor.tab().document.get_slice(start..end + 1) {
+                                Some(b) if !b.is_empty() => b,
+                                _ => return,
+                            };
+                            editor.open_data_in_new_tab(bytes, name);
+                            editor.log(
+                                crate::log_panel::LogLevel::Info,
+                                format!("Opened {} byte(s) in new tab", byte_count),
+                            );
+                            cx.notify();
+                        });
+                    }
+                }
+            })
+            .detach();
+        } else {
+            let bytes = match self.tab().document.get_slice(start..end + 1) {
+                Some(b) if !b.is_empty() => b,
+                _ => {
+                    self.log(crate::log_panel::LogLevel::Info, "No data in selection");
+                    return;
+                }
+            };
+            self.open_data_in_new_tab(bytes, name);
+            self.log(
+                crate::log_panel::LogLevel::Info,
+                format!("Opened {} byte(s) in new tab", byte_count),
+            );
+        }
     }
 }

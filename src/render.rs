@@ -458,6 +458,7 @@ impl HexEditor {
                                         .menu("Paste", Box::new(actions::Paste))
                                         .separator()
                                         .menu_with_enable("Save Selection As...", Box::new(actions::SaveSelectionAs), has_selection)
+                                        .menu_with_enable("Open Selection in New Tab", Box::new(actions::OpenSelectionInNewTab), has_selection)
                                         .separator()
                                         .menu("Select All", Box::new(actions::SelectAll))
                                         .separator()
@@ -3133,6 +3134,10 @@ impl Render for HexEditor {
             }))
             .on_action(cx.listener(|this, _: &actions::SaveSelectionAs, _window, cx| {
                 this.save_selection_as_dialog(cx);
+            }))
+            .on_action(cx.listener(|this, _: &actions::OpenSelectionInNewTab, window, cx| {
+                this.open_selection_in_new_tab(window, cx);
+                cx.notify();
             }))
             .on_action(cx.listener(|this, _: &actions::NewTab, _window, cx| {
                 this.new_tab();

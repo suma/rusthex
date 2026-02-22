@@ -10,6 +10,7 @@ actions!(
         Save,
         SaveAs,
         SaveSelectionAs,
+        OpenSelectionInNewTab,
         NewTab,
         CloseTab,
         Quit,
