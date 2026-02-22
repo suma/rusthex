@@ -2506,6 +2506,13 @@ impl HexEditor {
                             .text_color(t.text_primary)
                             .child("A hex editor built with Rust and gpui"),
                     )
+                    .child(div().h(px(4.0)))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(t.text_muted)
+                            .child("\u{00A9} 2025-2026 Shuzo Kashihara"),
+                    )
                     .child(div().h(px(12.0)))
                     .child(
                         div()
