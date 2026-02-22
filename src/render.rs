@@ -110,7 +110,7 @@ impl HexEditor {
                                     .child(format!("{} \u{25BC}", self.text_encoding.label()))
                             )
                             .when(self.encoding_dropdown_open, |el| {
-                                el.child(
+                                el.child(deferred(
                                     div()
                                         .absolute()
                                         .top(px(24.0))
@@ -144,7 +144,7 @@ impl HexEditor {
                                                     format!("  {}", enc.label())
                                                 })
                                         }))
-                                )
+                                ).with_priority(100))
                             })
                     )
                     .child(
@@ -177,7 +177,7 @@ impl HexEditor {
                                     .child(format!("{} \u{25BC}", current_theme_name.label()))
                             )
                             .when(self.theme_dropdown_open, |el| {
-                                el.child(
+                                el.child(deferred(
                                     div()
                                         .absolute()
                                         .top(px(24.0))
@@ -211,7 +211,7 @@ impl HexEditor {
                                                     format!("  {}", name.label())
                                                 })
                                         }))
-                                )
+                                ).with_priority(100))
                             })
                     )
             )
