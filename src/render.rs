@@ -2199,7 +2199,12 @@ impl HexEditor {
                         })
                         .unwrap_or_else(|| ("-".to_string(), "-".to_string()));
 
-                    let doc_size_str = ui::format_file_size(doc.len());
+                    let doc_len = doc.len();
+                    let doc_size_str = if doc_len < 1024 {
+                        format!("{} bytes", doc_len)
+                    } else {
+                        format!("{} bytes ({})", doc_len, ui::format_file_size(doc_len))
+                    };
 
                     let info_row = |label: &str, value: String| {
                         div()
