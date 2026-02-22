@@ -1996,8 +1996,36 @@ impl HexEditor {
     /// Log panel for displaying accumulated status messages
     pub(crate) fn render_log_panel(&self, cx: &mut gpui::Context<Self>, font_name: &String) -> impl IntoElement {
         let t = &self.theme;
-        let entry_count = self.log_panel.entries.len();
         let panel_height = self.log_panel.panel_height;
+        let active_tab = self.log_panel.active_tab;
+
+        let tab_label = |id: &'static str,
+                         label: &'static str,
+                         _tab: crate::log_panel::BottomPanelTab,
+                         is_active: bool,
+                         t: &crate::theme::Theme| {
+            div()
+                .id(id)
+                .px_2()
+                .pb(px(2.0))
+                .cursor_pointer()
+                .text_color(if is_active {
+                    t.accent_primary
+                } else {
+                    t.text_muted
+                })
+                .when(is_active, |el| {
+                    el.border_b_2().border_color(t.accent_primary)
+                })
+                .hover(|s| s.text_color(t.accent_primary))
+                .child(label)
+                .on_mouse_down(
+                    gpui::MouseButton::Left,
+                    move |_event: &gpui::MouseDownEvent, _window, _cx| {
+                        // Handled by on_click below
+                    },
+                )
+        };
 
         div()
             .flex()
@@ -2024,58 +2052,188 @@ impl HexEditor {
             .border_color(t.border_primary)
             .text_xs()
             .font_family(font_name)
-            // Header row
+            // Tab bar
             .child(
                 div()
                     .flex()
-                    .justify_between()
+                    .gap_4()
                     .pb_1()
                     .mb_1()
                     .border_b_1()
                     .border_color(t.border_secondary)
                     .child(
-                        div()
-                            .flex()
-                            .gap_2()
-                            .child(div().text_color(t.accent_primary).child("Log"))
-                            .child(
-                                div()
-                                    .text_color(t.text_muted)
-                                    .child(format!("{} entries", entry_count)),
-                            ),
+                        tab_label(
+                            "bottom-tab-log",
+                            "Log",
+                            crate::log_panel::BottomPanelTab::Log,
+                            active_tab == crate::log_panel::BottomPanelTab::Log,
+                            t,
+                        )
+                        .on_click(cx.listener(|this, _event, _window, cx| {
+                            this.log_panel.active_tab = crate::log_panel::BottomPanelTab::Log;
+                            cx.notify();
+                        })),
                     )
                     .child(
-                        div()
-                            .id("clear-log-btn")
-                            .text_color(t.text_muted)
-                            .hover(|s| s.text_color(t.accent_primary))
-                            .cursor_pointer()
-                            .child("Clear")
-                            .on_click(cx.listener(|this, _event, _window, cx| {
-                                this.log_panel.clear();
-                                cx.notify();
-                            })),
+                        tab_label(
+                            "bottom-tab-info",
+                            "Info",
+                            crate::log_panel::BottomPanelTab::Info,
+                            active_tab == crate::log_panel::BottomPanelTab::Info,
+                            t,
+                        )
+                        .on_click(cx.listener(|this, _event, _window, cx| {
+                            this.log_panel.active_tab = crate::log_panel::BottomPanelTab::Info;
+                            cx.notify();
+                        })),
                     ),
             )
-            // Log entries with dynamic height
-            .child(
-                div()
-                    .id("log-entries")
-                    .flex()
-                    .flex_col()
-                    .h(px(panel_height))
-                    .overflow_y_scroll()
-                    .children(self.log_panel.entries.iter().map(|entry| {
-                        let color = match entry.level {
-                            crate::log_panel::LogLevel::Info => t.text_secondary,
-                            crate::log_panel::LogLevel::Warning => t.text_warning,
-                            crate::log_panel::LogLevel::Error => t.text_error,
-                        };
-                        let ts = self.log_panel.format_timestamp(entry.timestamp);
+            // Tab content
+            .when(
+                active_tab == crate::log_panel::BottomPanelTab::Log,
+                |el| {
+                    let entry_count = self.log_panel.entries.len();
+                    el
+                        // Log header (entry count + Clear button)
+                        .child(
+                            div()
+                                .flex()
+                                .justify_between()
+                                .pb_1()
+                                .mb_1()
+                                .child(
+                                    div()
+                                        .text_color(t.text_muted)
+                                        .child(format!("{} entries", entry_count)),
+                                )
+                                .child(
+                                    div()
+                                        .id("clear-log-btn")
+                                        .text_color(t.text_muted)
+                                        .hover(|s| s.text_color(t.accent_primary))
+                                        .cursor_pointer()
+                                        .child("Clear")
+                                        .on_click(cx.listener(|this, _event, _window, cx| {
+                                            this.log_panel.clear();
+                                            cx.notify();
+                                        })),
+                                ),
+                        )
+                        // Log entries
+                        .child(
+                            div()
+                                .id("log-entries")
+                                .flex()
+                                .flex_col()
+                                .h(px(panel_height))
+                                .overflow_y_scroll()
+                                .children(self.log_panel.entries.iter().map(|entry| {
+                                    let color = match entry.level {
+                                        crate::log_panel::LogLevel::Info => t.text_secondary,
+                                        crate::log_panel::LogLevel::Warning => t.text_warning,
+                                        crate::log_panel::LogLevel::Error => t.text_error,
+                                    };
+                                    let ts = self.log_panel.format_timestamp(entry.timestamp);
+                                    div()
+                                        .text_color(color)
+                                        .child(format!("[{}] {}", ts, entry.message))
+                                })),
+                        )
+                },
+            )
+            .when(
+                active_tab == crate::log_panel::BottomPanelTab::Info,
+                |el| {
+                    let doc = &self.tabs[self.active_tab].document;
+                    let file_path_str = doc
+                        .file_path()
+                        .map(|p| p.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "Untitled".to_string());
+
+                    let (file_size_str, modified_str) = doc
+                        .file_path()
+                        .and_then(|p| std::fs::metadata(p).ok())
+                        .map(|meta| {
+                            let size = ui::format_file_size(meta.len() as usize);
+                            let modified = meta
+                                .modified()
+                                .ok()
+                                .map(|t| {
+                                    let dt: chrono::DateTime<chrono::Local> = t.into();
+                                    dt.format("%Y-%m-%d %H:%M:%S").to_string()
+                                })
+                                .unwrap_or_else(|| "-".to_string());
+                            (size, modified)
+                        })
+                        .unwrap_or_else(|| ("-".to_string(), "-".to_string()));
+
+                    let doc_size_str = ui::format_file_size(doc.len());
+
+                    let info_row = |label: &str, value: String| {
                         div()
-                            .text_color(color)
-                            .child(format!("[{}] {}", ts, entry.message))
-                    })),
+                            .flex()
+                            .gap_4()
+                            .py(px(2.0))
+                            .child(
+                                div()
+                                    .w(px(100.0))
+                                    .text_color(t.text_muted)
+                                    .child(label.to_string()),
+                            )
+                            .child(div().text_color(t.text_secondary).child(value))
+                    };
+
+                    // Path row with copy button
+                    let path_for_copy: SharedString = file_path_str.clone().into();
+                    let path_row = div()
+                        .flex()
+                        .gap_4()
+                        .py(px(2.0))
+                        .items_center()
+                        .child(
+                            div()
+                                .w(px(100.0))
+                                .text_color(t.text_muted)
+                                .child("Path"),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .text_color(t.text_secondary)
+                                .overflow_x_hidden()
+                                .child(file_path_str),
+                        )
+                        .child(
+                            div()
+                                .id("copy-path-btn")
+                                .px_1()
+                                .rounded_sm()
+                                .cursor_pointer()
+                                .text_color(t.text_muted)
+                                .hover(|s| s.text_color(t.accent_primary))
+                                .child("Copy")
+                                .on_click(cx.listener(move |_this, _event, _window, cx| {
+                                    cx.write_to_clipboard(
+                                        gpui::ClipboardItem::new_string(
+                                            path_for_copy.to_string(),
+                                        ),
+                                    );
+                                })),
+                        );
+
+                    el.child(
+                        div()
+                            .id("info-content")
+                            .flex()
+                            .flex_col()
+                            .h(px(panel_height))
+                            .overflow_y_scroll()
+                            .child(path_row)
+                            .child(info_row("File size", file_size_str))
+                            .child(info_row("Modified", modified_str))
+                            .child(info_row("Document size", doc_size_str)),
+                    )
+                },
             )
     }
 

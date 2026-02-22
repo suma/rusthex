@@ -3,6 +3,14 @@
 use std::collections::VecDeque;
 use std::time::Instant;
 
+/// Active tab in the bottom panel
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BottomPanelTab {
+    #[default]
+    Log,
+    Info,
+}
+
 /// Severity level for log entries
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogLevel {
@@ -36,6 +44,8 @@ pub struct LogPanel {
     pub panel_height: f32,
     /// Drag state: (start_y, start_height), None when not dragging
     pub drag_state: Option<(f32, f32)>,
+    /// Active tab in the bottom panel
+    pub active_tab: BottomPanelTab,
 }
 
 impl LogPanel {
@@ -47,6 +57,7 @@ impl LogPanel {
             start_time: Instant::now(),
             panel_height: DEFAULT_HEIGHT,
             drag_state: None,
+            active_tab: BottomPanelTab::default(),
         }
     }
 
@@ -176,5 +187,35 @@ mod tests {
         assert_eq!(MIN_HEIGHT, 38.0);
         assert_eq!(MAX_HEIGHT, 475.0);
         assert_eq!(DEFAULT_HEIGHT, 95.0);
+    }
+
+    #[test]
+    fn test_default_active_tab_is_log() {
+        let panel = LogPanel::new();
+        assert_eq!(panel.active_tab, BottomPanelTab::Log);
+    }
+
+    #[test]
+    fn test_bottom_panel_tab_default_trait() {
+        assert_eq!(BottomPanelTab::default(), BottomPanelTab::Log);
+    }
+
+    #[test]
+    fn test_switch_active_tab() {
+        let mut panel = LogPanel::new();
+        assert_eq!(panel.active_tab, BottomPanelTab::Log);
+
+        panel.active_tab = BottomPanelTab::Info;
+        assert_eq!(panel.active_tab, BottomPanelTab::Info);
+
+        panel.active_tab = BottomPanelTab::Log;
+        assert_eq!(panel.active_tab, BottomPanelTab::Log);
+    }
+
+    #[test]
+    fn test_bottom_panel_tab_equality() {
+        assert_eq!(BottomPanelTab::Log, BottomPanelTab::Log);
+        assert_eq!(BottomPanelTab::Info, BottomPanelTab::Info);
+        assert_ne!(BottomPanelTab::Log, BottomPanelTab::Info);
     }
 }
