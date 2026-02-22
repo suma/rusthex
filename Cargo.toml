@@ -6,6 +6,7 @@ resolver = "2"
 name = "rusthex"
 version = "0.1.0"
 edition = "2024"
+authors = ["Shuzo Kashihara <suman.orega.warukatta@gmail.com>"]
 license = "MIT OR Apache-2.0"
 
 [dependencies]
