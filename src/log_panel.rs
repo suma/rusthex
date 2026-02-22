@@ -3,6 +3,8 @@
 use std::collections::VecDeque;
 use std::time::Instant;
 
+use gpui::ScrollHandle;
+
 /// Active tab in the bottom panel
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BottomPanelTab {
@@ -46,6 +48,10 @@ pub struct LogPanel {
     pub drag_state: Option<(f32, f32)>,
     /// Active tab in the bottom panel
     pub active_tab: BottomPanelTab,
+    /// Scroll handle for Log tab
+    pub log_scroll_handle: ScrollHandle,
+    /// Scroll handle for Info tab
+    pub info_scroll_handle: ScrollHandle,
 }
 
 impl LogPanel {
@@ -58,6 +64,8 @@ impl LogPanel {
             panel_height: DEFAULT_HEIGHT,
             drag_state: None,
             active_tab: BottomPanelTab::default(),
+            log_scroll_handle: ScrollHandle::new(),
+            info_scroll_handle: ScrollHandle::new(),
         }
     }
 

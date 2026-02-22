@@ -2134,22 +2134,42 @@ impl HexEditor {
                         // Log entries
                         .child(
                             div()
-                                .id("log-entries")
-                                .flex()
-                                .flex_col()
+                                .relative()
                                 .h(px(panel_height))
-                                .overflow_y_scroll()
-                                .children(self.log_panel.entries.iter().map(|entry| {
-                                    let color = match entry.level {
-                                        crate::log_panel::LogLevel::Info => t.text_secondary,
-                                        crate::log_panel::LogLevel::Warning => t.text_warning,
-                                        crate::log_panel::LogLevel::Error => t.text_error,
-                                    };
-                                    let ts = self.log_panel.format_timestamp(entry.timestamp);
+                                .overflow_hidden()
+                                .child(
                                     div()
-                                        .text_color(color)
-                                        .child(format!("[{}] {}", ts, entry.message))
-                                })),
+                                        .id("log-entries")
+                                        .absolute()
+                                        .inset_0()
+                                        .flex()
+                                        .flex_col()
+                                        .overflow_y_scroll()
+                                        .track_scroll(&self.log_panel.log_scroll_handle)
+                                        .children(self.log_panel.entries.iter().map(|entry| {
+                                            let color = match entry.level {
+                                                crate::log_panel::LogLevel::Info => t.text_secondary,
+                                                crate::log_panel::LogLevel::Warning => t.text_warning,
+                                                crate::log_panel::LogLevel::Error => t.text_error,
+                                            };
+                                            let ts = self.log_panel.format_timestamp(entry.timestamp);
+                                            div()
+                                                .text_color(color)
+                                                .child(format!("[{}] {}", ts, entry.message))
+                                        })),
+                                )
+                                .child(
+                                    div()
+                                        .absolute()
+                                        .top_0()
+                                        .right_0()
+                                        .bottom_0()
+                                        .w(px(12.0))
+                                        .child(
+                                            Scrollbar::vertical(&self.log_panel.log_scroll_handle)
+                                                .scrollbar_show(ScrollbarShow::Scrolling),
+                                        ),
+                                ),
                         )
                 },
             )
@@ -2253,15 +2273,35 @@ impl HexEditor {
 
                     el.child(
                         div()
-                            .id("info-content")
-                            .flex()
-                            .flex_col()
+                            .relative()
                             .h(px(panel_height))
-                            .overflow_y_scroll()
-                            .child(path_row)
-                            .child(info_row("File size", file_size_str))
-                            .child(info_row("Modified", modified_str))
-                            .child(info_row("Document size", doc_size_str)),
+                            .overflow_hidden()
+                            .child(
+                                div()
+                                    .id("info-content")
+                                    .absolute()
+                                    .inset_0()
+                                    .flex()
+                                    .flex_col()
+                                    .overflow_y_scroll()
+                                    .track_scroll(&self.log_panel.info_scroll_handle)
+                                    .child(path_row)
+                                    .child(info_row("File size", file_size_str))
+                                    .child(info_row("Modified", modified_str))
+                                    .child(info_row("Document size", doc_size_str)),
+                            )
+                            .child(
+                                div()
+                                    .absolute()
+                                    .top_0()
+                                    .right_0()
+                                    .bottom_0()
+                                    .w(px(12.0))
+                                    .child(
+                                        Scrollbar::vertical(&self.log_panel.info_scroll_handle)
+                                            .scrollbar_show(ScrollbarShow::Scrolling),
+                                    ),
+                            ),
                     )
                 },
             )
