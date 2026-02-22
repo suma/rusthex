@@ -2199,26 +2199,44 @@ impl HexEditor {
                         .child(
                             div()
                                 .flex_1()
-                                .text_color(t.text_secondary)
+                                .flex()
+                                .items_center()
+                                .gap_2()
                                 .overflow_x_hidden()
-                                .child(file_path_str),
-                        )
-                        .child(
-                            div()
-                                .id("copy-path-btn")
-                                .px_1()
-                                .rounded_sm()
-                                .cursor_pointer()
-                                .text_color(t.text_muted)
-                                .hover(|s| s.text_color(t.accent_primary))
-                                .child("Copy")
-                                .on_click(cx.listener(move |_this, _event, _window, cx| {
-                                    cx.write_to_clipboard(
-                                        gpui::ClipboardItem::new_string(
-                                            path_for_copy.to_string(),
-                                        ),
-                                    );
-                                })),
+                                .child(
+                                    div()
+                                        .text_color(t.text_secondary)
+                                        .flex_shrink_0()
+                                        .child(file_path_str),
+                                )
+                                .child(
+                                    div()
+                                        .id("copy-path-btn")
+                                        .px_1p5()
+                                        .rounded_sm()
+                                        .cursor_pointer()
+                                        .flex_shrink_0()
+                                        .border_1()
+                                        .border_color(t.border_secondary)
+                                        .text_color(t.text_muted)
+                                        .hover(|s| {
+                                            s.bg(t.bg_hover)
+                                                .border_color(t.border_primary)
+                                                .text_color(t.text_primary)
+                                        })
+                                        .active(|s| {
+                                            s.bg(t.bg_selection)
+                                                .border_color(t.border_dropdown)
+                                        })
+                                        .child("Copy")
+                                        .on_click(cx.listener(move |_this, _event, _window, cx| {
+                                            cx.write_to_clipboard(
+                                                gpui::ClipboardItem::new_string(
+                                                    path_for_copy.to_string(),
+                                                ),
+                                            );
+                                        })),
+                                ),
                         );
 
                     el.child(
