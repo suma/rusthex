@@ -163,6 +163,18 @@ impl HexEditor {
         self.settings.display.bytes_per_row
     }
 
+    /// Check if any dropdown menu is open
+    fn is_dropdown_open(&self) -> bool {
+        self.encoding_dropdown_open || self.theme_dropdown_open || self.pattern_dropdown_open
+    }
+
+    /// Close all dropdown menus
+    fn close_all_dropdowns(&mut self) {
+        self.encoding_dropdown_open = false;
+        self.theme_dropdown_open = false;
+        self.pattern_dropdown_open = false;
+    }
+
     /// Get row height (cached from font metrics calculation in render())
     fn row_height(&self) -> f64 {
         self.cached_row_height as f64

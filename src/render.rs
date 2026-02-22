@@ -585,6 +585,11 @@ impl HexEditor {
                                             .id(("hex-byte", row_start * 100 + i))  // Unique ID even for empty slots
                                             .when(has_data, |div| {
                                                 div.on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event: &gpui::MouseDownEvent, _window, cx| {
+                                                    if this.is_dropdown_open() {
+                                                        this.close_all_dropdowns();
+                                                        cx.notify();
+                                                        return;
+                                                    }
                                                     this.tab_mut().cursor_position = byte_idx;
                                                     this.tab_mut().selection_start = Some(byte_idx);
                                                     this.is_dragging = true;
@@ -657,6 +662,11 @@ impl HexEditor {
                                         div()
                                             .id(("ascii-byte", byte_idx))  // Stable ID for efficient diffing
                                             .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event: &gpui::MouseDownEvent, _window, cx| {
+                                                if this.is_dropdown_open() {
+                                                    this.close_all_dropdowns();
+                                                    cx.notify();
+                                                    return;
+                                                }
                                                 this.tab_mut().cursor_position = byte_idx;
                                                 this.tab_mut().selection_start = Some(byte_idx);
                                                 this.is_dragging = true;
