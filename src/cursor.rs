@@ -197,6 +197,7 @@ impl HexEditor {
     /// Navigate back in cursor history
     pub fn navigate_back(&mut self) {
         if let Some(target) = self.tab_mut().history_back() {
+            self.clear_selection();
             self.move_position(target);
         }
     }
@@ -204,6 +205,7 @@ impl HexEditor {
     /// Navigate forward in cursor history
     pub fn navigate_forward(&mut self) {
         if let Some(target) = self.tab_mut().history_forward() {
+            self.clear_selection();
             self.move_position(target);
         }
     }
