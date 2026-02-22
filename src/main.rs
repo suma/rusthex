@@ -106,6 +106,8 @@ struct HexEditor {
     search_debounce_gen: Arc<AtomicU64>,
     // Flag: user scrolled (mouse wheel) since last programmatic scroll
     user_scrolled: bool,
+    // About dialog visibility
+    about_visible: bool,
 }
 
 impl HexEditor {
@@ -152,6 +154,7 @@ impl HexEditor {
             pattern_filter_index: None,
             search_debounce_gen: Arc::new(AtomicU64::new(0)),
             user_scrolled: false,
+            about_visible: false,
         }
     }
 
@@ -618,6 +621,8 @@ fn build_menus() -> Vec<Menu> {
         Menu {
             name: SharedString::from("rusthex"),
             items: vec![
+                MenuItem::action("About rusthex", actions::About),
+                MenuItem::separator(),
                 MenuItem::os_submenu("Services", SystemMenuType::Services),
                 MenuItem::separator(),
                 MenuItem::action("Quit rusthex", actions::Quit),

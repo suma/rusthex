@@ -2451,6 +2451,85 @@ impl HexEditor {
     }
 
     /// Compare tab selection dialog (modal overlay)
+    pub(crate) fn render_about_dialog(&self, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+        let t = &self.theme;
+        div()
+            .id("about-overlay")
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .bg(t.modal_overlay)
+            .flex()
+            .items_center()
+            .justify_center()
+            // Consume all mouse events on the overlay to prevent click-through
+            .on_mouse_down(
+                gpui::MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    this.about_visible = false;
+                    cx.notify();
+                }),
+            )
+            .child(
+                div()
+                    .id("about-dialog")
+                    .bg(t.bg_elevated)
+                    .border_1()
+                    .border_color(t.accent_primary)
+                    .rounded_md()
+                    .p_6()
+                    .min_w(px(280.0))
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap_2()
+                    // Stop clicks inside the dialog from closing it via the overlay handler
+                    .on_mouse_down(gpui::MouseButton::Left, |_event, _window, _cx| {})
+                    .child(
+                        div()
+                            .text_xl()
+                            .text_color(t.accent_primary)
+                            .child("rusthex"),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(t.text_muted)
+                            .child(format!("v{}", env!("CARGO_PKG_VERSION"))),
+                    )
+                    .child(div().h(px(8.0)))
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(t.text_primary)
+                            .child("A hex editor built with Rust and gpui"),
+                    )
+                    .child(div().h(px(12.0)))
+                    .child(
+                        div()
+                            .id("about-close-btn")
+                            .px_4()
+                            .py_1()
+                            .rounded_md()
+                            .bg(t.accent_primary)
+                            .text_color(t.bg_primary)
+                            .text_sm()
+                            .cursor_pointer()
+                            .hover(|h| h.bg(t.accent_secondary))
+                            .on_mouse_down(
+                                gpui::MouseButton::Left,
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.about_visible = false;
+                                    cx.notify();
+                                }),
+                            )
+                            .child("Close"),
+                    ),
+            )
+    }
+
     pub(crate) fn render_compare_dialog(&self, cx: &mut gpui::Context<Self>) -> impl IntoElement {
         let t = &self.theme;
         let t_accent_primary = t.accent_primary;
@@ -2954,6 +3033,10 @@ impl Render for HexEditor {
                 this.prev_search_result();
                 cx.notify();
             }))
+            .on_action(cx.listener(|this, _: &actions::About, _window, cx| {
+                this.about_visible = !this.about_visible;
+                cx.notify();
+            }))
             .on_key_down(cx.listener(keyboard::handle_key_event))
             .on_drop(cx.listener(|editor, paths: &ExternalPaths, _window, cx| {
                 editor.handle_file_drop(paths, cx);
@@ -2992,6 +3075,9 @@ impl Render for HexEditor {
             })
             .when(self.compare.selection_visible, |parent| {
                 parent.child(self.render_compare_dialog(cx))
+            })
+            .when(self.about_visible, |parent| {
+                parent.child(self.render_about_dialog(cx))
             })
     }
 }

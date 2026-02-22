@@ -166,8 +166,10 @@ fn handle_special_keys(
 
     match event.keystroke.key.as_str() {
         "escape" => {
-            // Priority: pattern dropdown > bookmark comment editing > compare selection dialog > compare mode > search
-            if editor.pattern_dropdown_open {
+            // Priority: about dialog > pattern dropdown > bookmark comment editing > compare selection dialog > compare mode > search
+            if editor.about_visible {
+                editor.about_visible = false;
+            } else if editor.pattern_dropdown_open {
                 editor.pattern_dropdown_open = false;
                 editor.pattern_filter_query.clear();
                 editor.pattern_filter_index = None;

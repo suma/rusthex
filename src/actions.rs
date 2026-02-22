@@ -33,6 +33,8 @@ actions!(
         CycleEncoding,
         ToggleLogPanel,
         ClearLog,
+        // Application
+        About,
         // Navigation
         NavigateBack,
         NavigateForward,
