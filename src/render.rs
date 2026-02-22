@@ -1781,143 +1781,7 @@ impl HexEditor {
                         )
                     })
                     .child(
-                        // Text encoding dropdown selector
-                        div()
-                            .relative()
-                            .flex()
-                            .gap_1()
-                            .items_center()
-                            .child(
-                                div()
-                                    .text_color(t.text_muted)
-                                    .child("Enc:")
-                            )
-                            .child(
-                                // Dropdown button
-                                div()
-                                    .id("encoding-dropdown-button")
-                                    .px_2()
-                                    .rounded_sm()
-                                    .cursor_pointer()
-                                    .bg(t.bg_hover)
-                                    .text_color(t.text_primary)
-                                    .hover(|h| h.bg(t_bg_hover_tertiary))
-                                    .on_mouse_down(gpui::MouseButton::Left, cx.listener(|this, _event: &gpui::MouseDownEvent, _window, cx| {
-                                        this.encoding_dropdown_open = !this.encoding_dropdown_open;
-                                        this.theme_dropdown_open = false;
-                                        cx.notify();
-                                    }))
-                                    .child(format!("{} \u{25BC}", self.text_encoding.label()))
-                            )
-                            // Dropdown menu (shown when open)
-                            .when(self.encoding_dropdown_open, |el| {
-                                el.child(
-                                    div()
-                                        .absolute()
-                                        .bottom(px(24.0))
-                                        .left_0()
-                                        .bg(t_bg_elevated)
-                                        .border_1()
-                                        .border_color(t_border_dropdown)
-                                        .rounded_md()
-                                        .shadow_lg()
-                                        .py_1()
-                                        .min_w(px(100.0))
-                                        .children(TextEncoding::all().iter().map(|enc| {
-                                            let is_selected = self.text_encoding == *enc;
-                                            let enc_copy = *enc;
-                                            div()
-                                                .id(SharedString::from(format!("enc-{}", enc.label())))
-                                                .px_3()
-                                                .py_1()
-                                                .cursor_pointer()
-                                                .bg(if is_selected { t_accent_primary } else { t_bg_elevated })
-                                                .text_color(if is_selected { t_text_on_accent } else { t_text_secondary })
-                                                .hover(|h| h.bg(if is_selected { t_accent_primary } else { t_bg_hover_secondary }))
-                                                .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event: &gpui::MouseDownEvent, _window, cx| {
-                                                    this.set_encoding(enc_copy);
-                                                    this.encoding_dropdown_open = false;
-                                                    cx.notify();
-                                                }))
-                                                .child(if is_selected {
-                                                    format!("\u{2713} {}", enc.label())
-                                                } else {
-                                                    format!("  {}", enc.label())
-                                                })
-                                        }))
-                                )
-                            })
-                    )
-                    .child(
-                        // Theme dropdown selector
-                        div()
-                            .relative()
-                            .flex()
-                            .gap_1()
-                            .items_center()
-                            .child(
-                                div()
-                                    .text_color(t.text_muted)
-                                    .child("Theme:")
-                            )
-                            .child(
-                                // Dropdown button
-                                div()
-                                    .id("theme-dropdown-button")
-                                    .px_2()
-                                    .rounded_sm()
-                                    .cursor_pointer()
-                                    .bg(t.bg_hover)
-                                    .text_color(t.text_primary)
-                                    .hover(|h| h.bg(t_bg_hover_tertiary))
-                                    .on_mouse_down(gpui::MouseButton::Left, cx.listener(|this, _event: &gpui::MouseDownEvent, _window, cx| {
-                                        this.theme_dropdown_open = !this.theme_dropdown_open;
-                                        this.encoding_dropdown_open = false;
-                                        cx.notify();
-                                    }))
-                                    .child(format!("{} \u{25BC}", current_theme_name.label()))
-                            )
-                            // Dropdown menu (shown when open)
-                            .when(self.theme_dropdown_open, |el| {
-                                el.child(
-                                    div()
-                                        .absolute()
-                                        .bottom(px(24.0))
-                                        .left_0()
-                                        .bg(t_bg_elevated)
-                                        .border_1()
-                                        .border_color(t_border_dropdown)
-                                        .rounded_md()
-                                        .shadow_lg()
-                                        .py_1()
-                                        .min_w(px(100.0))
-                                        .children(ThemeName::all().iter().map(|name| {
-                                            let is_selected = *name == current_theme_name;
-                                            let name_copy = *name;
-                                            div()
-                                                .id(SharedString::from(format!("theme-{}", name.label())))
-                                                .px_3()
-                                                .py_1()
-                                                .cursor_pointer()
-                                                .bg(if is_selected { t_accent_primary } else { t_bg_elevated })
-                                                .text_color(if is_selected { t_text_on_accent } else { t_text_secondary })
-                                                .hover(|h| h.bg(if is_selected { t_accent_primary } else { t_bg_hover_secondary }))
-                                                .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event: &gpui::MouseDownEvent, _window, cx| {
-                                                    this.set_theme(name_copy);
-                                                    this.theme_dropdown_open = false;
-                                                    cx.notify();
-                                                }))
-                                                .child(if is_selected {
-                                                    format!("\u{2713} {}", name.label())
-                                                } else {
-                                                    format!("  {}", name.label())
-                                                })
-                                        }))
-                                )
-                            })
-                    )
-                    .child(
-                        // Spacer to keep layout balanced
+                        // Spacer to push remaining items right
                         div().flex_1()
                     )
             )
@@ -1997,6 +1861,140 @@ impl HexEditor {
                                 )
                         )
                     })
+                    // Spacer to push dropdowns right
+                    .child(div().flex_1())
+                    .child(
+                        // Text encoding dropdown selector
+                        div()
+                            .relative()
+                            .flex()
+                            .gap_1()
+                            .items_center()
+                            .child(
+                                div()
+                                    .text_color(t.text_muted)
+                                    .child("Enc:")
+                            )
+                            .child(
+                                div()
+                                    .id("encoding-dropdown-button")
+                                    .px_2()
+                                    .rounded_sm()
+                                    .cursor_pointer()
+                                    .bg(t.bg_hover)
+                                    .text_color(t.text_primary)
+                                    .hover(|h| h.bg(t_bg_hover_tertiary))
+                                    .on_mouse_down(gpui::MouseButton::Left, cx.listener(|this, _event: &gpui::MouseDownEvent, _window, cx| {
+                                        this.encoding_dropdown_open = !this.encoding_dropdown_open;
+                                        this.theme_dropdown_open = false;
+                                        cx.notify();
+                                    }))
+                                    .child(format!("{} \u{25BC}", self.text_encoding.label()))
+                            )
+                            .when(self.encoding_dropdown_open, |el| {
+                                el.child(
+                                    div()
+                                        .absolute()
+                                        .bottom(px(24.0))
+                                        .left_0()
+                                        .bg(t_bg_elevated)
+                                        .border_1()
+                                        .border_color(t_border_dropdown)
+                                        .rounded_md()
+                                        .shadow_lg()
+                                        .py_1()
+                                        .min_w(px(100.0))
+                                        .children(TextEncoding::all().iter().map(|enc| {
+                                            let is_selected = self.text_encoding == *enc;
+                                            let enc_copy = *enc;
+                                            div()
+                                                .id(SharedString::from(format!("enc-{}", enc.label())))
+                                                .px_3()
+                                                .py_1()
+                                                .cursor_pointer()
+                                                .bg(if is_selected { t_accent_primary } else { t_bg_elevated })
+                                                .text_color(if is_selected { t_text_on_accent } else { t_text_secondary })
+                                                .hover(|h| h.bg(if is_selected { t_accent_primary } else { t_bg_hover_secondary }))
+                                                .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event: &gpui::MouseDownEvent, _window, cx| {
+                                                    this.set_encoding(enc_copy);
+                                                    this.encoding_dropdown_open = false;
+                                                    cx.notify();
+                                                }))
+                                                .child(if is_selected {
+                                                    format!("\u{2713} {}", enc.label())
+                                                } else {
+                                                    format!("  {}", enc.label())
+                                                })
+                                        }))
+                                )
+                            })
+                    )
+                    .child(
+                        // Theme dropdown selector
+                        div()
+                            .relative()
+                            .flex()
+                            .gap_1()
+                            .items_center()
+                            .child(
+                                div()
+                                    .text_color(t.text_muted)
+                                    .child("Theme:")
+                            )
+                            .child(
+                                div()
+                                    .id("theme-dropdown-button")
+                                    .px_2()
+                                    .rounded_sm()
+                                    .cursor_pointer()
+                                    .bg(t.bg_hover)
+                                    .text_color(t.text_primary)
+                                    .hover(|h| h.bg(t_bg_hover_tertiary))
+                                    .on_mouse_down(gpui::MouseButton::Left, cx.listener(|this, _event: &gpui::MouseDownEvent, _window, cx| {
+                                        this.theme_dropdown_open = !this.theme_dropdown_open;
+                                        this.encoding_dropdown_open = false;
+                                        cx.notify();
+                                    }))
+                                    .child(format!("{} \u{25BC}", current_theme_name.label()))
+                            )
+                            .when(self.theme_dropdown_open, |el| {
+                                el.child(
+                                    div()
+                                        .absolute()
+                                        .bottom(px(24.0))
+                                        .left_0()
+                                        .bg(t_bg_elevated)
+                                        .border_1()
+                                        .border_color(t_border_dropdown)
+                                        .rounded_md()
+                                        .shadow_lg()
+                                        .py_1()
+                                        .min_w(px(100.0))
+                                        .children(ThemeName::all().iter().map(|name| {
+                                            let is_selected = *name == current_theme_name;
+                                            let name_copy = *name;
+                                            div()
+                                                .id(SharedString::from(format!("theme-{}", name.label())))
+                                                .px_3()
+                                                .py_1()
+                                                .cursor_pointer()
+                                                .bg(if is_selected { t_accent_primary } else { t_bg_elevated })
+                                                .text_color(if is_selected { t_text_on_accent } else { t_text_secondary })
+                                                .hover(|h| h.bg(if is_selected { t_accent_primary } else { t_bg_hover_secondary }))
+                                                .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event: &gpui::MouseDownEvent, _window, cx| {
+                                                    this.set_theme(name_copy);
+                                                    this.theme_dropdown_open = false;
+                                                    cx.notify();
+                                                }))
+                                                .child(if is_selected {
+                                                    format!("\u{2713} {}", name.label())
+                                                } else {
+                                                    format!("  {}", name.label())
+                                                })
+                                        }))
+                                )
+                            })
+                    )
             )
     }
 
