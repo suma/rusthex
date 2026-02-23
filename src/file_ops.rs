@@ -379,7 +379,9 @@ impl HexEditor {
         let timeout_secs = self.settings.analyze.timeout;
 
         // Run the blocking command on a background thread to keep the UI responsive
-        let (tx, rx) = std::sync::mpsc::channel::<Result<std::process::Output, String>>();
+        let (tx, rx) =
+            std::sync::mpsc::channel::<Result<(std::process::Output, std::time::Duration), String>>();
+        let cmd_start = std::time::Instant::now();
         std::thread::spawn(move || {
             let result = std::process::Command::new(&args[0])
                 .args(&args[1..])
@@ -423,7 +425,8 @@ impl HexEditor {
                         }
                     }
                 });
-            let _ = tx.send(result);
+            let elapsed = cmd_start.elapsed();
+            let _ = tx.send(result.map(|output| (output, elapsed)));
         });
 
         cx.spawn(async move |entity, cx| {
@@ -442,14 +445,17 @@ impl HexEditor {
 
             let _ = entity.update(cx, |editor, cx| {
                 match result {
-                    Ok(output) if output.status.success() => {
+                    Ok((output, elapsed)) if output.status.success() => {
                         let stdout = String::from_utf8_lossy(&output.stdout)
                             .trim()
                             .to_string();
                         if stdout.is_empty() {
                             editor.log(
                                 crate::log_panel::LogLevel::Info,
-                                "Analysis complete (no output)",
+                                format!(
+                                    "Analysis complete (no output) [{:.2}s]",
+                                    elapsed.as_secs_f64()
+                                ),
                             );
                         } else {
                             for line in stdout.lines() {
@@ -458,14 +464,31 @@ impl HexEditor {
                                     line.to_string(),
                                 );
                             }
+                            editor.log(
+                                crate::log_panel::LogLevel::Info,
+                                format!(
+                                    "Analysis complete [{:.2}s]",
+                                    elapsed.as_secs_f64()
+                                ),
+                            );
                         }
                     }
-                    Ok(output) => {
+                    Ok((output, elapsed)) => {
                         let code = output.status.code().unwrap_or(-1);
-                        eprintln!("Analyze command exited with code {}", code);
+                        editor.log(
+                            crate::log_panel::LogLevel::Error,
+                            format!(
+                                "Analyze command exited with code {} [{:.2}s]",
+                                code,
+                                elapsed.as_secs_f64()
+                            ),
+                        );
                     }
                     Err(e) => {
-                        eprintln!("Analyze error: {}", e);
+                        editor.log(
+                            crate::log_panel::LogLevel::Error,
+                            format!("Analyze error: {}", e),
+                        );
                     }
                 }
                 cx.notify();
