@@ -42,5 +42,7 @@ actions!(
         // Search
         FindNext,
         FindPrev,
+        // Analyze
+        AnalyzeSelection,
     ]
 );

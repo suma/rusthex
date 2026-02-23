@@ -541,6 +541,8 @@ fn main() {
             // Search
             KeyBinding::new("f3", actions::FindNext, None),
             KeyBinding::new("shift-f3", actions::FindPrev, None),
+            // Analyze
+            KeyBinding::new("cmd-e", actions::AnalyzeSelection, None),
         ]);
 
         // Set native menu bar (works on macOS; on Windows, stored but not rendered by gpui)
@@ -674,6 +676,8 @@ fn build_menus() -> Vec<Menu> {
                 MenuItem::os_action("Select All", actions::SelectAll, OsAction::SelectAll),
                 MenuItem::separator(),
                 MenuItem::action("Toggle Insert Mode", actions::ToggleInsertMode),
+                MenuItem::separator(),
+                MenuItem::action("Analyze Selection", actions::AnalyzeSelection),
             ],
         },
         Menu {

@@ -108,6 +108,28 @@ impl Default for PatternSettings {
     }
 }
 
+/// Analyze selection settings
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AnalyzeSettings {
+    /// External command to pipe selection context to (e.g., "llm -m gpt-4o")
+    pub command: String,
+    /// Prompt text prepended before the JSON input
+    pub prompt: String,
+    /// Timeout in seconds (default: 30)
+    pub timeout: u64,
+}
+
+impl Default for AnalyzeSettings {
+    fn default() -> Self {
+        Self {
+            command: String::new(),
+            prompt: "Parse next data:".to_string(),
+            timeout: 30,
+        }
+    }
+}
+
 /// Application settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -120,6 +142,8 @@ pub struct Settings {
     pub window: WindowSettings,
     /// Pattern language settings
     pub pattern: PatternSettings,
+    /// Analyze selection settings
+    pub analyze: AnalyzeSettings,
 }
 
 impl Default for Settings {
@@ -129,6 +153,7 @@ impl Default for Settings {
             editor: EditorSettings::default(),
             window: WindowSettings::default(),
             pattern: PatternSettings::default(),
+            analyze: AnalyzeSettings::default(),
         }
     }
 }
@@ -195,6 +220,14 @@ impl Settings {
         }
         if self.window.height < 300 {
             self.window.height = 600;
+        }
+
+        // Trim analyze command whitespace
+        self.analyze.command = self.analyze.command.trim().to_string();
+
+        // Validate analyze timeout (1-600 seconds)
+        if self.analyze.timeout == 0 || self.analyze.timeout > 600 {
+            self.analyze.timeout = 30;
         }
     }
 }

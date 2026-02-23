@@ -52,6 +52,8 @@ pub struct EditorTab {
     // Cursor navigation history (back/forward)
     pub cursor_history: Vec<usize>,
     pub cursor_history_index: usize,
+    // Cached file type string from `file` command detection
+    pub file_type: Option<String>,
 }
 
 impl EditorTab {
@@ -86,6 +88,7 @@ impl EditorTab {
             scroll_logical_row: None,
             cursor_history: Vec::new(),
             cursor_history_index: 0,
+            file_type: None,
         }
     }
 

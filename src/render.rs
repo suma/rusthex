@@ -619,6 +619,8 @@ impl HexEditor {
                                         .menu_with_enable("Save Selection As...", Box::new(actions::SaveSelectionAs), has_selection)
                                         .menu_with_enable("Open Selection in New Tab", Box::new(actions::OpenSelectionInNewTab), has_selection)
                                         .separator()
+                                        .menu_with_enable("Analyze Selection", Box::new(actions::AnalyzeSelection), has_selection)
+                                        .separator()
                                         .menu("Select All", Box::new(actions::SelectAll))
                                         .separator()
                                         .menu("Toggle Inspector", Box::new(actions::ToggleInspector))
@@ -3299,6 +3301,9 @@ impl Render for HexEditor {
             .on_action(cx.listener(|this, _: &actions::FindPrev, _window, cx| {
                 this.prev_search_result();
                 cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &actions::AnalyzeSelection, _window, cx| {
+                this.analyze_selection(cx);
             }))
             .on_action(cx.listener(|this, _: &actions::About, _window, cx| {
                 this.about_visible = !this.about_visible;

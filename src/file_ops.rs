@@ -287,6 +287,193 @@ impl HexEditor {
         }
     }
 
+    /// Analyze the current selection by piping context to an external command
+    pub fn analyze_selection(&mut self, cx: &mut Context<Self>) {
+        let command_str = self.settings.analyze.command.clone();
+        if command_str.is_empty() {
+            self.log(
+                crate::log_panel::LogLevel::Warning,
+                "Set [analyze] command in config.toml to enable selection analysis",
+            );
+            cx.notify();
+            return;
+        }
+
+        let (sel_start, sel_end) = match self.selection_range() {
+            Some(range) => range,
+            None => {
+                self.log(
+                    crate::log_panel::LogLevel::Info,
+                    "No selection to analyze",
+                );
+                cx.notify();
+                return;
+            }
+        };
+
+        let doc = &self.tab().document;
+        let doc_len = doc.len();
+        let sel_len = sel_end - sel_start + 1;
+
+        // Gather selection bytes as hex string
+        let selection_hex = (sel_start..=sel_end)
+            .filter_map(|i| doc.get_byte(i))
+            .map(|b| format!("{:02x}", b))
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        // Context: up to 256 bytes before selection
+        let ctx_before_start = sel_start.saturating_sub(256);
+        let context_before_hex = (ctx_before_start..sel_start)
+            .filter_map(|i| doc.get_byte(i))
+            .map(|b| format!("{:02x}", b))
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        // Context: up to 256 bytes after selection
+        let ctx_after_end = (sel_end + 1 + 256).min(doc_len);
+        let context_after_hex = (sel_end + 1..ctx_after_end)
+            .filter_map(|i| doc.get_byte(i))
+            .map(|b| format!("{:02x}", b))
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        let file_name = doc.file_name().unwrap_or("(unknown)").to_string();
+        let file_type = self.tab().file_type.clone().unwrap_or_default();
+
+        let json = serde_json::json!({
+            "file_name": file_name,
+            "file_size": doc_len,
+            "file_type": file_type,
+            "selection_offset": sel_start,
+            "selection_length": sel_len,
+            "selection_hex": selection_hex,
+            "context_before_hex": context_before_hex,
+            "context_after_hex": context_after_hex,
+        });
+        let prompt = &self.settings.analyze.prompt;
+        let json_str = if prompt.is_empty() {
+            json.to_string()
+        } else {
+            format!("{}\n{}", prompt, json.to_string())
+        };
+
+        self.log(
+            crate::log_panel::LogLevel::Info,
+            "Analyzing selection...",
+        );
+        self.log_panel.visible = true;
+        self.log_panel.active_tab = crate::log_panel::BottomPanelTab::Log;
+        cx.notify();
+
+        let args = shell_words(&command_str);
+        if args.is_empty() {
+            self.log(
+                crate::log_panel::LogLevel::Error,
+                "Analyze command is empty after parsing",
+            );
+            cx.notify();
+            return;
+        }
+
+        let timeout_secs = self.settings.analyze.timeout;
+
+        // Run the blocking command on a background thread to keep the UI responsive
+        let (tx, rx) = std::sync::mpsc::channel::<Result<std::process::Output, String>>();
+        std::thread::spawn(move || {
+            let result = std::process::Command::new(&args[0])
+                .args(&args[1..])
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .map_err(|e| format!("Failed to run analyze command: {}", e))
+                .and_then(|mut child| {
+                    if let Some(ref mut stdin) = child.stdin {
+                        let _ = stdin.write_all(json_str.as_bytes());
+                    }
+                    drop(child.stdin.take());
+
+                    // Poll with timeout
+                    let deadline = std::time::Instant::now()
+                        + std::time::Duration::from_secs(timeout_secs);
+                    loop {
+                        match child.try_wait() {
+                            Ok(Some(_status)) => {
+                                // Process exited; collect output
+                                return child
+                                    .wait_with_output()
+                                    .map_err(|e| format!("Failed to read output: {}", e));
+                            }
+                            Ok(None) => {
+                                // Still running
+                                if std::time::Instant::now() >= deadline {
+                                    let _ = child.kill();
+                                    let _ = child.wait();
+                                    return Err(format!(
+                                        "Analyze command timed out after {}s",
+                                        timeout_secs
+                                    ));
+                                }
+                                std::thread::sleep(std::time::Duration::from_millis(100));
+                            }
+                            Err(e) => {
+                                return Err(format!("Failed to wait for process: {}", e));
+                            }
+                        }
+                    }
+                });
+            let _ = tx.send(result);
+        });
+
+        cx.spawn(async move |entity, cx| {
+            // Poll the channel without blocking the UI thread
+            let result = loop {
+                match rx.try_recv() {
+                    Ok(r) => break r,
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {
+                        gpui::Timer::after(std::time::Duration::from_millis(100)).await;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        break Err("Analyze worker thread terminated unexpectedly".to_string());
+                    }
+                }
+            };
+
+            let _ = entity.update(cx, |editor, cx| {
+                match result {
+                    Ok(output) if output.status.success() => {
+                        let stdout = String::from_utf8_lossy(&output.stdout)
+                            .trim()
+                            .to_string();
+                        if stdout.is_empty() {
+                            editor.log(
+                                crate::log_panel::LogLevel::Info,
+                                "Analysis complete (no output)",
+                            );
+                        } else {
+                            for line in stdout.lines() {
+                                editor.log(
+                                    crate::log_panel::LogLevel::Info,
+                                    line.to_string(),
+                                );
+                            }
+                        }
+                    }
+                    Ok(output) => {
+                        let code = output.status.code().unwrap_or(-1);
+                        eprintln!("Analyze command exited with code {}", code);
+                    }
+                    Err(e) => {
+                        eprintln!("Analyze error: {}", e);
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     /// Detect file type using the `file` command and log the result
     pub fn detect_file_type(&mut self, cx: &mut Context<Self>) {
         // Check if `file` command exists on PATH
@@ -331,6 +518,7 @@ impl HexEditor {
                         let file_type = String::from_utf8_lossy(&output.stdout)
                             .trim()
                             .to_string();
+                        editor.tab_mut().file_type = Some(file_type.clone());
                         editor.log(
                             crate::log_panel::LogLevel::Info,
                             format!("{}: {}", display_name, file_type),
@@ -359,6 +547,47 @@ impl HexEditor {
     }
 }
 
+/// Split a command string into arguments, respecting single and double quotes.
+fn shell_words(input: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut chars = input.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => {
+                // Consume until closing double quote
+                for c2 in chars.by_ref() {
+                    if c2 == '"' {
+                        break;
+                    }
+                    current.push(c2);
+                }
+            }
+            '\'' => {
+                // Consume until closing single quote
+                for c2 in chars.by_ref() {
+                    if c2 == '\'' {
+                        break;
+                    }
+                    current.push(c2);
+                }
+            }
+            ' ' | '\t' => {
+                if !current.is_empty() {
+                    args.push(std::mem::take(&mut current));
+                }
+            }
+            _ => {
+                current.push(c);
+            }
+        }
+    }
+    if !current.is_empty() {
+        args.push(current);
+    }
+    args
+}
+
 /// Search PATH for the `file` command, returning its full path if found.
 /// On Unix, looks for "file". On Windows, looks for "file.exe".
 fn find_file_command() -> Option<PathBuf> {
@@ -372,4 +601,52 @@ fn find_file_command() -> Option<PathBuf> {
         let candidate = dir.join(FILE_NAME);
         candidate.is_file().then_some(candidate)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_shell_words_basic() {
+        assert_eq!(shell_words("llm -m gpt-4o"), vec!["llm", "-m", "gpt-4o"]);
+    }
+
+    #[test]
+    fn test_shell_words_double_quotes() {
+        assert_eq!(
+            shell_words(r#"echo "hello world" foo"#),
+            vec!["echo", "hello world", "foo"]
+        );
+    }
+
+    #[test]
+    fn test_shell_words_single_quotes() {
+        assert_eq!(
+            shell_words("echo 'hello world' foo"),
+            vec!["echo", "hello world", "foo"]
+        );
+    }
+
+    #[test]
+    fn test_shell_words_empty() {
+        assert!(shell_words("").is_empty());
+        assert!(shell_words("   ").is_empty());
+    }
+
+    #[test]
+    fn test_shell_words_extra_whitespace() {
+        assert_eq!(
+            shell_words("  cmd   arg1   arg2  "),
+            vec!["cmd", "arg1", "arg2"]
+        );
+    }
+
+    #[test]
+    fn test_shell_words_mixed_quotes() {
+        assert_eq!(
+            shell_words(r#"cmd "arg 1" 'arg 2' arg3"#),
+            vec!["cmd", "arg 1", "arg 2", "arg3"]
+        );
+    }
 }
