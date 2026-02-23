@@ -97,6 +97,13 @@ A modern hex editor built with Rust and [gpui](https://www.gpui.rs/), featuring 
   - Leaf values displayed with type, value, and offset
 - **Include Support**: `#include` directives resolved from the hexpat directory
 
+### Analyze Selection
+- **External Command Integration**: Pipe selected bytes to any external command for analysis
+- **LLM Support**: Use with `ollama`, `llm`, or any CLI tool that reads from stdin
+- **Configurable Prompt**: Customize the prompt text prepended to the JSON input
+- **Non-blocking**: Runs on a background thread with configurable timeout
+- **Access**: Cmd+E, Edit menu, or right-click context menu
+
 ### Color Themes
 - **Built-in Themes**: Dark (default), Light, Monokai
 - **Switch Themes**: Click "Theme: Dark ▼" in status bar to select
@@ -135,6 +142,11 @@ hexpat_dir = "/path/to/hexpat/patterns"    # Directory containing .hexpat files
 include_dirs = [                            # Additional directories for #include / import resolution
     "/path/to/hexpat/includes",
 ]
+
+[analyze]
+command = "ollama run deepseek-coder-v2:16b -- --system 'You are a reverse engineer. Analyze binary data concisely.'"
+prompt = "Please parse the following binary data and provide a brief summary of no more than 0.5KB"
+timeout = 60
 ```
 
 ## Keyboard Shortcuts
@@ -194,6 +206,8 @@ include_dirs = [                            # Additional directories for #includ
 | - | Decrease bitmap width |
 | **Pattern** ||
 | Ctrl+P / Cmd+P | Toggle pattern panel |
+| **Analyze** ||
+| Cmd+E | Analyze selection with external command |
 
 ## Installation
 
