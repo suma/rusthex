@@ -586,6 +586,13 @@ fn main() {
                     let _ = editor; // suppress unused warning
                 });
 
+                // Detect file type and log the result
+                entity.update(cx, |editor, cx| {
+                    if editor.tab().document.len() > 0 {
+                        editor.detect_file_type(cx);
+                    }
+                });
+
                 // Set initial focus
                 entity.update(cx, |_editor, cx| {
                     cx.focus_self(window);

@@ -164,6 +164,7 @@ impl HexEditor {
                         match editor.open_file_in_new_tab(path.clone()) {
                             Ok(_) => {
                                 editor.log(crate::log_panel::LogLevel::Info, format!("Opened in new tab: {}", path.display()));
+                                editor.detect_file_type(cx);
                             }
                             Err(e) => {
                                 editor.log(crate::log_panel::LogLevel::Error, format!("Error: {}", e));
@@ -276,6 +277,7 @@ impl HexEditor {
             match self.open_file_in_new_tab(path.clone()) {
                 Ok(_) => {
                     self.log(crate::log_panel::LogLevel::Info, format!("Opened: {}", path.display()));
+                    self.detect_file_type(cx);
                 }
                 Err(e) => {
                     self.log(crate::log_panel::LogLevel::Error, format!("Error: {}", e));
@@ -284,4 +286,90 @@ impl HexEditor {
             cx.notify();
         }
     }
+
+    /// Detect file type using the `file` command and log the result
+    pub fn detect_file_type(&mut self, cx: &mut Context<Self>) {
+        // Check if `file` command exists on PATH
+        if find_file_command().is_none() {
+            return;
+        }
+
+        let len = self.tab().document.len();
+        if len == 0 {
+            return;
+        }
+        let size = len.min(1024);
+        let bytes = match self.tab().document.get_slice(0..size) {
+            Some(b) => b,
+            None => return,
+        };
+        let display_name = self
+            .tab()
+            .document
+            .file_name()
+            .unwrap_or("(stdin)")
+            .to_string();
+
+        cx.spawn(async move |entity, cx| {
+            let result = std::process::Command::new("file")
+                .args(["-b", "-"])
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .and_then(|mut child| {
+                    if let Some(ref mut stdin) = child.stdin {
+                        let _ = stdin.write_all(&bytes);
+                    }
+                    drop(child.stdin.take()); // close stdin
+                    child.wait_with_output()
+                });
+
+            let _ = entity.update(cx, |editor, cx| {
+                match result {
+                    Ok(output) if output.status.success() => {
+                        let file_type = String::from_utf8_lossy(&output.stdout)
+                            .trim()
+                            .to_string();
+                        editor.log(
+                            crate::log_panel::LogLevel::Info,
+                            format!("{}: {}", display_name, file_type),
+                        );
+                    }
+                    Ok(output) => {
+                        let stderr = String::from_utf8_lossy(&output.stderr)
+                            .trim()
+                            .to_string();
+                        editor.log(
+                            crate::log_panel::LogLevel::Warning,
+                            format!("file command failed: {}", stderr),
+                        );
+                    }
+                    Err(e) => {
+                        editor.log(
+                            crate::log_panel::LogLevel::Warning,
+                            format!("file command not available: {}", e),
+                        );
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+}
+
+/// Search PATH for the `file` command, returning its full path if found.
+/// On Unix, looks for "file". On Windows, looks for "file.exe".
+fn find_file_command() -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    const FILE_NAME: &str = "file.exe";
+    #[cfg(not(target_os = "windows"))]
+    const FILE_NAME: &str = "file";
+
+    let paths = std::env::var_os("PATH")?;
+    std::env::split_paths(&paths).find_map(|dir| {
+        let candidate = dir.join(FILE_NAME);
+        candidate.is_file().then_some(candidate)
+    })
 }

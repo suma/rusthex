@@ -301,6 +301,7 @@ impl HexEditor {
                                 crate::log_panel::LogLevel::Info,
                                 format!("Opened {} byte(s) in new tab", byte_count),
                             );
+                            editor.detect_file_type(cx);
                             cx.notify();
                         });
                     }
@@ -320,6 +321,7 @@ impl HexEditor {
                 crate::log_panel::LogLevel::Info,
                 format!("Opened {} byte(s) in new tab", byte_count),
             );
+            self.detect_file_type(cx);
         }
     }
 }
