@@ -374,7 +374,7 @@ Build the binary once:
 cargo build -p rusthex-mcp --release
 ```
 
-Then add the following to your Claude Code MCP settings (`.claude/settings.json` or project-level `.mcp.json`):
+Then add the following to `.claude/mcp.json` in the project root:
 
 ```json
 {
@@ -388,6 +388,12 @@ Then add the following to your Claude Code MCP settings (`.claude/settings.json`
 ```
 
 Replace the path with the actual absolute path to the built binary.
+
+Start Claude Code with MCP enabled:
+
+```bash
+claude --mcp-config=.claude/mcp.json
+```
 
 ### Available Tools
 
