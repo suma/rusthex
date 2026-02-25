@@ -2,6 +2,8 @@ use std::fs;
 use std::io::{Read, Seek, SeekFrom, Write};
 use memchr::memmem;
 use memmap2::Mmap;
+use sha2::{Sha256, Digest as Sha2Digest};
+use md5::Md5;
 use rmcp::{
     ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
@@ -79,6 +81,44 @@ pub struct HexPatchParams {
 pub struct FileTypeParams {
     #[schemars(description = "Path to the binary file")]
     pub path: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct HexStringsParams {
+    #[schemars(description = "Path to the binary file")]
+    pub path: String,
+    #[schemars(description = "Byte offset to start reading from (default: 0)")]
+    pub offset: Option<u64>,
+    #[schemars(description = "Number of bytes to read (default: entire file, max: 10MB)")]
+    pub length: Option<usize>,
+    #[schemars(description = "Minimum string length to extract (default: 4)")]
+    pub min_length: Option<usize>,
+    #[schemars(description = "Encoding: \"ascii\" or \"utf8\" (default: \"ascii\")")]
+    pub encoding: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct HexChecksumParams {
+    #[schemars(description = "Path to the binary file")]
+    pub path: String,
+    #[schemars(description = "Byte offset to start reading from (default: 0)")]
+    pub offset: Option<u64>,
+    #[schemars(description = "Number of bytes to compute checksum over (default: entire file)")]
+    pub length: Option<usize>,
+    #[schemars(description = "Algorithm: \"all\", \"md5\", \"sha1\", \"sha256\", \"crc32\" (default: \"all\")")]
+    pub algorithm: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct HexEntropyParams {
+    #[schemars(description = "Path to the binary file")]
+    pub path: String,
+    #[schemars(description = "Byte offset to start reading from (default: 0)")]
+    pub offset: Option<u64>,
+    #[schemars(description = "Number of bytes to compute entropy over (default: entire file)")]
+    pub length: Option<usize>,
+    #[schemars(description = "Block size for per-block entropy output (default: none, only overall entropy)")]
+    pub block_size: Option<usize>,
 }
 
 // GUI-only tool parameters
@@ -485,6 +525,160 @@ impl HexServer {
                 p.path
             ))])),
         }
+    }
+
+    #[tool(description = "Extract printable strings from a binary file. Returns strings with their offsets.")]
+    async fn hex_strings(
+        &self,
+        Parameters(p): Parameters<HexStringsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        const MAX_READ: usize = 10 * 1024 * 1024; // 10 MB
+        const MAX_RESULTS: usize = 1000;
+
+        let min_length = p.min_length.unwrap_or(4).max(1);
+        let encoding = p.encoding.as_deref().unwrap_or("ascii");
+
+        let data = match (p.offset, p.length) {
+            (None, None) => {
+                let all = read_entire_file(&p.path)
+                    .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+                if all.len() > MAX_READ {
+                    all[..MAX_READ].to_vec()
+                } else {
+                    all
+                }
+            }
+            _ => {
+                let offset = p.offset.unwrap_or(0);
+                let length = p.length.unwrap_or(MAX_READ).min(MAX_READ);
+                read_bytes_from_file(&p.path, offset, length)
+                    .map_err(|e| McpError::internal_error(e.to_string(), None))?
+            }
+        };
+
+        if data.is_empty() {
+            return Ok(CallToolResult::success(vec![Content::text(
+                "No data at specified offset.",
+            )]));
+        }
+
+        let base_offset = p.offset.unwrap_or(0) as usize;
+        let strings = extract_strings(&data, min_length, encoding);
+
+        if strings.is_empty() {
+            return Ok(CallToolResult::success(vec![Content::text(
+                "No strings found.",
+            )]));
+        }
+
+        let mut output = format!("Found {} string(s):\n", strings.len().min(MAX_RESULTS));
+        for (i, (offset, s)) in strings.iter().enumerate() {
+            if i >= MAX_RESULTS {
+                output.push_str(&format!("... truncated ({} total)\n", strings.len()));
+                break;
+            }
+            output.push_str(&format!("0x{:08X}: {}\n", base_offset + offset, s));
+        }
+        Ok(CallToolResult::success(vec![Content::text(output)]))
+    }
+
+    #[tool(description = "Compute checksums/hashes of a binary file or byte range. Supports MD5, SHA-1, SHA-256, CRC32.")]
+    async fn hex_checksum(
+        &self,
+        Parameters(p): Parameters<HexChecksumParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let algorithm = p.algorithm.as_deref().unwrap_or("all");
+
+        let data = match (p.offset, p.length) {
+            (None, None) => read_entire_file(&p.path)
+                .map_err(|e| McpError::internal_error(e.to_string(), None))?,
+            _ => {
+                let offset = p.offset.unwrap_or(0);
+                let length = p.length.unwrap_or_else(|| {
+                    fs::metadata(&p.path).map(|m| m.len() as usize).unwrap_or(0)
+                });
+                read_bytes_from_file(&p.path, offset, length)
+                    .map_err(|e| McpError::internal_error(e.to_string(), None))?
+            }
+        };
+
+        let mut output = format!(
+            "Checksums for {} ({} bytes):\n",
+            p.path,
+            data.len()
+        );
+        output.push_str(&compute_checksums(&data, algorithm));
+
+        Ok(CallToolResult::success(vec![Content::text(output)]))
+    }
+
+    #[tool(description = "Calculate Shannon entropy of a binary file or byte range. Entropy near 0 = uniform/empty, near 8 = random/encrypted/compressed.")]
+    async fn hex_entropy(
+        &self,
+        Parameters(p): Parameters<HexEntropyParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let data = match (p.offset, p.length) {
+            (None, None) => read_entire_file(&p.path)
+                .map_err(|e| McpError::internal_error(e.to_string(), None))?,
+            _ => {
+                let offset = p.offset.unwrap_or(0);
+                let length = p.length.unwrap_or_else(|| {
+                    fs::metadata(&p.path).map(|m| m.len() as usize).unwrap_or(0)
+                });
+                read_bytes_from_file(&p.path, offset, length)
+                    .map_err(|e| McpError::internal_error(e.to_string(), None))?
+            }
+        };
+
+        if data.is_empty() {
+            return Ok(CallToolResult::success(vec![Content::text(
+                "No data at specified offset.",
+            )]));
+        }
+
+        let overall = compute_entropy(&data);
+        let mut output = format!(
+            "Entropy: {:.4} bits/byte (range: 0.0 - 8.0)\n",
+            overall
+        );
+
+        // Classify
+        let classification = if overall < 1.0 {
+            "Very low entropy - likely uniform/empty data"
+        } else if overall < 3.0 {
+            "Low entropy - structured/repetitive data"
+        } else if overall < 5.0 {
+            "Medium entropy - mixed data (code, text)"
+        } else if overall < 7.0 {
+            "Moderately high entropy - binary data"
+        } else {
+            "High entropy - likely encrypted/compressed/random"
+        };
+        output.push_str(&format!("Assessment: {}\n", classification));
+
+        // Per-block entropy if block_size specified
+        if let Some(block_size) = p.block_size {
+            if block_size > 0 && data.len() > block_size {
+                let base_offset = p.offset.unwrap_or(0) as usize;
+                output.push_str(&format!(
+                    "\nPer-block entropy (block size: {} bytes):\n",
+                    block_size
+                ));
+                for (i, chunk) in data.chunks(block_size).enumerate() {
+                    let block_entropy = compute_entropy(chunk);
+                    let bar_len = (block_entropy * 4.0).round() as usize; // 0..32 chars
+                    let bar: String = std::iter::repeat_n('#', bar_len).collect();
+                    output.push_str(&format!(
+                        "0x{:08X}: {:.4} |{:<32}|\n",
+                        base_offset + i * block_size,
+                        block_entropy,
+                        bar
+                    ));
+                }
+            }
+        }
+
+        Ok(CallToolResult::success(vec![Content::text(output)]))
     }
 
     // -----------------------------------------------------------------------
@@ -996,6 +1190,90 @@ fn detect_magic(data: &[u8]) -> Option<&'static str> {
     }
 }
 
+fn extract_strings(data: &[u8], min_length: usize, encoding: &str) -> Vec<(usize, String)> {
+    let mut results = Vec::new();
+    let mut current_start = 0;
+    let mut current = String::new();
+
+    let is_printable = match encoding {
+        "utf8" => |b: u8| b >= 0x20 && b != 0x7f,
+        _ => |b: u8| b.is_ascii_graphic() || b == b' ',
+    };
+
+    for (i, &byte) in data.iter().enumerate() {
+        if is_printable(byte) {
+            if current.is_empty() {
+                current_start = i;
+            }
+            current.push(byte as char);
+        } else {
+            if current.len() >= min_length {
+                results.push((current_start, current.clone()));
+            }
+            current.clear();
+        }
+    }
+    // Flush remaining
+    if current.len() >= min_length {
+        results.push((current_start, current));
+    }
+
+    results
+}
+
+fn compute_checksums(data: &[u8], algorithm: &str) -> String {
+    let mut output = String::new();
+    let all = algorithm == "all";
+
+    if all || algorithm == "crc32" {
+        let crc = crc32fast::hash(data);
+        output.push_str(&format!("CRC32:  {:08x}\n", crc));
+    }
+    if all || algorithm == "md5" {
+        let mut hasher = Md5::new();
+        hasher.update(data);
+        let result = hasher.finalize();
+        output.push_str(&format!("MD5:    {:x}\n", result));
+    }
+    if all || algorithm == "sha1" {
+        use sha1::{Sha1, Digest as Sha1Digest};
+        let mut hasher = Sha1::new();
+        hasher.update(data);
+        let result = hasher.finalize();
+        output.push_str(&format!("SHA-1:  {:x}\n", result));
+    }
+    if all || algorithm == "sha256" {
+        let mut hasher = Sha256::new();
+        hasher.update(data);
+        let result = hasher.finalize();
+        output.push_str(&format!("SHA-256: {:x}\n", result));
+    }
+
+    output
+}
+
+fn compute_entropy(data: &[u8]) -> f64 {
+    if data.is_empty() {
+        return 0.0;
+    }
+
+    let mut counts = [0u64; 256];
+    for &byte in data {
+        counts[byte as usize] += 1;
+    }
+
+    let len = data.len() as f64;
+    let mut entropy = 0.0;
+    for &count in &counts {
+        if count > 0 {
+            let p = count as f64 / len;
+            entropy -= p * p.log2();
+        }
+    }
+
+    entropy
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -1236,5 +1514,67 @@ mod tests {
         assert_eq!(detect_magic(&[0x89, b'P', b'N', b'G']), Some("PNG image"));
         assert_eq!(detect_magic(&[0xcf, 0xfa, 0xed, 0xfe]), Some("Mach-O (64-bit, reversed)"));
         assert_eq!(detect_magic(&[0x00, 0x00, 0x00]), None); // too short
+    }
+
+    #[test]
+    fn test_extract_strings_basic() {
+        let data = b"\x00\x00Hello\x00World\x00\x00";
+        let results = extract_strings(data, 4, "ascii");
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].1, "Hello");
+        assert_eq!(results[1].1, "World");
+        assert_eq!(results[0].0, 2);  // offset of "Hello"
+        assert_eq!(results[1].0, 8);  // offset of "World"
+    }
+
+    #[test]
+    fn test_extract_strings_min_length() {
+        let data = b"\x00Hi\x00Hello\x00OK\x00Test\x00";
+        // min_length=4: "Hello" and "Test" pass, "Hi" and "OK" do not
+        let results = extract_strings(data, 4, "ascii");
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].1, "Hello");
+        assert_eq!(results[1].1, "Test");
+    }
+
+    #[test]
+    fn test_compute_checksums_known() {
+        // MD5 of empty string is d41d8cd98f00b204e9800998ecf8427e
+        let data = b"";
+        let output = compute_checksums(data, "md5");
+        assert!(output.contains("d41d8cd98f00b204e9800998ecf8427e"));
+
+        // CRC32 of "123456789" is cbf43926
+        let data = b"123456789";
+        let output = compute_checksums(data, "crc32");
+        assert!(output.contains("cbf43926"));
+    }
+
+    #[test]
+    fn test_compute_entropy_uniform() {
+        // All same byte -> entropy = 0
+        let data = vec![0xAA; 1024];
+        let entropy = compute_entropy(&data);
+        assert!((entropy - 0.0).abs() < 0.001, "Expected ~0, got {}", entropy);
+    }
+
+    #[test]
+    fn test_compute_entropy_random() {
+        // Each byte value appears equally (4 times each for 256*4=1024 bytes)
+        let mut data = Vec::new();
+        for _ in 0..4 {
+            for b in 0u8..=255 {
+                data.push(b);
+            }
+        }
+        let entropy = compute_entropy(&data);
+        assert!((entropy - 8.0).abs() < 0.001, "Expected ~8.0, got {}", entropy);
+    }
+
+    #[test]
+    fn test_compute_entropy_empty() {
+        let data: Vec<u8> = vec![];
+        let entropy = compute_entropy(&data);
+        assert_eq!(entropy, 0.0);
     }
 }
