@@ -25,6 +25,7 @@ actions!(
         CopyAsAscii,
         CopyAsHexString,
         CopyAsCArray,
+        CopyAsPython,
         // View
         ToggleSearch,
         ToggleInspector,

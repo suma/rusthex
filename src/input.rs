@@ -212,6 +212,19 @@ impl HexEditor {
         }
     }
 
+    /// Copy selected bytes as Python bytes literal (e.g. b'\x4a\x6f\x68\x6e')
+    pub fn copy_as_python(&mut self, cx: &mut Context<Self>) {
+        if let Some((_start, bytes)) = self.get_selected_bytes() {
+            let items: String = bytes
+                .iter()
+                .map(|b| format!("\\x{:02x}", b))
+                .collect();
+            let python = format!("b'{}'", items);
+            cx.write_to_clipboard(ClipboardItem::new_string(python));
+            self.log(crate::log_panel::LogLevel::Info, format!("Copied {} byte(s) as Python bytes", bytes.len()));
+        }
+    }
+
     /// Paste hex string from clipboard
     pub fn paste_from_clipboard(&mut self, cx: &mut Context<Self>) {
         let clipboard = cx.read_from_clipboard();

@@ -672,6 +672,7 @@ fn build_menus() -> Vec<Menu> {
                 MenuItem::action("Copy as ASCII Text", actions::CopyAsAscii),
                 MenuItem::action("Copy as Hex String", actions::CopyAsHexString),
                 MenuItem::action("Copy as C Array", actions::CopyAsCArray),
+                MenuItem::action("Copy as Python", actions::CopyAsPython),
                 MenuItem::os_action("Paste", actions::Paste, OsAction::Paste),
                 MenuItem::os_action("Select All", actions::SelectAll, OsAction::SelectAll),
                 MenuItem::separator(),

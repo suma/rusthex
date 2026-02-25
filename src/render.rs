@@ -614,6 +614,7 @@ impl HexEditor {
                                         .menu("Copy as ASCII Text", Box::new(actions::CopyAsAscii))
                                         .menu("Copy as Hex String", Box::new(actions::CopyAsHexString))
                                         .menu("Copy as C Array", Box::new(actions::CopyAsCArray))
+                                        .menu("Copy as Python", Box::new(actions::CopyAsPython))
                                         .menu("Paste", Box::new(actions::Paste))
                                         .separator()
                                         .menu_with_enable("Save Selection As...", Box::new(actions::SaveSelectionAs), has_selection)
@@ -3232,6 +3233,9 @@ impl Render for HexEditor {
             }))
             .on_action(cx.listener(|this, _: &actions::CopyAsCArray, _window, cx| {
                 this.copy_as_c_array(cx);
+            }))
+            .on_action(cx.listener(|this, _: &actions::CopyAsPython, _window, cx| {
+                this.copy_as_python(cx);
             }))
             .on_action(cx.listener(|this, _: &actions::Paste, _window, cx| {
                 this.paste_from_clipboard(cx);
