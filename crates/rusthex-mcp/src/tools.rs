@@ -75,6 +75,12 @@ pub struct HexPatchParams {
     pub insert_data: Option<String>,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct FileTypeParams {
+    #[schemars(description = "Path to the binary file")]
+    pub path: String,
+}
+
 // GUI-only tool parameters
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -448,6 +454,56 @@ impl HexServer {
         }
 
         Ok(CallToolResult::success(vec![Content::text(msg)]))
+    }
+
+    #[tool(description = "Detect file type using the `file` command. Reads the first 1024 bytes and pipes them to `file -b -` for identification.")]
+    async fn detect_file_type(
+        &self,
+        Parameters(p): Parameters<FileTypeParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let data = read_bytes_from_file(&p.path, 0, 1024)
+            .map_err(|e| McpError::internal_error(format!("Cannot read file: {}", e), None))?;
+
+        if data.is_empty() {
+            return Ok(CallToolResult::success(vec![Content::text(
+                "Empty file.",
+            )]));
+        }
+
+        let result = std::process::Command::new("file")
+            .args(["-b", "-"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .and_then(|mut child| {
+                if let Some(ref mut stdin) = child.stdin {
+                    let _ = stdin.write_all(&data);
+                }
+                drop(child.stdin.take());
+                child.wait_with_output()
+            });
+
+        match result {
+            Ok(output) if output.status.success() => {
+                let file_type = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                Ok(CallToolResult::success(vec![Content::text(format!(
+                    "{}: {}",
+                    p.path, file_type
+                ))]))
+            }
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                Err(McpError::internal_error(
+                    format!("file command failed: {}", stderr),
+                    None,
+                ))
+            }
+            Err(e) => Err(McpError::internal_error(
+                format!("file command not available: {}", e),
+                None,
+            )),
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -1125,6 +1181,46 @@ mod tests {
         assert_eq!(data, b"Hello Rust!");
 
         let _ = fs::remove_file(format!("{}.bak", path));
+    }
+
+    #[test]
+    fn test_detect_file_type_via_command() {
+        // Create a temp file with PNG-like header
+        let mut tmp = NamedTempFile::new().unwrap();
+        tmp.write_all(b"Hello, this is a plain text file.\n").unwrap();
+        tmp.flush().unwrap();
+        let path = tmp.path().to_str().unwrap();
+
+        let data = read_bytes_from_file(path, 0, 1024).unwrap();
+        let result = std::process::Command::new("file")
+            .args(["-b", "-"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .and_then(|mut child| {
+                if let Some(ref mut stdin) = child.stdin {
+                    let _ = stdin.write_all(&data);
+                }
+                drop(child.stdin.take());
+                child.wait_with_output()
+            });
+
+        match result {
+            Ok(output) if output.status.success() => {
+                let file_type = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                assert!(
+                    file_type.to_lowercase().contains("text"),
+                    "Expected 'text' in file type, got: {}",
+                    file_type
+                );
+            }
+            Ok(_) => panic!("file command failed"),
+            Err(e) => {
+                // Skip test if `file` command is not available
+                eprintln!("Skipping test: file command not available: {}", e);
+            }
+        }
     }
 
     #[test]
