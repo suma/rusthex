@@ -306,8 +306,9 @@ impl HexServer {
         let preview = read_bytes_from_file(&p.path, 0, preview_len)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
-        // Detect magic bytes
-        let magic = detect_magic(&preview);
+        // Detect file type: try `file` command first, fall back to magic bytes
+        let file_type = detect_file_by_command(&preview)
+            .or_else(|| detect_magic(&preview).map(|s| s.to_string()));
 
         let mut output = String::new();
         output.push_str(&format!("File: {}\n", p.path));
@@ -319,8 +320,8 @@ impl HexServer {
         }
         output.push('\n');
 
-        if let Some(magic) = magic {
-            output.push_str(&format!("Type: {}\n", magic));
+        if let Some(ref file_type) = file_type {
+            output.push_str(&format!("Type: {}\n", file_type));
         }
 
         output.push_str(&format!("\nFirst {} bytes:\n", preview_len));
@@ -456,7 +457,7 @@ impl HexServer {
         Ok(CallToolResult::success(vec![Content::text(msg)]))
     }
 
-    #[tool(description = "Detect file type using the `file` command. Reads the first 1024 bytes and pipes them to `file -b -` for identification.")]
+    #[tool(description = "Detect file type using the `file` command. Reads the first 1024 bytes and pipes them to `file -b -` for identification. Falls back to magic byte detection if `file` is unavailable.")]
     async fn detect_file_type(
         &self,
         Parameters(p): Parameters<FileTypeParams>,
@@ -470,39 +471,19 @@ impl HexServer {
             )]));
         }
 
-        let result = std::process::Command::new("file")
-            .args(["-b", "-"])
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .and_then(|mut child| {
-                if let Some(ref mut stdin) = child.stdin {
-                    let _ = stdin.write_all(&data);
-                }
-                drop(child.stdin.take());
-                child.wait_with_output()
-            });
+        // Try `file` command first, fall back to magic byte detection
+        let file_type = detect_file_by_command(&data)
+            .or_else(|| detect_magic(&data).map(|s| s.to_string()));
 
-        match result {
-            Ok(output) if output.status.success() => {
-                let file_type = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                Ok(CallToolResult::success(vec![Content::text(format!(
-                    "{}: {}",
-                    p.path, file_type
-                ))]))
-            }
-            Ok(output) => {
-                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                Err(McpError::internal_error(
-                    format!("file command failed: {}", stderr),
-                    None,
-                ))
-            }
-            Err(e) => Err(McpError::internal_error(
-                format!("file command not available: {}", e),
-                None,
-            )),
+        match file_type {
+            Some(ft) => Ok(CallToolResult::success(vec![Content::text(format!(
+                "{}: {}",
+                p.path, ft
+            ))])),
+            None => Ok(CallToolResult::success(vec![Content::text(format!(
+                "{}: unknown",
+                p.path
+            ))])),
         }
     }
 
@@ -953,6 +934,32 @@ fn interpret_bytes(data: &[u8], base_offset: u64) -> String {
     }
 
     output
+}
+
+/// Run `file -b -` on the given data and return the detected type string.
+/// Returns `None` if the `file` command is not available or fails.
+fn detect_file_by_command(data: &[u8]) -> Option<String> {
+    let output = std::process::Command::new("file")
+        .args(["-b", "-"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            if let Some(ref mut stdin) = child.stdin {
+                let _ = stdin.write_all(data);
+            }
+            drop(child.stdin.take());
+            child.wait_with_output()
+        })
+        .ok()?;
+
+    if output.status.success() {
+        let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if s.is_empty() { None } else { Some(s) }
+    } else {
+        None
+    }
 }
 
 fn detect_magic(data: &[u8]) -> Option<&'static str> {
