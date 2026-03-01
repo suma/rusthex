@@ -21,6 +21,7 @@ mod actions;
 mod bitmap;
 mod bookmark;
 mod compare;
+mod goto_address;
 mod config;
 mod cursor;
 mod document;
@@ -214,7 +215,14 @@ impl HexEditor {
             0.0
         };
 
-        menu_bar + base_header + tab_bar + search_bar + bookmark_bar
+        // Go to Address bar: py_2(8+8) + text_sm + text_xs + border_b_1(1) = sm + xs + 17
+        let goto_address_bar = if self.tab().goto_address_visible {
+            self.cached_line_height_sm + self.cached_line_height_xs + 17.0
+        } else {
+            0.0
+        };
+
+        menu_bar + base_header + tab_bar + search_bar + bookmark_bar + goto_address_bar
     }
 
     /// Get current active tab
@@ -530,6 +538,7 @@ fn main() {
             KeyBinding::new("cmd-v", actions::Paste, None),
             KeyBinding::new("cmd-a", actions::SelectAll, None),
             KeyBinding::new("cmd-shift-i", actions::ToggleInsertMode, None),
+            KeyBinding::new("cmd-g", actions::GoToAddress, None),
             // View
             KeyBinding::new("cmd-f", actions::ToggleSearch, None),
             KeyBinding::new("cmd-i", actions::ToggleInspector, None),
@@ -677,6 +686,7 @@ fn build_menus() -> Vec<Menu> {
                 MenuItem::os_action("Select All", actions::SelectAll, OsAction::SelectAll),
                 MenuItem::separator(),
                 MenuItem::action("Toggle Insert Mode", actions::ToggleInsertMode),
+                MenuItem::action("Go to Address...", actions::GoToAddress),
                 MenuItem::separator(),
                 MenuItem::action("Analyze Selection", actions::AnalyzeSelection),
             ],

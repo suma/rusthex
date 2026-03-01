@@ -45,6 +45,9 @@ pub struct EditorTab {
     pub bookmark_comment_editing: bool,
     pub bookmark_comment_text: String,
     pub bookmark_comment_position: usize,
+    // Go to Address state
+    pub goto_address_visible: bool,
+    pub goto_address_text: String,
     // Pattern language state
     pub pattern: PatternState,
     // Logical first visible row for programmatic scroll (bypass f32 precision loss)
@@ -84,6 +87,8 @@ impl EditorTab {
             bookmark_comment_editing: false,
             bookmark_comment_text: String::new(),
             bookmark_comment_position: 0,
+            goto_address_visible: false,
+            goto_address_text: String::new(),
             pattern: PatternState::new(),
             scroll_logical_row: None,
             cursor_history: Vec::new(),

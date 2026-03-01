@@ -229,6 +229,7 @@ fn shortcut_for_action(action_name: &str) -> Option<&'static str> {
         "rusthex::Paste" => Some("Ctrl+V"),
         "rusthex::SelectAll" => Some("Ctrl+A"),
         "rusthex::ToggleInsertMode" => Some("Ctrl+Shift+I"),
+        "rusthex::GoToAddress" => Some("Ctrl+G"),
         "rusthex::ToggleSearch" => Some("Ctrl+F"),
         "rusthex::ToggleInspector" => Some("Ctrl+I"),
         "rusthex::ToggleBitmap" => Some("Ctrl+M"),

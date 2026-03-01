@@ -21,6 +21,7 @@ actions!(
         Copy,
         Paste,
         ToggleInsertMode,
+        GoToAddress,
         // Copy variants
         CopyAsAscii,
         CopyAsHexString,

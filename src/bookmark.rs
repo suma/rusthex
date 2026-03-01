@@ -26,6 +26,9 @@ impl HexEditor {
             self.log(crate::log_panel::LogLevel::Info, format!("Bookmark removed at {}", self.fmt_addr(pos)));
         } else {
             self.tab_mut().bookmarks.insert(pos, String::new());
+            // Close other input bars (mutual exclusion)
+            self.tab_mut().search_visible = false;
+            self.tab_mut().goto_address_visible = false;
             // Enter comment editing mode for the new bookmark
             self.tab_mut().bookmark_comment_editing = true;
             self.tab_mut().bookmark_comment_text = String::new();
@@ -141,6 +144,9 @@ impl HexEditor {
     pub fn edit_bookmark_comment(&mut self) {
         let pos = self.tab().cursor_position;
         if let Some(comment) = self.tab().bookmarks.get(&pos).cloned() {
+            // Close other input bars (mutual exclusion)
+            self.tab_mut().search_visible = false;
+            self.tab_mut().goto_address_visible = false;
             self.tab_mut().bookmark_comment_editing = true;
             self.tab_mut().bookmark_comment_text = comment;
             self.tab_mut().bookmark_comment_position = pos;

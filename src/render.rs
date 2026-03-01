@@ -522,6 +522,49 @@ impl HexEditor {
             )
     }
 
+    /// Go to Address input bar
+    pub(crate) fn render_goto_address_bar(&self) -> impl IntoElement {
+        let t = &self.theme;
+        let input_text = self.tab().goto_address_text.clone();
+
+        div()
+            .flex()
+            .flex_col()
+            .py_2()
+            .px_4()
+            .bg(t.bg_elevated)
+            .border_b_1()
+            .border_color(t.border_primary)
+            .child(
+                div()
+                    .flex()
+                    .gap_4()
+                    .items_center()
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(t.accent_primary)
+                            .child("Go to Address:"),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(t.text_primary)
+                            .child(if input_text.is_empty() {
+                                String::from("_")
+                            } else {
+                                input_text
+                            }),
+                    ),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(t.text_muted)
+                    .child("100 = decimal | 0xFF = hex | Enter: go | Esc: cancel"),
+            )
+    }
+
     /// Normal mode: hex/ASCII view with optional bitmap panel
     pub(crate) fn render_normal_mode(
         &self,
@@ -3257,10 +3300,18 @@ impl Render for HexEditor {
                 this.tab_mut().hex_nibble = HexNibble::High;
                 cx.notify();
             }))
+            .on_action(cx.listener(|this, _: &actions::GoToAddress, _window, cx| {
+                this.show_goto_address();
+                cx.notify();
+            }))
             .on_action(cx.listener(|this, _: &actions::ToggleSearch, _window, cx| {
                 let visible = !this.tab().search_visible;
                 this.tab_mut().search_visible = visible;
-                if !visible {
+                if visible {
+                    // Close other input bars (mutual exclusion)
+                    this.tab_mut().goto_address_visible = false;
+                    this.tab_mut().bookmark_comment_editing = false;
+                } else {
                     this.tab_mut().search_results.clear();
                     this.tab_mut().current_search_index = None;
                 }
@@ -3331,6 +3382,9 @@ impl Render for HexEditor {
             })
             .when(self.tab().bookmark_comment_editing, |parent| {
                 parent.child(self.render_bookmark_bar())
+            })
+            .when(self.tab().goto_address_visible, |parent| {
+                parent.child(self.render_goto_address_bar())
             })
             .when(!self.compare.mode, |parent| {
                 parent.child(self.render_normal_mode(cx, &params))

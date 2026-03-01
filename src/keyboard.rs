@@ -80,7 +80,11 @@ fn handle_command_shortcuts(
         ("f", _) => {
             let visible = !editor.tab().search_visible;
             editor.tab_mut().search_visible = visible;
-            if !visible {
+            if visible {
+                // Close other input bars (mutual exclusion)
+                editor.tab_mut().goto_address_visible = false;
+                editor.tab_mut().bookmark_comment_editing = false;
+            } else {
                 editor.tab_mut().search_results.clear();
                 editor.tab_mut().current_search_index = None;
             }
@@ -111,6 +115,7 @@ fn handle_command_shortcuts(
                 editor.log(crate::log_panel::LogLevel::Info, "Selected all");
             }
         }
+        ("g", _) => editor.show_goto_address(),
         ("b", false) => editor.toggle_bookmark(),
         ("b", true) => editor.edit_bookmark_comment(),
         ("m", false) => editor.toggle_bitmap(),
@@ -175,6 +180,8 @@ fn handle_special_keys(
                 editor.pattern_filter_index = None;
             } else if editor.tab().bookmark_comment_editing {
                 editor.cancel_bookmark_comment();
+            } else if editor.tab().goto_address_visible {
+                editor.hide_goto_address();
             } else if editor.compare.selection_visible {
                 editor.compare.selection_visible = false;
             } else if editor.compare.mode {
@@ -318,6 +325,9 @@ fn handle_navigation_and_input(
                 let filtered = editor.get_filtered_patterns();
                 editor.pattern_filter_index = if filtered.is_empty() { None } else { Some(0) };
                 cx.notify();
+            } else if editor.tab().goto_address_visible {
+                editor.tab_mut().goto_address_text.pop();
+                cx.notify();
             } else if editor.tab().bookmark_comment_editing {
                 editor.tab_mut().bookmark_comment_text.pop();
                 cx.notify();
@@ -363,6 +373,9 @@ fn handle_navigation_and_input(
                         editor.select_pattern(original_idx);
                     }
                 }
+                cx.notify();
+            } else if editor.tab().goto_address_visible {
+                editor.confirm_goto_address();
                 cx.notify();
             } else if editor.tab().bookmark_comment_editing {
                 editor.confirm_bookmark_comment();
@@ -430,6 +443,12 @@ fn handle_navigation_and_input(
                         let filtered = editor.get_filtered_patterns();
                         editor.pattern_filter_index =
                             if filtered.is_empty() { None } else { Some(0) };
+                        cx.notify();
+                    }
+                } else if editor.tab().goto_address_visible {
+                    // Accept hex digits, 'x'/'X' for 0x prefix
+                    if c.is_ascii_hexdigit() || c == 'x' || c == 'X' {
+                        editor.tab_mut().goto_address_text.push(c);
                         cx.notify();
                     }
                 } else if editor.tab().bookmark_comment_editing {
