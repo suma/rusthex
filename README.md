@@ -15,6 +15,7 @@ A modern hex editor built with Rust and [gpui](https://www.gpui.rs/), featuring 
 - **Large File Support**: Memory-mapped files for efficient handling of files > 10MB
 - **Virtual Scrolling**: Smooth performance even with gigabyte-sized files
 - **Undo/Redo**: Full edit history with 1,000 operation limit
+- **Vim Mode**: Optional Vim-like keybindings with Normal/Insert/Visual/Command modes (`vim_mode = true` in config.toml, see [VIMMODE.md](VIMMODE.md))
 
 ### Navigation & Selection
 - **Keyboard Navigation**: Arrow keys, Page Up/Down, Home/End, Ctrl+Home/End
@@ -132,6 +133,7 @@ theme = "dark"        # "dark", "light", "monokai"
 [editor]
 default_endian = "Little"  # "Little" or "Big"
 max_undo_levels = 1000
+vim_mode = false           # Enable Vim-like keybindings (see VIMMODE.md)
 
 [window]
 width = 800
