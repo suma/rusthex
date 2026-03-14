@@ -186,16 +186,33 @@ fn handle_normal_mode(
         return handle_operator_motion(editor, event, op);
     }
 
-    // Handle shifted keys
-    if shift {
+    // Resolve shifted key: gpui may report either the physical key with shift=true
+    // (e.g. key="g", shift=true) or the already-translated character (e.g. key="G").
+    // Normalize to the uppercase/symbol form for matching.
+    let shifted_key = if shift {
         match key {
-            "g" => {
+            "4" => Some("$".to_string()),
+            ";" => Some(":".to_string()),
+            k if k.len() == 1 && k.as_bytes()[0].is_ascii_lowercase() => {
+                Some(k.to_ascii_uppercase())
+            }
+            _ => None,
+        }
+    } else {
+        match key {
+            "$" | ":" => Some(key.to_string()),
+            k if k.len() == 1 && k.as_bytes()[0].is_ascii_uppercase() => Some(k.to_string()),
+            _ => None,
+        }
+    };
+
+    if let Some(ref sk) = shifted_key {
+        match sk.as_str() {
+            "G" => {
                 // G: go to file end, or {count}G for address jump
                 let count = editor.tab_mut().vim_state.count.take();
                 editor.push_cursor_history();
-                editor.clear_selection();
                 if let Some(addr) = count {
-                    // {count}G: jump to byte offset
                     editor.move_position(addr);
                 } else {
                     editor.move_cursor_file_end();
@@ -203,36 +220,42 @@ fn handle_normal_mode(
                 editor.tab_mut().vim_state.reset_pending();
                 return true;
             }
-            "a" => {
+            "A" => {
                 // A: go to end of row, then insert mode
                 editor.move_cursor_end();
                 editor.tab_mut().edit_mode = EditMode::Insert;
                 editor.tab_mut().vim_state.enter_mode(VimMode::Insert);
                 return true;
             }
-            "i" => {
+            "I" => {
                 // I: go to start of row, then insert mode
                 editor.move_cursor_home();
                 editor.tab_mut().edit_mode = EditMode::Insert;
                 editor.tab_mut().vim_state.enter_mode(VimMode::Insert);
                 return true;
             }
-            "n" => {
+            "N" => {
                 // N: previous search result
                 editor.prev_search_result();
                 return true;
             }
-            "p" => {
+            "P" => {
                 // P: paste before cursor
                 paste_bytes(editor, false);
                 return true;
             }
-            "4" => {
+            "$" => {
                 // $: end of row
                 let count = editor.tab_mut().vim_state.take_count();
                 for _ in 0..count {
                     editor.move_cursor_end();
                 }
+                return true;
+            }
+            ":" => {
+                // :: enter command mode
+                editor.tab_mut().vim_state.command_buffer.clear();
+                editor.tab_mut().vim_state.enter_mode(VimMode::Command);
                 return true;
             }
             _ => {}
@@ -378,14 +401,6 @@ fn handle_normal_mode(
             true
         }
 
-        // Command mode
-        ";" if shift => {
-            // : (colon) — enter command mode
-            editor.tab_mut().vim_state.command_buffer.clear();
-            editor.tab_mut().vim_state.enter_mode(VimMode::Command);
-            true
-        }
-
         _ => false,
     }
 }
@@ -493,7 +508,7 @@ fn handle_visual_mode(
             }
             true
         }
-        "g" if shift => {
+        "g" | "G" if shift || key == "G" => {
             // G: file end
             editor.push_cursor_history();
             editor.move_cursor_file_end();
@@ -523,7 +538,7 @@ fn handle_visual_mode(
         }
 
         // $ end of row
-        "4" if shift => {
+        "4" | "$" if shift || key == "$" => {
             editor.move_cursor_end();
             true
         }
@@ -794,12 +809,12 @@ fn apply_motion(editor: &mut HexEditor, key: &str, shift: bool) -> bool {
             editor.move_cursor_home();
             true
         }
-        "4" if shift => {
+        "4" | "$" if shift || key == "$" => {
             // $
             editor.move_cursor_end();
             true
         }
-        "g" if shift => {
+        "g" | "G" if shift || key == "G" => {
             // G: file end
             editor.move_cursor_file_end();
             true
