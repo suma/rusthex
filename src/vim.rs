@@ -642,6 +642,12 @@ fn execute_command(
             editor.force_close = true;
             cx.quit();
         }
+        "tabn" | "tabnext" => {
+            editor.next_tab();
+        }
+        "tabp" | "tabprevious" | "tabprev" => {
+            editor.prev_tab();
+        }
         _ => {
             // Try parsing as address jump
             if let Some(addr) = parse_address(cmd) {
