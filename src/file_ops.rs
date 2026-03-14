@@ -287,6 +287,137 @@ impl HexEditor {
         }
     }
 
+    /// Collect bytes from document as a space-separated hex string.
+    fn bytes_to_hex_string(
+        doc: &crate::document::Document,
+        range: std::ops::Range<usize>,
+    ) -> String {
+        range
+            .filter_map(|i| doc.get_byte(i))
+            .map(|b| format!("{:02x}", b))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// Build the JSON payload for analyze_selection.
+    fn build_analyze_json(
+        doc: &crate::document::Document,
+        sel_start: usize,
+        sel_end: usize,
+        file_type: &str,
+    ) -> serde_json::Value {
+        let doc_len = doc.len();
+        let sel_len = sel_end - sel_start + 1;
+        let ctx_before_start = sel_start.saturating_sub(256);
+        let ctx_after_end = (sel_end + 1 + 256).min(doc_len);
+
+        serde_json::json!({
+            "file_name": doc.file_name().unwrap_or("(unknown)"),
+            "file_size": doc_len,
+            "file_type": file_type,
+            "selection_offset": sel_start,
+            "selection_length": sel_len,
+            "selection_hex": Self::bytes_to_hex_string(doc, sel_start..sel_end + 1),
+            "context_before_hex": Self::bytes_to_hex_string(doc, ctx_before_start..sel_start),
+            "context_after_hex": Self::bytes_to_hex_string(doc, sel_end + 1..ctx_after_end),
+        })
+    }
+
+    /// Spawn the analyze command on a background thread with timeout.
+    /// Returns a channel receiver for the result.
+    fn spawn_analyze_command(
+        args: Vec<String>,
+        input: String,
+        timeout_secs: u64,
+    ) -> std::sync::mpsc::Receiver<Result<(std::process::Output, std::time::Duration), String>>
+    {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let cmd_start = std::time::Instant::now();
+        std::thread::spawn(move || {
+            let result = std::process::Command::new(&args[0])
+                .args(&args[1..])
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .map_err(|e| format!("Failed to run analyze command: {}", e))
+                .and_then(|mut child| {
+                    if let Some(ref mut stdin) = child.stdin {
+                        let _ = stdin.write_all(input.as_bytes());
+                    }
+                    drop(child.stdin.take());
+
+                    let deadline = std::time::Instant::now()
+                        + std::time::Duration::from_secs(timeout_secs);
+                    loop {
+                        match child.try_wait() {
+                            Ok(Some(_status)) => {
+                                return child
+                                    .wait_with_output()
+                                    .map_err(|e| format!("Failed to read output: {}", e));
+                            }
+                            Ok(None) => {
+                                if std::time::Instant::now() >= deadline {
+                                    let _ = child.kill();
+                                    let _ = child.wait();
+                                    return Err(format!(
+                                        "Analyze command timed out after {}s",
+                                        timeout_secs
+                                    ));
+                                }
+                                std::thread::sleep(std::time::Duration::from_millis(100));
+                            }
+                            Err(e) => {
+                                return Err(format!("Failed to wait for process: {}", e));
+                            }
+                        }
+                    }
+                });
+            let elapsed = cmd_start.elapsed();
+            let _ = tx.send(result.map(|output| (output, elapsed)));
+        });
+        rx
+    }
+
+    /// Log the result of an analyze command execution.
+    fn log_analyze_result(
+        editor: &mut HexEditor,
+        result: Result<(std::process::Output, std::time::Duration), String>,
+    ) {
+        match result {
+            Ok((output, elapsed)) if output.status.success() => {
+                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if stdout.is_empty() {
+                    editor.log(
+                        crate::log_panel::LogLevel::Info,
+                        format!("Analysis complete (no output) [{:.2}s]", elapsed.as_secs_f64()),
+                    );
+                } else {
+                    for line in stdout.lines() {
+                        editor.log(crate::log_panel::LogLevel::Info, line.to_string());
+                    }
+                    editor.log(
+                        crate::log_panel::LogLevel::Info,
+                        format!("Analysis complete [{:.2}s]", elapsed.as_secs_f64()),
+                    );
+                }
+            }
+            Ok((output, elapsed)) => {
+                let code = output.status.code().unwrap_or(-1);
+                editor.log(
+                    crate::log_panel::LogLevel::Error,
+                    format!("Analyze command exited with code {} [{:.2}s]", code, elapsed.as_secs_f64()),
+                );
+            }
+            Err(e) => {
+                editor.log(
+                    crate::log_panel::LogLevel::Error,
+                    format!("Analyze error: {}", e),
+                );
+            }
+        }
+    }
+
     /// Analyze the current selection by piping context to an external command
     pub fn analyze_selection(&mut self, cx: &mut Context<Self>) {
         let command_str = self.settings.analyze.command.clone();
@@ -311,46 +442,8 @@ impl HexEditor {
             }
         };
 
-        let doc = &self.tab().document;
-        let doc_len = doc.len();
-        let sel_len = sel_end - sel_start + 1;
-
-        // Gather selection bytes as hex string
-        let selection_hex = (sel_start..=sel_end)
-            .filter_map(|i| doc.get_byte(i))
-            .map(|b| format!("{:02x}", b))
-            .collect::<Vec<_>>()
-            .join(" ");
-
-        // Context: up to 256 bytes before selection
-        let ctx_before_start = sel_start.saturating_sub(256);
-        let context_before_hex = (ctx_before_start..sel_start)
-            .filter_map(|i| doc.get_byte(i))
-            .map(|b| format!("{:02x}", b))
-            .collect::<Vec<_>>()
-            .join(" ");
-
-        // Context: up to 256 bytes after selection
-        let ctx_after_end = (sel_end + 1 + 256).min(doc_len);
-        let context_after_hex = (sel_end + 1..ctx_after_end)
-            .filter_map(|i| doc.get_byte(i))
-            .map(|b| format!("{:02x}", b))
-            .collect::<Vec<_>>()
-            .join(" ");
-
-        let file_name = doc.file_name().unwrap_or("(unknown)").to_string();
         let file_type = self.tab().file_type.clone().unwrap_or_default();
-
-        let json = serde_json::json!({
-            "file_name": file_name,
-            "file_size": doc_len,
-            "file_type": file_type,
-            "selection_offset": sel_start,
-            "selection_length": sel_len,
-            "selection_hex": selection_hex,
-            "context_before_hex": context_before_hex,
-            "context_after_hex": context_after_hex,
-        });
+        let json = Self::build_analyze_json(&self.tab().document, sel_start, sel_end, &file_type);
         let prompt = &self.settings.analyze.prompt;
         let json_str = if prompt.is_empty() {
             json.to_string()
@@ -377,57 +470,7 @@ impl HexEditor {
         }
 
         let timeout_secs = self.settings.analyze.timeout;
-
-        // Run the blocking command on a background thread to keep the UI responsive
-        let (tx, rx) =
-            std::sync::mpsc::channel::<Result<(std::process::Output, std::time::Duration), String>>();
-        let cmd_start = std::time::Instant::now();
-        std::thread::spawn(move || {
-            let result = std::process::Command::new(&args[0])
-                .args(&args[1..])
-                .stdin(std::process::Stdio::piped())
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::null())
-                .spawn()
-                .map_err(|e| format!("Failed to run analyze command: {}", e))
-                .and_then(|mut child| {
-                    if let Some(ref mut stdin) = child.stdin {
-                        let _ = stdin.write_all(json_str.as_bytes());
-                    }
-                    drop(child.stdin.take());
-
-                    // Poll with timeout
-                    let deadline = std::time::Instant::now()
-                        + std::time::Duration::from_secs(timeout_secs);
-                    loop {
-                        match child.try_wait() {
-                            Ok(Some(_status)) => {
-                                // Process exited; collect output
-                                return child
-                                    .wait_with_output()
-                                    .map_err(|e| format!("Failed to read output: {}", e));
-                            }
-                            Ok(None) => {
-                                // Still running
-                                if std::time::Instant::now() >= deadline {
-                                    let _ = child.kill();
-                                    let _ = child.wait();
-                                    return Err(format!(
-                                        "Analyze command timed out after {}s",
-                                        timeout_secs
-                                    ));
-                                }
-                                std::thread::sleep(std::time::Duration::from_millis(100));
-                            }
-                            Err(e) => {
-                                return Err(format!("Failed to wait for process: {}", e));
-                            }
-                        }
-                    }
-                });
-            let elapsed = cmd_start.elapsed();
-            let _ = tx.send(result.map(|output| (output, elapsed)));
-        });
+        let rx = Self::spawn_analyze_command(args, json_str, timeout_secs);
 
         cx.spawn(async move |entity, cx| {
             // Poll the channel without blocking the UI thread
@@ -444,53 +487,7 @@ impl HexEditor {
             };
 
             let _ = entity.update(cx, |editor, cx| {
-                match result {
-                    Ok((output, elapsed)) if output.status.success() => {
-                        let stdout = String::from_utf8_lossy(&output.stdout)
-                            .trim()
-                            .to_string();
-                        if stdout.is_empty() {
-                            editor.log(
-                                crate::log_panel::LogLevel::Info,
-                                format!(
-                                    "Analysis complete (no output) [{:.2}s]",
-                                    elapsed.as_secs_f64()
-                                ),
-                            );
-                        } else {
-                            for line in stdout.lines() {
-                                editor.log(
-                                    crate::log_panel::LogLevel::Info,
-                                    line.to_string(),
-                                );
-                            }
-                            editor.log(
-                                crate::log_panel::LogLevel::Info,
-                                format!(
-                                    "Analysis complete [{:.2}s]",
-                                    elapsed.as_secs_f64()
-                                ),
-                            );
-                        }
-                    }
-                    Ok((output, elapsed)) => {
-                        let code = output.status.code().unwrap_or(-1);
-                        editor.log(
-                            crate::log_panel::LogLevel::Error,
-                            format!(
-                                "Analyze command exited with code {} [{:.2}s]",
-                                code,
-                                elapsed.as_secs_f64()
-                            ),
-                        );
-                    }
-                    Err(e) => {
-                        editor.log(
-                            crate::log_panel::LogLevel::Error,
-                            format!("Analyze error: {}", e),
-                        );
-                    }
-                }
+                Self::log_analyze_result(editor, result);
                 cx.notify();
             });
         })
