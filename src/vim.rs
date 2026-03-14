@@ -658,6 +658,9 @@ fn execute_command(
         "tabp" | "tabprevious" | "tabprev" => {
             editor.prev_tab();
         }
+        "jumps" => {
+            show_jump_list(editor);
+        }
         _ => {
             // Try parsing as address jump
             if let Some(addr) = parse_address(cmd) {
@@ -896,6 +899,45 @@ fn handle_replace_char(editor: &mut HexEditor, event: &KeyDownEvent) -> bool {
 }
 
 // ─── Helper functions ──────────────────────────────────────────────────────────
+
+fn show_jump_list(editor: &mut HexEditor) {
+    let show_count = 20;
+
+    // Collect data first to avoid borrow conflicts
+    let history: Vec<usize>;
+    let index: usize;
+    let current_pos: usize;
+    let addr_chars: usize;
+    {
+        let tab = editor.tab();
+        history = tab.cursor_history.iter().copied().take(show_count).collect();
+        index = tab.cursor_history_index;
+        current_pos = tab.cursor_position;
+        addr_chars = crate::ui::address_chars(tab.document.len());
+    }
+
+    if history.is_empty() {
+        editor.log(crate::log_panel::LogLevel::Info, "Jump list is empty");
+        return;
+    }
+
+    // Build lines: oldest first, then current position at bottom
+    let mut lines = Vec::new();
+    lines.push(" # offset".to_string());
+    for i in (0..history.len()).rev() {
+        let marker = if i == index { ">" } else { " " };
+        let addr = crate::ui::format_address(history[i], addr_chars);
+        lines.push(format!("{}{:2} {}", marker, i, addr));
+    }
+    lines.push(format!(
+        "   {} (current)",
+        crate::ui::format_address(current_pos, addr_chars)
+    ));
+
+    for line in &lines {
+        editor.log(crate::log_panel::LogLevel::Info, line);
+    }
+}
 
 fn delete_at_cursor(editor: &mut HexEditor, count: usize) {
     let pos = editor.tab().cursor_position;
