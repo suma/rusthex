@@ -134,6 +134,7 @@ fn handle_normal_mode(
     if ctrl {
         match key {
             "f" => {
+                editor.push_cursor_history();
                 let count = editor.tab_mut().vim_state.take_count();
                 for _ in 0..count {
                     editor.move_cursor_page_down(crate::keyboard::PAGE_ROWS);
@@ -141,6 +142,7 @@ fn handle_normal_mode(
                 return true;
             }
             "b" => {
+                editor.push_cursor_history();
                 let count = editor.tab_mut().vim_state.take_count();
                 for _ in 0..count {
                     editor.move_cursor_page_up(crate::keyboard::PAGE_ROWS);
@@ -246,6 +248,7 @@ fn handle_normal_mode(
             }
             "N" => {
                 // N: previous search result
+                editor.push_cursor_history();
                 editor.prev_search_result();
                 return true;
             }
@@ -398,6 +401,7 @@ fn handle_normal_mode(
 
         // Search navigation
         "n" if !shift => {
+            editor.push_cursor_history();
             editor.next_search_result();
             true
         }
@@ -526,6 +530,7 @@ fn handle_visual_mode(
             true
         }
         "f" if ctrl => {
+            editor.push_cursor_history();
             let count = editor.tab_mut().vim_state.take_count();
             for _ in 0..count {
                 editor.move_cursor_page_down(crate::keyboard::PAGE_ROWS);
@@ -533,6 +538,7 @@ fn handle_visual_mode(
             true
         }
         "b" if ctrl => {
+            editor.push_cursor_history();
             let count = editor.tab_mut().vim_state.take_count();
             for _ in 0..count {
                 editor.move_cursor_page_up(crate::keyboard::PAGE_ROWS);
