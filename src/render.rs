@@ -1895,7 +1895,18 @@ impl HexEditor {
             .text_sm()
             .font_family(font_name)
             // First line: cursor position, byte value, selection
-            .child(
+            //   (in Vim Command mode, replaced by full-width command input)
+            .child(if self.settings.editor.vim_mode && self.tab().vim_state.mode == crate::vim::VimMode::Command {
+                // Vim Command mode: full-width command input line
+                let cmd = format!(":{}█", self.tab().vim_state.command_buffer);
+                div()
+                    .flex()
+                    .flex_1()
+                    .py_1()
+                    .child(
+                        div().text_color(t.accent_primary).child(cmd)
+                    )
+            } else {
                 div()
                     .flex()
                     .gap_4()
@@ -1913,10 +1924,7 @@ impl HexEditor {
                                 crate::vim::VimMode::Visual => {
                                     div().text_color(t.text_warning).child("VISUAL")
                                 }
-                                crate::vim::VimMode::Command => {
-                                    let cmd = format!(":{}█", self.tab().vim_state.command_buffer);
-                                    div().text_color(t.accent_primary).child(cmd)
-                                }
+                                crate::vim::VimMode::Command => unreachable!(),
                             }
                         } else {
                             match self.tab().edit_mode {
@@ -1988,7 +1996,7 @@ impl HexEditor {
                         // Spacer to push remaining items right
                         div().flex_1()
                     )
-            )
+            })
             // Second line: search status, messages
             .child(
                 div()
