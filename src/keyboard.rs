@@ -13,6 +13,13 @@ fn is_cmd(event: &KeyDownEvent) -> bool {
     event.keystroke.modifiers.control || event.keystroke.modifiers.platform
 }
 
+/// In Vim mode, only treat the platform key (Cmd on macOS) as the command
+/// modifier. Ctrl is reserved for Vim bindings (Ctrl+F, Ctrl+B, Ctrl+R).
+/// On Windows/Linux where Ctrl IS the platform key, this behaves identically.
+fn is_cmd_vim(event: &KeyDownEvent) -> bool {
+    event.keystroke.modifiers.platform
+}
+
 /// Begin or continue selection if Shift is held, otherwise clear selection
 fn update_selection(editor: &mut HexEditor, shift: bool) {
     if shift {
@@ -59,7 +66,12 @@ fn handle_command_shortcuts(
     window: &mut Window,
     cx: &mut Context<HexEditor>,
 ) -> bool {
-    if !is_cmd(event) {
+    let cmd_held = if editor.settings.editor.vim_mode {
+        is_cmd_vim(event)
+    } else {
+        is_cmd(event)
+    };
+    if !cmd_held {
         return false;
     }
     let shift = event.keystroke.modifiers.shift;
