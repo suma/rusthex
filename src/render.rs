@@ -14,6 +14,44 @@ use gpui_component::scroll::{Scrollbar, ScrollbarShow};
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
 
+/// Render a single label-value row for the data inspector panel.
+fn inspector_row(
+    label: &str,
+    value: String,
+    label_color: gpui::Hsla,
+    value_color: gpui::Hsla,
+    value_width: Pixels,
+) -> gpui::Div {
+    div()
+        .flex()
+        .gap_2()
+        .child(div().w(px(60.0)).text_color(label_color).child(SharedString::from(label.to_string())))
+        .child(
+            div()
+                .w(value_width)
+                .text_right()
+                .text_color(value_color)
+                .child(SharedString::from(value)),
+        )
+}
+
+/// Render an inspector row for a float value, with NaN/Inf formatting.
+fn inspector_float_row(
+    label: &str,
+    value: f64,
+    precision: usize,
+    label_color: gpui::Hsla,
+    value_color: gpui::Hsla,
+    value_width: Pixels,
+) -> gpui::Div {
+    let display = if value.is_nan() || value.is_infinite() {
+        format!("{}", value)
+    } else {
+        format!("{:.prec$}", value, prec = precision)
+    };
+    inspector_row(label, display, label_color, value_color, value_width)
+}
+
 /// Bundle of parameters computed in the render() preamble
 pub(crate) struct RenderParams {
     pub font_name: String,
@@ -2441,6 +2479,13 @@ impl HexEditor {
             )
             // Values grid
             .when_some(values, |el, vals| {
+                let muted = t.text_muted;
+                let success = t.accent_success;
+                let warning = t.text_warning;
+                let primary = t.accent_primary;
+                let w_narrow = px(100.0);
+                let w_wide = px(180.0);
+
                 el.child(
                     div()
                         .flex()
@@ -2451,124 +2496,19 @@ impl HexEditor {
                                 .flex()
                                 .flex_col()
                                 .gap_1()
-                                // 8-bit values
-                                .child(
-                                    div()
-                                        .flex()
-                                        .gap_2()
-                                        .child(
-                                            div()
-                                                .w(px(60.0))
-                                                .text_color(t.text_muted)
-                                                .child("Int8:"),
-                                        )
-                                        .child(
-                                            div()
-                                                .w(px(100.0))
-                                                .text_right()
-                                                .text_color(t.accent_success)
-                                                .child(format!("{}", vals.int8)),
-                                        ),
-                                )
-                                .child(
-                                    div()
-                                        .flex()
-                                        .gap_2()
-                                        .child(
-                                            div()
-                                                .w(px(60.0))
-                                                .text_color(t.text_muted)
-                                                .child("UInt8:"),
-                                        )
-                                        .child(
-                                            div()
-                                                .w(px(100.0))
-                                                .text_right()
-                                                .text_color(t.accent_success)
-                                                .child(format!("{}", vals.uint8)),
-                                        ),
-                                )
-                                // 16-bit values
+                                .child(inspector_row("Int8:", format!("{}", vals.int8), muted, success, w_narrow))
+                                .child(inspector_row("UInt8:", format!("{}", vals.uint8), muted, success, w_narrow))
                                 .when_some(vals.int16, |el, v| {
-                                    el.child(
-                                        div()
-                                            .flex()
-                                            .gap_2()
-                                            .child(
-                                                div()
-                                                    .w(px(60.0))
-                                                    .text_color(t.text_muted)
-                                                    .child("Int16:"),
-                                            )
-                                            .child(
-                                                div()
-                                                    .w(px(100.0))
-                                                    .text_right()
-                                                    .text_color(t.accent_success)
-                                                    .child(format!("{}", v)),
-                                            ),
-                                    )
+                                    el.child(inspector_row("Int16:", format!("{}", v), muted, success, w_narrow))
                                 })
                                 .when_some(vals.uint16, |el, v| {
-                                    el.child(
-                                        div()
-                                            .flex()
-                                            .gap_2()
-                                            .child(
-                                                div()
-                                                    .w(px(60.0))
-                                                    .text_color(t.text_muted)
-                                                    .child("UInt16:"),
-                                            )
-                                            .child(
-                                                div()
-                                                    .w(px(100.0))
-                                                    .text_right()
-                                                    .text_color(t.accent_success)
-                                                    .child(format!("{}", v)),
-                                            ),
-                                    )
+                                    el.child(inspector_row("UInt16:", format!("{}", v), muted, success, w_narrow))
                                 })
-                                // 32-bit values
                                 .when_some(vals.int32, |el, v| {
-                                    el.child(
-                                        div()
-                                            .flex()
-                                            .gap_2()
-                                            .child(
-                                                div()
-                                                    .w(px(60.0))
-                                                    .text_color(t.text_muted)
-                                                    .child("Int32:"),
-                                            )
-                                            .child(
-                                                div()
-                                                    .w(px(100.0))
-                                                    .text_right()
-                                                    .text_color(t.accent_success)
-                                                    .child(format!("{}", v)),
-                                            ),
-                                    )
+                                    el.child(inspector_row("Int32:", format!("{}", v), muted, success, w_narrow))
                                 })
                                 .when_some(vals.uint32, |el, v| {
-                                    el.child(
-                                        div()
-                                            .flex()
-                                            .gap_2()
-                                            .child(
-                                                div()
-                                                    .w(px(60.0))
-                                                    .text_color(t.text_muted)
-                                                    .child("UInt32:"),
-                                            )
-                                            .child(
-                                                div()
-                                                    .w(px(100.0))
-                                                    .text_right()
-                                                    .text_color(t.accent_success)
-                                                    .child(format!("{}", v)),
-                                            ),
-                                    )
+                                    el.child(inspector_row("UInt32:", format!("{}", v), muted, success, w_narrow))
                                 }),
                         )
                         // 64-bit and float column
@@ -2577,97 +2517,17 @@ impl HexEditor {
                                 .flex()
                                 .flex_col()
                                 .gap_1()
-                                // 64-bit values
                                 .when_some(vals.int64, |el, v| {
-                                    el.child(
-                                        div()
-                                            .flex()
-                                            .gap_2()
-                                            .child(
-                                                div()
-                                                    .w(px(60.0))
-                                                    .text_color(t.text_muted)
-                                                    .child("Int64:"),
-                                            )
-                                            .child(
-                                                div()
-                                                    .w(px(180.0))
-                                                    .text_right()
-                                                    .text_color(t.accent_success)
-                                                    .child(format!("{}", v)),
-                                            ),
-                                    )
+                                    el.child(inspector_row("Int64:", format!("{}", v), muted, success, w_wide))
                                 })
                                 .when_some(vals.uint64, |el, v| {
-                                    el.child(
-                                        div()
-                                            .flex()
-                                            .gap_2()
-                                            .child(
-                                                div()
-                                                    .w(px(60.0))
-                                                    .text_color(t.text_muted)
-                                                    .child("UInt64:"),
-                                            )
-                                            .child(
-                                                div()
-                                                    .w(px(180.0))
-                                                    .text_right()
-                                                    .text_color(t.accent_success)
-                                                    .child(format!("{}", v)),
-                                            ),
-                                    )
+                                    el.child(inspector_row("UInt64:", format!("{}", v), muted, success, w_wide))
                                 })
-                                // Float values
                                 .when_some(vals.float32, |el, v| {
-                                    let display = if v.is_nan() || v.is_infinite() {
-                                        format!("{}", v)
-                                    } else {
-                                        format!("{:.6}", v)
-                                    };
-                                    el.child(
-                                        div()
-                                            .flex()
-                                            .gap_2()
-                                            .child(
-                                                div()
-                                                    .w(px(60.0))
-                                                    .text_color(t.text_muted)
-                                                    .child("Float32:"),
-                                            )
-                                            .child(
-                                                div()
-                                                    .w(px(180.0))
-                                                    .text_right()
-                                                    .text_color(t.text_warning)
-                                                    .child(display),
-                                            ),
-                                    )
+                                    el.child(inspector_float_row("Float32:", v as f64, 6, muted, warning, w_wide))
                                 })
                                 .when_some(vals.float64, |el, v| {
-                                    let display = if v.is_nan() || v.is_infinite() {
-                                        format!("{}", v)
-                                    } else {
-                                        format!("{:.10}", v)
-                                    };
-                                    el.child(
-                                        div()
-                                            .flex()
-                                            .gap_2()
-                                            .child(
-                                                div()
-                                                    .w(px(60.0))
-                                                    .text_color(t.text_muted)
-                                                    .child("Float64:"),
-                                            )
-                                            .child(
-                                                div()
-                                                    .w(px(180.0))
-                                                    .text_right()
-                                                    .text_color(t.text_warning)
-                                                    .child(display),
-                                            ),
-                                    )
+                                    el.child(inspector_float_row("Float64:", v, 10, muted, warning, w_wide))
                                 }),
                         )
                         // Hex column
@@ -2676,75 +2536,15 @@ impl HexEditor {
                                 .flex()
                                 .flex_col()
                                 .gap_1()
-                                .child(
-                                    div()
-                                        .flex()
-                                        .gap_2()
-                                        .child(
-                                            div()
-                                                .w(px(60.0))
-                                                .text_color(t.text_muted)
-                                                .child("Hex8:"),
-                                        )
-                                        .child(
-                                            div()
-                                                .text_color(t.accent_primary)
-                                                .child(format!("0x{:02X}", vals.uint8)),
-                                        ),
-                                )
+                                .child(inspector_row("Hex8:", format!("0x{:02X}", vals.uint8), muted, primary, w_narrow))
                                 .when_some(vals.uint16, |el, v| {
-                                    el.child(
-                                        div()
-                                            .flex()
-                                            .gap_2()
-                                            .child(
-                                                div()
-                                                    .w(px(60.0))
-                                                    .text_color(t.text_muted)
-                                                    .child("Hex16:"),
-                                            )
-                                            .child(
-                                                div()
-                                                    .text_color(t.accent_primary)
-                                                    .child(format!("0x{:04X}", v)),
-                                            ),
-                                    )
+                                    el.child(inspector_row("Hex16:", format!("0x{:04X}", v), muted, primary, w_narrow))
                                 })
                                 .when_some(vals.uint32, |el, v| {
-                                    el.child(
-                                        div()
-                                            .flex()
-                                            .gap_2()
-                                            .child(
-                                                div()
-                                                    .w(px(60.0))
-                                                    .text_color(t.text_muted)
-                                                    .child("Hex32:"),
-                                            )
-                                            .child(
-                                                div()
-                                                    .text_color(t.accent_primary)
-                                                    .child(format!("0x{:08X}", v)),
-                                            ),
-                                    )
+                                    el.child(inspector_row("Hex32:", format!("0x{:08X}", v), muted, primary, w_narrow))
                                 })
                                 .when_some(vals.uint64, |el, v| {
-                                    el.child(
-                                        div()
-                                            .flex()
-                                            .gap_2()
-                                            .child(
-                                                div()
-                                                    .w(px(60.0))
-                                                    .text_color(t.text_muted)
-                                                    .child("Hex64:"),
-                                            )
-                                            .child(
-                                                div()
-                                                    .text_color(t.accent_primary)
-                                                    .child(format!("0x{:016X}", v)),
-                                            ),
-                                    )
+                                    el.child(inspector_row("Hex64:", format!("0x{:016X}", v), muted, primary, w_narrow))
                                 }),
                         )
                         // Binary column
@@ -2753,22 +2553,13 @@ impl HexEditor {
                                 .flex()
                                 .flex_col()
                                 .gap_1()
-                                .child(
-                                    div()
-                                        .flex()
-                                        .gap_2()
-                                        .child(
-                                            div()
-                                                .w(px(60.0))
-                                                .text_color(t.text_muted)
-                                                .child("Bin8:"),
-                                        )
-                                        .child(
-                                            div()
-                                                .text_color(t.accent_primary)
-                                                .child(format!("{:04b} {:04b}", vals.uint8 >> 4, vals.uint8 & 0x0F)),
-                                        ),
-                                ),
+                                .child(inspector_row(
+                                    "Bin8:",
+                                    format!("{:04b} {:04b}", vals.uint8 >> 4, vals.uint8 & 0x0F),
+                                    muted,
+                                    primary,
+                                    w_narrow,
+                                )),
                         ),
                 )
             })
