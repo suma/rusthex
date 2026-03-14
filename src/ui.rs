@@ -81,6 +81,37 @@ impl TextEncoding {
         ]
     }
 
+    /// Parse encoding from config label string (case-insensitive)
+    pub fn from_label(s: &str) -> Option<TextEncoding> {
+        match s.to_lowercase().as_str() {
+            "ascii" => Some(TextEncoding::Ascii),
+            "latin1" => Some(TextEncoding::Latin1),
+            "utf-8" | "utf8" => Some(TextEncoding::Utf8),
+            "sjis" | "shift-jis" | "shiftjis" => Some(TextEncoding::ShiftJis),
+            "euc" | "euc-jp" | "eucjp" => Some(TextEncoding::EucJp),
+            "utf16be" | "utf-16be" => Some(TextEncoding::Utf16Be),
+            "utf16le" | "utf-16le" => Some(TextEncoding::Utf16Le),
+            "utf32be" | "utf-32be" => Some(TextEncoding::Utf32Be),
+            "utf32le" | "utf-32le" => Some(TextEncoding::Utf32Le),
+            _ => None,
+        }
+    }
+
+    /// Get config string for this encoding (lowercase, used in config.toml)
+    pub fn to_config_str(&self) -> &'static str {
+        match self {
+            TextEncoding::Ascii => "ascii",
+            TextEncoding::Latin1 => "latin1",
+            TextEncoding::Utf8 => "utf-8",
+            TextEncoding::ShiftJis => "sjis",
+            TextEncoding::EucJp => "euc",
+            TextEncoding::Utf16Be => "utf16be",
+            TextEncoding::Utf16Le => "utf16le",
+            TextEncoding::Utf32Be => "utf32be",
+            TextEncoding::Utf32Le => "utf32le",
+        }
+    }
+
     /// Cycle to next encoding
     pub fn next(&self) -> TextEncoding {
         match self {
@@ -960,5 +991,29 @@ mod tests {
         assert_eq!(layout.byte_in_row_from_mouse_x_ascii(549.0), 1);
         // byte 13 at 538 + 13*11 = 681
         assert_eq!(layout.byte_in_row_from_mouse_x_ascii(681.0), 13);
+    }
+
+    // -- TextEncoding::from_label --
+
+    #[test]
+    fn text_encoding_from_label_roundtrip() {
+        for enc in TextEncoding::all() {
+            let config_str = enc.to_config_str();
+            let parsed = TextEncoding::from_label(config_str);
+            assert_eq!(parsed, Some(*enc), "roundtrip failed for {:?}", enc);
+        }
+    }
+
+    #[test]
+    fn text_encoding_from_label_case_insensitive() {
+        assert_eq!(TextEncoding::from_label("ASCII"), Some(TextEncoding::Ascii));
+        assert_eq!(TextEncoding::from_label("UTF-8"), Some(TextEncoding::Utf8));
+        assert_eq!(TextEncoding::from_label("Utf8"), Some(TextEncoding::Utf8));
+    }
+
+    #[test]
+    fn text_encoding_from_label_invalid() {
+        assert_eq!(TextEncoding::from_label("invalid"), None);
+        assert_eq!(TextEncoding::from_label(""), None);
     }
 }

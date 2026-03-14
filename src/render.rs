@@ -2933,6 +2933,9 @@ impl Render for HexEditor {
             }
         }
 
+        // Cache window bounds for layout save on quit
+        self.cached_window_bounds = Some(window.bounds());
+
         // Calculate and cache font metrics for different text sizes
         let font = Font {
             family: self.settings.display.font_name.clone().into(),

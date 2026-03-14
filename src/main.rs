@@ -49,7 +49,7 @@ use config::Settings;
 use document::Document;
 use gpui::{
     App, Application, Bounds, FocusHandle, Focusable, KeyBinding, Menu, MenuItem, OsAction,
-    SharedString, SystemMenuType, Timer, WindowBounds, WindowOptions, prelude::*, px, size,
+    SharedString, SystemMenuType, Timer, WindowBounds, WindowOptions, prelude::*, point, px, size,
 };
 use render_cache::{CacheState, RenderCache};
 pub use search::SearchMode;
@@ -109,6 +109,8 @@ struct HexEditor {
     user_scrolled: bool,
     // About dialog visibility
     about_visible: bool,
+    // Cached window bounds (updated each render frame for save on quit)
+    cached_window_bounds: Option<Bounds<gpui::Pixels>>,
 }
 
 impl HexEditor {
@@ -123,7 +125,8 @@ impl HexEditor {
         let initial_patterns = pattern::scan_hexpat_dir(&settings.pattern.hexpat_dir);
         let mut initial_tab = EditorTab::new();
         initial_tab.pattern.available_patterns = initial_patterns;
-        Self {
+        let layout = settings.layout.clone();
+        let mut editor = Self {
             tabs: vec![initial_tab],
             active_tab: 0,
             settings,
@@ -156,7 +159,10 @@ impl HexEditor {
             search_debounce_gen: Arc::new(AtomicU64::new(0)),
             user_scrolled: false,
             about_visible: false,
-        }
+            cached_window_bounds: None,
+        };
+        editor.apply_layout(&layout);
+        editor
     }
 
     /// Get bytes per row from settings
@@ -331,6 +337,72 @@ impl HexEditor {
     // - file_ops.rs (load/save)
     // - input.rs (selection, hex/ascii input)
     // - inspector.rs (data inspector)
+
+    /// Collect current layout state into settings
+    fn collect_layout(&self) -> (config::WindowSettings, config::LayoutSettings) {
+        let ws = if let Some(bounds) = self.cached_window_bounds {
+            config::WindowSettings {
+                width: f32::from(bounds.size.width).max(400.0) as u32,
+                height: f32::from(bounds.size.height).max(300.0) as u32,
+                x: Some(f32::from(bounds.origin.x) as i32),
+                y: Some(f32::from(bounds.origin.y) as i32),
+            }
+        } else {
+            self.settings.window.clone()
+        };
+        let ls = config::LayoutSettings {
+            inspector_visible: self.inspector_visible,
+            inspector_endian: match self.inspector_endian {
+                Endian::Little => "little".to_string(),
+                Endian::Big => "big".to_string(),
+            },
+            pattern_panel_visible: self.pattern_panel_visible,
+            pattern_panel_width: self.pattern_panel_width,
+            bitmap_visible: self.bitmap.visible,
+            bitmap_panel_width: self.bitmap.panel_width,
+            bitmap_color_mode: self.bitmap.color_mode.to_config_str().to_string(),
+            bitmap_width: self.bitmap.width,
+            text_encoding: self.text_encoding.to_config_str().to_string(),
+            log_panel_visible: self.log_panel.visible,
+            log_panel_height: self.log_panel.panel_height,
+            log_panel_tab: match self.log_panel.active_tab {
+                log_panel::BottomPanelTab::Log => "log".to_string(),
+                log_panel::BottomPanelTab::Info => "info".to_string(),
+            },
+        };
+        (ws, ls)
+    }
+
+    /// Apply layout settings from config
+    fn apply_layout(&mut self, layout: &config::LayoutSettings) {
+        self.inspector_visible = layout.inspector_visible;
+        self.inspector_endian = match layout.inspector_endian.as_str() {
+            "big" => Endian::Big,
+            _ => Endian::Little,
+        };
+        self.pattern_panel_visible = layout.pattern_panel_visible;
+        self.pattern_panel_width = layout.pattern_panel_width;
+        self.bitmap.visible = layout.bitmap_visible;
+        self.bitmap.panel_width = layout.bitmap_panel_width;
+        self.bitmap.color_mode = bitmap::BitmapColorMode::from_config_str(&layout.bitmap_color_mode);
+        self.bitmap.width = layout.bitmap_width;
+        self.text_encoding = TextEncoding::from_label(&layout.text_encoding)
+            .unwrap_or(TextEncoding::Ascii);
+        self.log_panel.visible = layout.log_panel_visible;
+        self.log_panel.panel_height = layout.log_panel_height;
+        self.log_panel.active_tab = match layout.log_panel_tab.as_str() {
+            "info" => log_panel::BottomPanelTab::Info,
+            _ => log_panel::BottomPanelTab::Log,
+        };
+    }
+
+    /// Save layout state to config file
+    fn save_layout(&mut self) {
+        let (ws, ls) = self.collect_layout();
+        self.settings.window = ws;
+        self.settings.layout = ls;
+        let _ = self.settings.save();
+    }
 
     fn with_sample_data(cx: &mut Context<Self>) -> Self {
         let mut editor = Self::new(cx);
@@ -516,8 +588,21 @@ fn main() {
         // Initialize gpui-component (theme, popup menu, etc.)
         gpui_component::init(cx);
 
+        // Shared weak reference for Quit handler to save layout
+        let quit_entity: Arc<std::sync::Mutex<Option<gpui::WeakEntity<HexEditor>>>> =
+            Arc::new(std::sync::Mutex::new(None));
+        let quit_entity_clone = Arc::clone(&quit_entity);
+
         // Register global Quit action handler
-        cx.on_action(|_: &actions::Quit, cx| {
+        cx.on_action(move |_: &actions::Quit, cx| {
+            // Save layout before quitting
+            if let Some(weak) = quit_entity_clone.lock().unwrap().as_ref() {
+                if let Some(entity) = weak.upgrade() {
+                    let _ = entity.update(cx, |editor: &mut HexEditor, _cx| {
+                        editor.save_layout();
+                    });
+                }
+            }
             ipc::cleanup_socket();
             cx.quit();
         });
@@ -557,11 +642,17 @@ fn main() {
         // Set native menu bar (works on macOS; on Windows, stored but not rendered by gpui)
         cx.set_menus(build_menus());
 
-        // Load settings for window size
+        // Load settings for window size and position
         let settings = Settings::load();
-        let window_width = settings.window.width as f32;
-        let window_height = settings.window.height as f32;
-        let bounds = Bounds::centered(None, size(px(window_width), px(window_height)), cx);
+        let w = px(settings.window.width as f32);
+        let h = px(settings.window.height as f32);
+        let bounds = match (settings.window.x, settings.window.y) {
+            (Some(x), Some(y)) => Bounds {
+                origin: point(px(x as f32), px(y as f32)),
+                size: size(w, h),
+            },
+            _ => Bounds::centered(None, size(w, h), cx),
+        };
         cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -609,10 +700,18 @@ fn main() {
                     cx.focus_self(window);
                 });
 
+                // Store weak reference for Quit handler
+                *quit_entity.lock().unwrap() = Some(entity.downgrade());
+
                 // Set up window close confirmation for unsaved changes
                 let weak_entity = entity.downgrade();
                 window.on_window_should_close(cx, move |window, cx| {
                     if let Some(entity) = weak_entity.upgrade() {
+                        // Save layout before closing
+                        let _ = entity.update(cx, |editor, _cx| {
+                            editor.save_layout();
+                        });
+
                         let editor = entity.read(cx);
 
                         // If force_close is set, allow closing

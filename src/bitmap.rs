@@ -60,6 +60,24 @@ impl BitmapColorMode {
         }
     }
 
+    /// Parse color mode from config string
+    pub fn from_config_str(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "heatmap" => BitmapColorMode::Heatmap,
+            "category" => BitmapColorMode::Category,
+            _ => BitmapColorMode::Grayscale,
+        }
+    }
+
+    /// Get config string for this color mode
+    pub fn to_config_str(&self) -> &'static str {
+        match self {
+            BitmapColorMode::Grayscale => "grayscale",
+            BitmapColorMode::Heatmap => "heatmap",
+            BitmapColorMode::Category => "category",
+        }
+    }
+
     /// Cycle to next color mode
     pub fn next(&self) -> BitmapColorMode {
         match self {
@@ -338,4 +356,30 @@ where
         Delay::from_saturating_duration(Duration::from_millis(0)),
     );
     Arc::new(RenderImage::new(smallvec![frame]))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bitmap_color_mode_roundtrip() {
+        for mode in [
+            BitmapColorMode::Grayscale,
+            BitmapColorMode::Heatmap,
+            BitmapColorMode::Category,
+        ] {
+            let s = mode.to_config_str();
+            let parsed = BitmapColorMode::from_config_str(s);
+            assert_eq!(parsed, mode);
+        }
+    }
+
+    #[test]
+    fn bitmap_color_mode_from_invalid() {
+        assert_eq!(
+            BitmapColorMode::from_config_str("invalid"),
+            BitmapColorMode::Grayscale
+        );
+    }
 }
