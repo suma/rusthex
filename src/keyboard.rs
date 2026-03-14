@@ -213,8 +213,12 @@ fn handle_special_keys(
                     editor.tab_mut().is_searching = false;
                 }
                 editor.tab_mut().search_visible = false;
-                editor.tab_mut().search_results.clear();
-                editor.tab_mut().current_search_index = None;
+                if !editor.settings.editor.vim_mode {
+                    // Non-Vim: clear results on close
+                    editor.tab_mut().search_results.clear();
+                    editor.tab_mut().current_search_index = None;
+                }
+                // Vim mode: keep results for n/N navigation
             } else {
                 return false;
             }
@@ -399,7 +403,14 @@ fn handle_navigation_and_input(
                 editor.confirm_bookmark_comment();
                 cx.notify();
             } else if editor.tab().search_visible {
-                editor.next_search_result();
+                if editor.settings.editor.vim_mode {
+                    // Vim mode: Enter confirms search and closes the bar,
+                    // keeping results for n/N navigation
+                    editor.next_search_result();
+                    editor.tab_mut().search_visible = false;
+                } else {
+                    editor.next_search_result();
+                }
                 cx.notify();
             }
         }
