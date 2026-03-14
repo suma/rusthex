@@ -156,6 +156,16 @@ fn handle_normal_mode(
                 }
                 return true;
             }
+            "o" => {
+                // Ctrl+o = jump back in cursor history
+                editor.navigate_back();
+                return true;
+            }
+            "i" => {
+                // Ctrl+i = jump forward in cursor history
+                editor.navigate_forward();
+                return true;
+            }
             _ => return false,
         }
     }
