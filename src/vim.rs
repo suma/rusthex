@@ -540,7 +540,7 @@ fn handle_visual_mode(
             }
             true
         }
-        "b" if !shift => {
+        "b" if !shift && !ctrl => {
             let count = editor.tab_mut().vim_state.take_count();
             for _ in 0..count {
                 editor.move_cursor_word_backward();
