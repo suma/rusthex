@@ -7,7 +7,8 @@
 //! - Document navigation (Ctrl+Home, Ctrl+End)
 
 use crate::HexEditor;
-use crate::ui::{self, EditMode, HexNibble};
+use crate::encoding::{DisplayChar, decode_for_display};
+use crate::ui::{self, EditMode, EditPane, HexNibble};
 use gpui::{Point, px};
 
 impl HexEditor {
@@ -186,32 +187,129 @@ impl HexEditor {
         self.move_position(end_pos);
     }
 
-    /// Move cursor forward to the next 8-byte boundary (Vim 'w' word motion)
+    /// Move cursor forward to the next word boundary (Vim 'w' motion).
+    /// - Hex pane: 8-byte aligned boundary
+    /// - ASCII pane: skip to next printable/non-printable boundary using current encoding
     pub fn move_cursor_word_forward(&mut self) {
         let current = self.tab().cursor_position;
-        let boundary = 8;
-        let next = ((current / boundary) + 1) * boundary;
         let max_pos = if self.tab().edit_mode == EditMode::Insert {
             self.tab().document.len()
         } else {
             self.tab().document.len().saturating_sub(1)
         };
-        self.move_position(next.min(max_pos));
+
+        if self.tab().edit_pane == EditPane::Ascii {
+            let next = self.find_word_boundary_forward(current, max_pos);
+            self.move_position(next);
+        } else {
+            let boundary = 8;
+            let next = ((current / boundary) + 1) * boundary;
+            self.move_position(next.min(max_pos));
+        }
     }
 
-    /// Move cursor backward to the previous 8-byte boundary (Vim 'b' word motion)
+    /// Move cursor backward to the previous word boundary (Vim 'b' motion).
+    /// - Hex pane: 8-byte aligned boundary
+    /// - ASCII pane: skip to previous printable/non-printable boundary using current encoding
     pub fn move_cursor_word_backward(&mut self) {
         let current = self.tab().cursor_position;
-        let boundary = 8;
         if current == 0 {
             return;
         }
-        let prev = if current % boundary == 0 {
-            current - boundary
+
+        if self.tab().edit_pane == EditPane::Ascii {
+            let prev = self.find_word_boundary_backward(current);
+            self.move_position(prev);
         } else {
-            (current / boundary) * boundary
-        };
-        self.move_position(prev);
+            let boundary = 8;
+            let prev = if current % boundary == 0 {
+                current - boundary
+            } else {
+                (current / boundary) * boundary
+            };
+            self.move_position(prev);
+        }
+    }
+
+    /// Find the next word boundary forward from `pos`.
+    /// A "word" is a contiguous run of printable characters or a contiguous run
+    /// of non-printable bytes, determined by the current text encoding.
+    fn find_word_boundary_forward(&self, pos: usize, max_pos: usize) -> usize {
+        let doc_len = self.tab().document.len();
+        if pos >= max_pos || doc_len == 0 {
+            return max_pos;
+        }
+
+        // Decode a window around the cursor (enough context for word search)
+        let window_start = pos;
+        let window_end = (pos + 256).min(doc_len);
+        let data = self
+            .tab()
+            .document
+            .get_slice(window_start..window_end)
+            .unwrap_or_default();
+        if data.is_empty() {
+            return max_pos;
+        }
+
+        let chars = decode_for_display(&data, self.text_encoding);
+        let is_printable = |dc: &DisplayChar| matches!(dc, DisplayChar::Char(_));
+
+        // Current char category
+        let cur_printable = is_printable(&chars[0]);
+
+        // Skip rest of current word (same category)
+        let mut i = 0;
+        while i < chars.len() && is_printable(&chars[i]) == cur_printable {
+            i += 1;
+        }
+
+        // Skip non-printable gap to reach next word start (skip one class boundary)
+        // If we moved from printable → non-printable, we're at the start of non-printable run
+        // which counts as a "word" in Vim terms, so stop here.
+
+        (window_start + i).min(max_pos)
+    }
+
+    /// Find the previous word boundary backward from `pos`.
+    fn find_word_boundary_backward(&self, pos: usize) -> usize {
+        if pos == 0 {
+            return 0;
+        }
+
+        let doc_len = self.tab().document.len();
+        if doc_len == 0 {
+            return 0;
+        }
+
+        // Decode a window behind the cursor
+        let window_start = pos.saturating_sub(256);
+        let window_end = pos.min(doc_len);
+        let data = self
+            .tab()
+            .document
+            .get_slice(window_start..window_end)
+            .unwrap_or_default();
+        if data.is_empty() {
+            return 0;
+        }
+
+        let chars = decode_for_display(&data, self.text_encoding);
+        let is_printable = |dc: &DisplayChar| matches!(dc, DisplayChar::Char(_));
+
+        // pos corresponds to chars[chars.len()] (one past the window)
+        // Look at the byte just before pos → chars[chars.len() - 1]
+        let mut i = chars.len();
+
+        // Category of the byte just before cursor
+        let cur_printable = is_printable(&chars[i - 1]);
+
+        // Skip backwards while same category
+        while i > 0 && is_printable(&chars[i - 1]) == cur_printable {
+            i -= 1;
+        }
+
+        window_start + i
     }
 
     /// Push the current cursor position onto the navigation history.
