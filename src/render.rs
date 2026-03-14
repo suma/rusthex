@@ -1901,16 +1901,33 @@ impl HexEditor {
                     .gap_4()
                     .py_1()
                     .child(
-                        // Edit mode indicator
-                        div()
-                            .text_color(match self.tab().edit_mode {
-                                EditMode::Overwrite => t.text_primary,
-                                EditMode::Insert => t.text_insert_mode,
-                            })
-                            .child(match self.tab().edit_mode {
-                                EditMode::Overwrite => "OVR",
-                                EditMode::Insert => "INS",
-                            })
+                        // Edit mode / Vim mode indicator
+                        if self.settings.editor.vim_mode {
+                            match self.tab().vim_state.mode {
+                                crate::vim::VimMode::Normal => {
+                                    div().text_color(t.accent_success).child("NORMAL")
+                                }
+                                crate::vim::VimMode::Insert => {
+                                    div().text_color(t.text_insert_mode).child("INSERT")
+                                }
+                                crate::vim::VimMode::Visual => {
+                                    div().text_color(t.text_warning).child("VISUAL")
+                                }
+                                crate::vim::VimMode::Command => {
+                                    let cmd = format!(":{}█", self.tab().vim_state.command_buffer);
+                                    div().text_color(t.accent_primary).child(cmd)
+                                }
+                            }
+                        } else {
+                            match self.tab().edit_mode {
+                                EditMode::Overwrite => {
+                                    div().text_color(t.text_primary).child("OVR")
+                                }
+                                EditMode::Insert => {
+                                    div().text_color(t.text_insert_mode).child("INS")
+                                }
+                            }
+                        }
                     )
                     .child(
                         // Cursor position

@@ -38,6 +38,12 @@ pub fn handle_key_event(
     if handle_command_shortcuts(editor, event, window, cx) {
         return;
     }
+    // Vim mode intercept (after Cmd/Ctrl shortcuts, before special keys)
+    if editor.settings.editor.vim_mode {
+        if crate::vim::handle_vim_key(editor, event, window, cx) {
+            return;
+        }
+    }
     if handle_special_keys(editor, event, cx) {
         return;
     }
@@ -238,7 +244,7 @@ fn handle_special_keys(
 }
 
 /// Default visible rows for page navigation (approximately one screen)
-const PAGE_ROWS: usize = 20;
+pub(crate) const PAGE_ROWS: usize = 20;
 
 /// Handle navigation keys and text input
 fn handle_navigation_and_input(

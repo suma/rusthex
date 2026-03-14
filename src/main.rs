@@ -40,6 +40,7 @@ mod tab;
 mod tabs;
 mod theme;
 mod ui;
+mod vim;
 #[cfg(target_os = "windows")]
 mod windows_menu;
 

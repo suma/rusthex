@@ -186,6 +186,34 @@ impl HexEditor {
         self.move_position(end_pos);
     }
 
+    /// Move cursor forward to the next 8-byte boundary (Vim 'w' word motion)
+    pub fn move_cursor_word_forward(&mut self) {
+        let current = self.tab().cursor_position;
+        let boundary = 8;
+        let next = ((current / boundary) + 1) * boundary;
+        let max_pos = if self.tab().edit_mode == EditMode::Insert {
+            self.tab().document.len()
+        } else {
+            self.tab().document.len().saturating_sub(1)
+        };
+        self.move_position(next.min(max_pos));
+    }
+
+    /// Move cursor backward to the previous 8-byte boundary (Vim 'b' word motion)
+    pub fn move_cursor_word_backward(&mut self) {
+        let current = self.tab().cursor_position;
+        let boundary = 8;
+        if current == 0 {
+            return;
+        }
+        let prev = if current % boundary == 0 {
+            current - boundary
+        } else {
+            (current / boundary) * boundary
+        };
+        self.move_position(prev);
+    }
+
     /// Push the current cursor position onto the navigation history.
     /// Called before a "big jump" (search, bookmark, page up/down, etc.)
     /// so the user can navigate back to it later.

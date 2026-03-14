@@ -59,6 +59,8 @@ pub struct EditorSettings {
     pub default_endian: DefaultEndian,
     /// Maximum number of undo levels
     pub max_undo_levels: usize,
+    /// Enable Vim-like keybindings (Normal/Insert/Visual/Command modes)
+    pub vim_mode: bool,
 }
 
 impl Default for EditorSettings {
@@ -66,6 +68,7 @@ impl Default for EditorSettings {
         Self {
             default_endian: DefaultEndian::default(),
             max_undo_levels: 1000,
+            vim_mode: false,
         }
     }
 }

@@ -13,6 +13,7 @@ use crate::pattern::PatternState;
 use crate::render_cache::RenderCache;
 use crate::search::SearchMode;
 use crate::ui::{EditMode, EditPane, HexNibble};
+use crate::vim::VimState;
 
 /// Represents a single editor tab with its own document and state
 pub struct EditorTab {
@@ -57,6 +58,8 @@ pub struct EditorTab {
     pub cursor_history_index: usize,
     // Cached file type string from `file` command detection
     pub file_type: Option<String>,
+    // Vim mode state
+    pub vim_state: VimState,
 }
 
 impl EditorTab {
@@ -94,6 +97,7 @@ impl EditorTab {
             cursor_history: Vec::new(),
             cursor_history_index: 0,
             file_type: None,
+            vim_state: VimState::new(),
         }
     }
 
