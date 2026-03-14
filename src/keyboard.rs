@@ -8,6 +8,32 @@ use std::sync::atomic::Ordering;
 
 use crate::{EditMode, EditPane, HexEditor, SearchMode};
 
+/// US keyboard layout: map unshifted key to its shifted symbol.
+const SHIFT_MAP: &[(char, char)] = &[
+    ('1', '!'), ('2', '@'), ('3', '#'), ('4', '$'), ('5', '%'),
+    ('6', '^'), ('7', '&'), ('8', '*'), ('9', '('), ('0', ')'),
+    ('-', '_'), ('=', '+'), ('[', '{'), (']', '}'), ('\\', '|'),
+    (';', ':'), ('\'', '"'), (',', '<'), ('.', '>'), ('/', '?'),
+    ('`', '~'),
+];
+
+/// Apply Shift modifier to a character (uppercase + symbol mapping).
+fn apply_shift(c: char) -> char {
+    if c.is_ascii_lowercase() {
+        c.to_ascii_uppercase()
+    } else {
+        SHIFT_MAP.iter()
+            .find(|(from, _)| *from == c)
+            .map(|(_, to)| *to)
+            .unwrap_or(c)
+    }
+}
+
+/// Returns true if the character is printable ASCII (space through tilde).
+fn is_printable_ascii(c: char) -> bool {
+    c >= ' ' && c <= '~'
+}
+
 /// Check if Ctrl (Windows/Linux) or Cmd (macOS) modifier is held
 fn is_cmd(event: &KeyDownEvent) -> bool {
     event.keystroke.modifiers.control || event.keystroke.modifiers.platform
@@ -435,39 +461,12 @@ fn handle_navigation_and_input(
             if key.len() == 1 {
                 let mut c = key.chars().next().unwrap();
 
-                // Handle Shift modifier for uppercase and symbols
                 if shift {
-                    c = match c {
-                        'a'..='z' => c.to_ascii_uppercase(),
-                        // Handle shifted number row symbols
-                        '1' => '!',
-                        '2' => '@',
-                        '3' => '#',
-                        '4' => '$',
-                        '5' => '%',
-                        '6' => '^',
-                        '7' => '&',
-                        '8' => '*',
-                        '9' => '(',
-                        '0' => ')',
-                        '-' => '_',
-                        '=' => '+',
-                        '[' => '{',
-                        ']' => '}',
-                        '\\' => '|',
-                        ';' => ':',
-                        '\'' => '"',
-                        ',' => '<',
-                        '.' => '>',
-                        '/' => '?',
-                        '`' => '~',
-                        _ => c, // Keep other characters as-is
-                    };
+                    c = apply_shift(c);
                 }
 
                 if editor.pattern_dropdown_open {
-                    // Add character to pattern filter query
-                    if (c >= ' ' && c <= '~') || c.is_whitespace() {
+                    if is_printable_ascii(c) || c.is_whitespace() {
                         editor.pattern_filter_query.push(c);
                         let filtered = editor.get_filtered_patterns();
                         editor.pattern_filter_index =
@@ -481,14 +480,12 @@ fn handle_navigation_and_input(
                         cx.notify();
                     }
                 } else if editor.tab().bookmark_comment_editing {
-                    // Add character to bookmark comment
-                    if (c >= ' ' && c <= '~') || c.is_whitespace() {
+                    if is_printable_ascii(c) || c.is_whitespace() {
                         editor.tab_mut().bookmark_comment_text.push(c);
                         cx.notify();
                     }
                 } else if editor.tab().search_visible {
-                    // Add character to search query
-                    if (c >= ' ' && c <= '~') || c.is_whitespace() {
+                    if is_printable_ascii(c) || c.is_whitespace() {
                         editor.tab_mut().search_query.push(c);
                         editor.schedule_search(cx);
                         cx.notify();
@@ -503,7 +500,7 @@ fn handle_navigation_and_input(
                             }
                         }
                         EditPane::Ascii => {
-                            if c >= ' ' && c <= '~' {
+                            if is_printable_ascii(c) {
                                 editor.input_ascii(c);
                                 cx.notify();
                             }
