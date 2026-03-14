@@ -476,6 +476,20 @@ impl Document {
     }
 
     /// Set byte at offset (backward compatible with old API)
+    /// Push an undo record, trimming oldest if over limit, and clear redo stack.
+    fn push_undo_record(&mut self, operation: EditOperation) {
+        let undo_record = UndoRecord {
+            operation,
+            pieces_snapshot: self.pieces.clone(),
+            cached_length: self.cached_length,
+        };
+        self.undo_stack.push(undo_record);
+        if self.undo_stack.len() > self.max_undo_levels {
+            self.undo_stack.remove(0);
+        }
+        self.redo_stack.clear();
+    }
+
     pub fn set_byte(&mut self, offset: usize, value: u8) -> Result<(), String> {
         if offset >= self.cached_length {
             return Err(format!(
@@ -487,21 +501,11 @@ impl Document {
         let old_value = self.get_byte(offset).unwrap();
 
         if old_value != value {
-            // Save snapshot for undo
-            let undo_record = UndoRecord {
-                operation: EditOperation::Replace {
-                    offset,
-                    old_bytes: vec![old_value],
-                    new_bytes: vec![value],
-                },
-                pieces_snapshot: self.pieces.clone(),
-                cached_length: self.cached_length,
-            };
-            self.undo_stack.push(undo_record);
-            if self.undo_stack.len() > self.max_undo_levels {
-                self.undo_stack.remove(0);
-            }
-            self.redo_stack.clear();
+            self.push_undo_record(EditOperation::Replace {
+                offset,
+                old_bytes: vec![old_value],
+                new_bytes: vec![value],
+            });
 
             // Add new byte to add_buffer
             let add_offset = self.add_buffer.len();
@@ -560,20 +564,10 @@ impl Document {
             return Ok(());
         }
 
-        // Save snapshot for undo
-        let undo_record = UndoRecord {
-            operation: EditOperation::Insert {
-                offset,
-                data: data.to_vec(),
-            },
-            pieces_snapshot: self.pieces.clone(),
-            cached_length: self.cached_length,
-        };
-        self.undo_stack.push(undo_record);
-        if self.undo_stack.len() > self.max_undo_levels {
-            self.undo_stack.remove(0);
-        }
-        self.redo_stack.clear();
+        self.push_undo_record(EditOperation::Insert {
+            offset,
+            data: data.to_vec(),
+        });
 
         // Add data to add_buffer
         let add_offset = self.add_buffer.len();
@@ -621,20 +615,10 @@ impl Document {
         // Collect deleted bytes for undo (bulk copy via piece table)
         let deleted_bytes = self.get_slice(offset..end).unwrap_or_default();
 
-        // Save snapshot for undo
-        let undo_record = UndoRecord {
-            operation: EditOperation::Delete {
-                offset,
-                deleted_bytes,
-            },
-            pieces_snapshot: self.pieces.clone(),
-            cached_length: self.cached_length,
-        };
-        self.undo_stack.push(undo_record);
-        if self.undo_stack.len() > self.max_undo_levels {
-            self.undo_stack.remove(0);
-        }
-        self.redo_stack.clear();
+        self.push_undo_record(EditOperation::Delete {
+            offset,
+            deleted_bytes,
+        });
 
         // Find the range of pieces affected
         self.delete_piece_range(offset, count);
@@ -735,21 +719,11 @@ impl Document {
         // Collect old bytes for undo (bulk copy via piece table)
         let old_bytes = self.get_slice(offset..end).unwrap_or_default();
 
-        // Save snapshot for undo
-        let undo_record = UndoRecord {
-            operation: EditOperation::Replace {
-                offset,
-                old_bytes,
-                new_bytes: data.to_vec(),
-            },
-            pieces_snapshot: self.pieces.clone(),
-            cached_length: self.cached_length,
-        };
-        self.undo_stack.push(undo_record);
-        if self.undo_stack.len() > self.max_undo_levels {
-            self.undo_stack.remove(0);
-        }
-        self.redo_stack.clear();
+        self.push_undo_record(EditOperation::Replace {
+            offset,
+            old_bytes,
+            new_bytes: data.to_vec(),
+        });
 
         // Delete old range
         if count > 0 {
