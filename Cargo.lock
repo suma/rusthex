@@ -499,6 +499,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
+name = "binary-analysis"
+version = "0.1.0"
+
+[[package]]
 name = "bindgen"
 version = "0.71.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4833,6 +4837,7 @@ dependencies = [
 name = "rusthex"
 version = "0.1.0"
 dependencies = [
+ "binary-analysis",
  "chrono",
  "dirs 5.0.1",
  "encoding_rs",
