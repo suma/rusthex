@@ -276,33 +276,51 @@ fn handle_normal_mode(
     }
 
     match key {
-        // Movement
-        "h" => {
+        // Movement (h/j/k/l and arrow keys share the same behavior)
+        "h" | "left" => {
             let count = editor.tab_mut().vim_state.take_count();
             for _ in 0..count {
                 editor.move_cursor_left();
             }
             true
         }
-        "l" => {
+        "l" | "right" => {
             let count = editor.tab_mut().vim_state.take_count();
             for _ in 0..count {
                 editor.move_cursor_right();
             }
             true
         }
-        "j" => {
+        "j" | "down" => {
             let count = editor.tab_mut().vim_state.take_count();
             for _ in 0..count {
                 editor.move_cursor_down();
             }
             true
         }
-        "k" => {
+        "k" | "up" => {
             let count = editor.tab_mut().vim_state.take_count();
             for _ in 0..count {
                 editor.move_cursor_up();
             }
+            true
+        }
+        "home" => {
+            editor.move_cursor_home();
+            true
+        }
+        "end" => {
+            editor.move_cursor_end();
+            true
+        }
+        "pageup" => {
+            editor.push_cursor_history();
+            editor.move_cursor_page_up(crate::keyboard::PAGE_ROWS);
+            true
+        }
+        "pagedown" => {
+            editor.push_cursor_history();
+            editor.move_cursor_page_down(crate::keyboard::PAGE_ROWS);
             true
         }
         "0" => {
@@ -461,32 +479,50 @@ fn handle_visual_mode(
             true
         }
         // Movement keys (selection_start stays fixed, cursor_position moves)
-        "h" => {
+        "h" | "left" => {
             let count = editor.tab_mut().vim_state.take_count();
             for _ in 0..count {
                 editor.move_cursor_left();
             }
             true
         }
-        "l" => {
+        "l" | "right" => {
             let count = editor.tab_mut().vim_state.take_count();
             for _ in 0..count {
                 editor.move_cursor_right();
             }
             true
         }
-        "j" => {
+        "j" | "down" => {
             let count = editor.tab_mut().vim_state.take_count();
             for _ in 0..count {
                 editor.move_cursor_down();
             }
             true
         }
-        "k" => {
+        "k" | "up" => {
             let count = editor.tab_mut().vim_state.take_count();
             for _ in 0..count {
                 editor.move_cursor_up();
             }
+            true
+        }
+        "home" => {
+            editor.move_cursor_home();
+            true
+        }
+        "end" => {
+            editor.move_cursor_end();
+            true
+        }
+        "pageup" => {
+            editor.push_cursor_history();
+            editor.move_cursor_page_up(crate::keyboard::PAGE_ROWS);
+            true
+        }
+        "pagedown" => {
+            editor.push_cursor_history();
+            editor.move_cursor_page_down(crate::keyboard::PAGE_ROWS);
             true
         }
         "0" => {
