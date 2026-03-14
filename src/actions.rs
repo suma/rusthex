@@ -46,5 +46,6 @@ actions!(
         FindPrev,
         // Analyze
         AnalyzeSelection,
+        AnalyzeEntropy,
     ]
 );

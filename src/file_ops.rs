@@ -497,6 +497,57 @@ impl HexEditor {
         .detach();
     }
 
+    /// Analyze Shannon entropy of the current selection and log results.
+    pub fn analyze_entropy(&mut self, cx: &mut Context<Self>) {
+        let (sel_start, sel_end) = match self.selection_range() {
+            Some(range) => range,
+            None => {
+                self.log(
+                    crate::log_panel::LogLevel::Info,
+                    "No selection — select a range to analyze entropy",
+                );
+                cx.notify();
+                return;
+            }
+        };
+
+        let bytes = match self.tab().document.get_slice(sel_start..sel_end + 1) {
+            Some(b) if !b.is_empty() => b,
+            _ => {
+                self.log(
+                    crate::log_panel::LogLevel::Warning,
+                    "Could not read selected bytes",
+                );
+                cx.notify();
+                return;
+            }
+        };
+
+        let entropy = shannon_entropy(&bytes);
+        let desc = entropy_description(entropy);
+
+        // Count unique byte values
+        let mut seen = [false; 256];
+        for &b in &bytes {
+            seen[b as usize] = true;
+        }
+        let unique_count = seen.iter().filter(|&&s| s).count();
+
+        self.log(
+            crate::log_panel::LogLevel::Info,
+            format!(
+                "Entropy: {:.4} bits/byte ({} bytes, {} unique values) — {}",
+                entropy,
+                bytes.len(),
+                unique_count,
+                desc,
+            ),
+        );
+        self.log_panel.visible = true;
+        self.log_panel.active_tab = crate::log_panel::BottomPanelTab::Log;
+        cx.notify();
+    }
+
     /// Detect file type using the `file` command and log the result
     pub fn detect_file_type(&mut self, cx: &mut Context<Self>) {
         // Check if `file` command exists on PATH
@@ -570,6 +621,43 @@ impl HexEditor {
     }
 }
 
+/// Calculate Shannon entropy of a byte slice (bits per byte, 0.0 to 8.0).
+pub fn shannon_entropy(data: &[u8]) -> f64 {
+    if data.is_empty() {
+        return 0.0;
+    }
+    let mut freq = [0u64; 256];
+    for &b in data {
+        freq[b as usize] += 1;
+    }
+    let len = data.len() as f64;
+    let mut entropy = 0.0;
+    for &count in &freq {
+        if count > 0 {
+            let p = count as f64 / len;
+            entropy -= p * p.log2();
+        }
+    }
+    entropy
+}
+
+/// Return a short description of data characteristics based on entropy value.
+fn entropy_description(entropy: f64) -> &'static str {
+    if entropy < 1.0 {
+        "Very low entropy — likely uniform/empty data"
+    } else if entropy < 3.5 {
+        "Low entropy — likely plain text or structured data"
+    } else if entropy < 5.0 {
+        "Medium-low entropy — structured binary data"
+    } else if entropy < 6.5 {
+        "Medium entropy — executable code or multimedia"
+    } else if entropy < 7.5 {
+        "High entropy — possibly compressed data"
+    } else {
+        "Very high entropy — likely encrypted or compressed data"
+    }
+}
+
 /// Split a command string into arguments, respecting single and double quotes.
 fn shell_words(input: &str) -> Vec<String> {
     let mut args = Vec::new();
@@ -629,6 +717,49 @@ fn find_file_command() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_entropy_empty() {
+        assert_eq!(shannon_entropy(&[]), 0.0);
+    }
+
+    #[test]
+    fn test_entropy_uniform_single_value() {
+        // All same bytes → entropy = 0
+        let data = vec![0xAA; 1024];
+        assert!((shannon_entropy(&data) - 0.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_entropy_two_equal_values() {
+        // Two equally distributed values → entropy = 1.0
+        let mut data = Vec::new();
+        for _ in 0..512 {
+            data.push(0x00);
+            data.push(0xFF);
+        }
+        assert!((shannon_entropy(&data) - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_entropy_all_256_values_equal() {
+        // All 256 byte values equally distributed → entropy = 8.0
+        let mut data = Vec::new();
+        for _ in 0..100 {
+            for b in 0u8..=255 {
+                data.push(b);
+            }
+        }
+        assert!((shannon_entropy(&data) - 8.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_entropy_plain_text() {
+        // ASCII text should have low-to-medium entropy
+        let data = b"Hello, World! This is a test of entropy calculation for plain text data.";
+        let e = shannon_entropy(data);
+        assert!(e > 2.0 && e < 5.0, "Plain text entropy: {}", e);
+    }
 
     #[test]
     fn test_shell_words_basic() {
