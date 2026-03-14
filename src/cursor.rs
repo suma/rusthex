@@ -12,18 +12,22 @@ use crate::ui::{self, EditMode, EditPane, HexNibble};
 use gpui::{Point, px};
 
 impl HexEditor {
+    /// Maximum valid cursor position, accounting for Insert mode (allows append).
+    fn max_cursor_position(&self) -> usize {
+        let doc_len = self.tab().document.len();
+        if self.tab().edit_mode == EditMode::Insert {
+            doc_len
+        } else {
+            doc_len.saturating_sub(1)
+        }
+    }
+
     /// Calculate new position from current position with relative offset.
     /// Handles boundary checks to prevent underflow/overflow.
     /// Based on suma/hex cursor.cpp getRelativePosition.
     pub fn get_relative_position(&self, relative_pos: i64) -> usize {
         let current_pos = self.tab().cursor_position;
-        let doc_len = self.tab().document.len();
-        // In Insert mode, allow one position past the end of the document (for appending)
-        let max_pos = if self.tab().edit_mode == EditMode::Insert {
-            doc_len
-        } else {
-            doc_len.saturating_sub(1)
-        };
+        let max_pos = self.max_cursor_position();
 
         if relative_pos < 0 {
             // Moving backward
@@ -48,12 +52,7 @@ impl HexEditor {
     /// Resets nibble state and ensures cursor visibility.
     /// Based on suma/hex cursor.cpp movePosition.
     pub fn move_position(&mut self, new_pos: usize) {
-        let max_pos = if self.tab().edit_mode == EditMode::Insert {
-            self.tab().document.len()
-        } else {
-            self.tab().document.len().saturating_sub(1)
-        };
-        self.tab_mut().cursor_position = new_pos.min(max_pos);
+        self.tab_mut().cursor_position = new_pos.min(self.max_cursor_position());
         self.tab_mut().hex_nibble = HexNibble::High;
         self.ensure_cursor_visible_by_row();
     }
@@ -109,55 +108,44 @@ impl HexEditor {
         }
     }
 
-    /// Move cursor left by one byte
-    pub fn move_cursor_left(&mut self) {
-        let new_pos = self.get_relative_position(-1);
+    /// Move cursor by a relative byte offset, only if the position actually changes.
+    fn move_cursor_by_offset(&mut self, offset: i64) {
+        let new_pos = self.get_relative_position(offset);
         if new_pos != self.tab().cursor_position {
             self.move_position(new_pos);
         }
+    }
+
+    /// Move cursor left by one byte
+    pub fn move_cursor_left(&mut self) {
+        self.move_cursor_by_offset(-1);
     }
 
     /// Move cursor right by one byte
     pub fn move_cursor_right(&mut self) {
-        let new_pos = self.get_relative_position(1);
-        if new_pos != self.tab().cursor_position {
-            self.move_position(new_pos);
-        }
+        self.move_cursor_by_offset(1);
     }
 
     /// Move cursor up by one row
     pub fn move_cursor_up(&mut self) {
-        let offset = -(self.bytes_per_row() as i64);
-        let new_pos = self.get_relative_position(offset);
-        if new_pos != self.tab().cursor_position {
-            self.move_position(new_pos);
-        }
+        self.move_cursor_by_offset(-(self.bytes_per_row() as i64));
     }
 
     /// Move cursor down by one row
     pub fn move_cursor_down(&mut self) {
-        let offset = self.bytes_per_row() as i64;
-        let new_pos = self.get_relative_position(offset);
-        if new_pos != self.tab().cursor_position {
-            self.move_position(new_pos);
-        }
+        self.move_cursor_by_offset(self.bytes_per_row() as i64);
     }
 
     /// Page Up: Move cursor up by one page
     pub fn move_cursor_page_up(&mut self, visible_rows: usize) {
-        let rows_to_move = visible_rows.saturating_sub(1).max(1);
-        let bytes_to_move = rows_to_move * self.bytes_per_row();
-        let offset = -(bytes_to_move as i64);
-        let new_pos = self.get_relative_position(offset);
-        self.move_position(new_pos);
+        let bytes = visible_rows.saturating_sub(1).max(1) * self.bytes_per_row();
+        self.move_position(self.get_relative_position(-(bytes as i64)));
     }
 
     /// Page Down: Move cursor down by one page
     pub fn move_cursor_page_down(&mut self, visible_rows: usize) {
-        let rows_to_move = visible_rows.saturating_sub(1).max(1);
-        let bytes_to_move = rows_to_move * self.bytes_per_row();
-        let new_pos = self.get_relative_position(bytes_to_move as i64);
-        self.move_position(new_pos);
+        let bytes = visible_rows.saturating_sub(1).max(1) * self.bytes_per_row();
+        self.move_position(self.get_relative_position(bytes as i64));
     }
 
     /// Home: Move cursor to the beginning of the current row
@@ -192,11 +180,7 @@ impl HexEditor {
     /// - ASCII pane: skip to next printable/non-printable boundary using current encoding
     pub fn move_cursor_word_forward(&mut self) {
         let current = self.tab().cursor_position;
-        let max_pos = if self.tab().edit_mode == EditMode::Insert {
-            self.tab().document.len()
-        } else {
-            self.tab().document.len().saturating_sub(1)
-        };
+        let max_pos = self.max_cursor_position();
 
         if self.tab().edit_pane == EditPane::Ascii {
             let next = self.find_word_boundary_forward(current, max_pos);
