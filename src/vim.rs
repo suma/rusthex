@@ -127,6 +127,9 @@ fn handle_normal_mode(
     let ctrl = event.keystroke.modifiers.control;
     let shift = event.keystroke.modifiers.shift;
 
+    // Normal mode never has selection (that's Visual mode)
+    editor.clear_selection();
+
     // Ctrl+f / Ctrl+b for page navigation
     if ctrl {
         match key {
