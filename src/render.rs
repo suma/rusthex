@@ -664,7 +664,7 @@ impl HexEditor {
                                         .menu_with_enable("Open Selection in New Tab", Box::new(actions::OpenSelectionInNewTab), has_selection)
                                         .separator()
                                         .menu_with_enable("Analyze Selection", Box::new(actions::AnalyzeSelection), has_selection)
-                                        .menu_with_enable("Analyze Entropy", Box::new(actions::AnalyzeEntropy), has_selection)
+                                        .menu_with_enable("Analyze Binary", Box::new(actions::AnalyzeBinary), has_selection)
                                         .separator()
                                         .menu("Select All", Box::new(actions::SelectAll))
                                         .separator()
@@ -3389,8 +3389,8 @@ impl Render for HexEditor {
             .on_action(cx.listener(|this, _: &actions::AnalyzeSelection, _window, cx| {
                 this.analyze_selection(cx);
             }))
-            .on_action(cx.listener(|this, _: &actions::AnalyzeEntropy, _window, cx| {
-                this.analyze_entropy(cx);
+            .on_action(cx.listener(|this, _: &actions::AnalyzeBinary, _window, cx| {
+                this.analyze_binary(cx);
             }))
             .on_action(cx.listener(|this, _: &actions::About, _window, cx| {
                 this.about_visible = !this.about_visible;

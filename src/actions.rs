@@ -46,6 +46,6 @@ actions!(
         FindPrev,
         // Analyze
         AnalyzeSelection,
-        AnalyzeEntropy,
+        AnalyzeBinary,
     ]
 );

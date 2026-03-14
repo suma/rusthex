@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/pattern-lang", "crates/rusthex-mcp", "crates/rusthex-ipc"]
+members = ["crates/pattern-lang", "crates/rusthex-mcp", "crates/rusthex-ipc", "crates/binary-analysis"]
 resolver = "2"
 
 [package]
@@ -21,6 +21,7 @@ memchr = "2.7"
 image = "0.25"
 smallvec = "1.15"
 pattern-lang = { path = "crates/pattern-lang" }
+binary-analysis = { path = "crates/binary-analysis" }
 rusthex-ipc = { path = "crates/rusthex-ipc" }
 serde_json = "1"
 raw-window-handle = "0.6"
