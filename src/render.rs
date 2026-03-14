@@ -2856,7 +2856,14 @@ impl Render for HexEditor {
         // which already represents the content area (excluding header and status bar)
         let viewport_bounds = self.tab().scroll_handle.bounds();
         let viewport_height = viewport_bounds.size.height;
-        let content_height = viewport_height.max(px(20.0));
+        // On the first frame, scroll_handle.bounds() returns zero before layout
+        // is computed. Use a reasonable fallback and schedule a re-render.
+        let content_height = if f32::from(viewport_height) < 1.0 {
+            cx.notify();
+            px(self.content_view_rows.max(40) as f32 * self.row_height() as f32)
+        } else {
+            viewport_height.max(px(20.0))
+        };
 
         let anchor_row = self.tab().scroll_logical_row;
         let visible_range = ui::calculate_visible_range(
