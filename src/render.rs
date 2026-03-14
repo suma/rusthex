@@ -52,6 +52,47 @@ fn inspector_float_row(
     inspector_row(label, display, label_color, value_color, value_width)
 }
 
+/// Create a dropdown menu container with standard styling (absolute, bordered, shadow).
+fn dropdown_menu_container(bg: gpui::Hsla, border: gpui::Hsla) -> gpui::Div {
+    div()
+        .absolute()
+        .top(px(24.0))
+        .left_0()
+        .bg(bg)
+        .border_1()
+        .border_color(border)
+        .rounded_md()
+        .shadow_lg()
+        .py_1()
+        .min_w(px(100.0))
+}
+
+/// Create a single dropdown menu item with standard styling.
+fn dropdown_menu_item(
+    id: impl Into<SharedString>,
+    label: String,
+    is_selected: bool,
+    bg_normal: gpui::Hsla,
+    bg_selected: gpui::Hsla,
+    bg_hover: gpui::Hsla,
+    text_normal: gpui::Hsla,
+    text_selected: gpui::Hsla,
+) -> gpui::Stateful<gpui::Div> {
+    div()
+        .id(id.into())
+        .px_3()
+        .py_1()
+        .cursor_pointer()
+        .bg(if is_selected { bg_selected } else { bg_normal })
+        .text_color(if is_selected { text_selected } else { text_normal })
+        .hover(move |h| h.bg(if is_selected { bg_selected } else { bg_hover }))
+        .child(SharedString::from(if is_selected {
+            format!("\u{2713} {}", label)
+        } else {
+            format!("  {}", label)
+        }))
+}
+
 /// Bundle of parameters computed in the render() preamble
 pub(crate) struct RenderParams {
     pub font_name: String,
@@ -149,38 +190,22 @@ impl HexEditor {
                             )
                             .when(self.encoding_dropdown_open, |el| {
                                 el.child(deferred(
-                                    div()
-                                        .absolute()
-                                        .top(px(24.0))
-                                        .left_0()
-                                        .bg(t_bg_elevated)
-                                        .border_1()
-                                        .border_color(t_border_dropdown)
-                                        .rounded_md()
-                                        .shadow_lg()
-                                        .py_1()
-                                        .min_w(px(100.0))
+                                    dropdown_menu_container(t_bg_elevated, t_border_dropdown)
                                         .children(TextEncoding::all().iter().map(|enc| {
                                             let is_selected = self.text_encoding == *enc;
                                             let enc_copy = *enc;
-                                            div()
-                                                .id(SharedString::from(format!("enc-{}", enc.label())))
-                                                .px_3()
-                                                .py_1()
-                                                .cursor_pointer()
-                                                .bg(if is_selected { t_accent_primary } else { t_bg_elevated })
-                                                .text_color(if is_selected { t_text_on_accent } else { t_text_secondary })
-                                                .hover(|h| h.bg(if is_selected { t_accent_primary } else { t_bg_hover_secondary }))
-                                                .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event: &gpui::MouseDownEvent, _window, cx| {
-                                                    this.set_encoding(enc_copy);
-                                                    this.encoding_dropdown_open = false;
-                                                    cx.notify();
-                                                }))
-                                                .child(if is_selected {
-                                                    format!("\u{2713} {}", enc.label())
-                                                } else {
-                                                    format!("  {}", enc.label())
-                                                })
+                                            dropdown_menu_item(
+                                                format!("enc-{}", enc.label()),
+                                                enc.label().to_string(),
+                                                is_selected,
+                                                t_bg_elevated, t_accent_primary, t_bg_hover_secondary,
+                                                t_text_secondary, t_text_on_accent,
+                                            )
+                                            .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event: &gpui::MouseDownEvent, _window, cx| {
+                                                this.set_encoding(enc_copy);
+                                                this.encoding_dropdown_open = false;
+                                                cx.notify();
+                                            }))
                                         }))
                                 ).with_priority(100))
                             })
@@ -216,38 +241,22 @@ impl HexEditor {
                             )
                             .when(self.theme_dropdown_open, |el| {
                                 el.child(deferred(
-                                    div()
-                                        .absolute()
-                                        .top(px(24.0))
-                                        .left_0()
-                                        .bg(t_bg_elevated)
-                                        .border_1()
-                                        .border_color(t_border_dropdown)
-                                        .rounded_md()
-                                        .shadow_lg()
-                                        .py_1()
-                                        .min_w(px(100.0))
+                                    dropdown_menu_container(t_bg_elevated, t_border_dropdown)
                                         .children(ThemeName::all().iter().map(|name| {
                                             let is_selected = *name == current_theme_name;
                                             let name_copy = *name;
-                                            div()
-                                                .id(SharedString::from(format!("theme-{}", name.label())))
-                                                .px_3()
-                                                .py_1()
-                                                .cursor_pointer()
-                                                .bg(if is_selected { t_accent_primary } else { t_bg_elevated })
-                                                .text_color(if is_selected { t_text_on_accent } else { t_text_secondary })
-                                                .hover(|h| h.bg(if is_selected { t_accent_primary } else { t_bg_hover_secondary }))
-                                                .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event: &gpui::MouseDownEvent, _window, cx| {
-                                                    this.set_theme(name_copy);
-                                                    this.theme_dropdown_open = false;
-                                                    cx.notify();
-                                                }))
-                                                .child(if is_selected {
-                                                    format!("\u{2713} {}", name.label())
-                                                } else {
-                                                    format!("  {}", name.label())
-                                                })
+                                            dropdown_menu_item(
+                                                format!("theme-{}", name.label()),
+                                                name.label().to_string(),
+                                                is_selected,
+                                                t_bg_elevated, t_accent_primary, t_bg_hover_secondary,
+                                                t_text_secondary, t_text_on_accent,
+                                            )
+                                            .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event: &gpui::MouseDownEvent, _window, cx| {
+                                                this.set_theme(name_copy);
+                                                this.theme_dropdown_open = false;
+                                                cx.notify();
+                                            }))
                                         }))
                                 ).with_priority(100))
                             })
