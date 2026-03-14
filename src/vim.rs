@@ -84,6 +84,115 @@ impl Default for VimState {
     }
 }
 
+/// Handle common movement keys shared across Normal, Visual, and operator-motion contexts.
+/// Returns true if the key was a movement key and was handled.
+fn handle_movement(editor: &mut HexEditor, key: &str, shift: bool, ctrl: bool) -> bool {
+    // Ctrl+f / Ctrl+b for page navigation
+    if ctrl {
+        match key {
+            "f" => {
+                editor.push_cursor_history();
+                let count = editor.tab_mut().vim_state.take_count();
+                for _ in 0..count {
+                    editor.move_cursor_page_down(crate::keyboard::PAGE_ROWS);
+                }
+                return true;
+            }
+            "b" => {
+                editor.push_cursor_history();
+                let count = editor.tab_mut().vim_state.take_count();
+                for _ in 0..count {
+                    editor.move_cursor_page_up(crate::keyboard::PAGE_ROWS);
+                }
+                return true;
+            }
+            _ => return false,
+        }
+    }
+
+    match key {
+        "h" | "left" => {
+            let count = editor.tab_mut().vim_state.take_count();
+            for _ in 0..count {
+                editor.move_cursor_left();
+            }
+            true
+        }
+        "l" | "right" => {
+            let count = editor.tab_mut().vim_state.take_count();
+            for _ in 0..count {
+                editor.move_cursor_right();
+            }
+            true
+        }
+        "j" | "down" => {
+            let count = editor.tab_mut().vim_state.take_count();
+            for _ in 0..count {
+                editor.move_cursor_down();
+            }
+            true
+        }
+        "k" | "up" => {
+            let count = editor.tab_mut().vim_state.take_count();
+            for _ in 0..count {
+                editor.move_cursor_up();
+            }
+            true
+        }
+        "home" => {
+            editor.move_cursor_home();
+            true
+        }
+        "end" => {
+            editor.move_cursor_end();
+            true
+        }
+        "pageup" => {
+            editor.push_cursor_history();
+            editor.move_cursor_page_up(crate::keyboard::PAGE_ROWS);
+            true
+        }
+        "pagedown" => {
+            editor.push_cursor_history();
+            editor.move_cursor_page_down(crate::keyboard::PAGE_ROWS);
+            true
+        }
+        "0" => {
+            if editor.tab().vim_state.count.is_some() {
+                editor.tab_mut().vim_state.accumulate_count(0);
+            } else {
+                editor.move_cursor_home();
+            }
+            true
+        }
+        "w" => {
+            let count = editor.tab_mut().vim_state.take_count();
+            for _ in 0..count {
+                editor.move_cursor_word_forward();
+            }
+            true
+        }
+        "b" if !shift => {
+            let count = editor.tab_mut().vim_state.take_count();
+            for _ in 0..count {
+                editor.move_cursor_word_backward();
+            }
+            true
+        }
+        // Digits 1-9 for count prefix
+        "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" if !shift => {
+            let digit = key.parse::<u8>().unwrap();
+            editor.tab_mut().vim_state.accumulate_count(digit);
+            true
+        }
+        "4" | "$" if shift || key == "$" => {
+            editor.move_cursor_end();
+            true
+        }
+        _ => false,
+    }
+}
+
 /// Main Vim key dispatcher. Returns true if the key was handled.
 pub fn handle_vim_key(
     editor: &mut HexEditor,
@@ -130,25 +239,9 @@ fn handle_normal_mode(
     // Normal mode never has selection (that's Visual mode)
     editor.clear_selection();
 
-    // Ctrl+f / Ctrl+b for page navigation
+    // Normal-only Ctrl keys (Redo, jump history)
     if ctrl {
         match key {
-            "f" => {
-                editor.push_cursor_history();
-                let count = editor.tab_mut().vim_state.take_count();
-                for _ in 0..count {
-                    editor.move_cursor_page_down(crate::keyboard::PAGE_ROWS);
-                }
-                return true;
-            }
-            "b" => {
-                editor.push_cursor_history();
-                let count = editor.tab_mut().vim_state.take_count();
-                for _ in 0..count {
-                    editor.move_cursor_page_up(crate::keyboard::PAGE_ROWS);
-                }
-                return true;
-            }
             "r" => {
                 // Ctrl+r = Redo
                 if let Some(offset) = editor.tab_mut().document.redo() {
@@ -168,8 +261,13 @@ fn handle_normal_mode(
                 editor.navigate_forward();
                 return true;
             }
-            _ => return false,
+            _ => {}
         }
+    }
+
+    // Common movement keys (h/l/j/k, arrows, page, word, Ctrl+f/b, digits, etc.)
+    if handle_movement(editor, key, shift, ctrl) {
+        return true;
     }
 
     // Check for pending 'g' key (for gg)
@@ -276,87 +374,9 @@ fn handle_normal_mode(
     }
 
     match key {
-        // Movement (h/j/k/l and arrow keys share the same behavior)
-        "h" | "left" => {
-            let count = editor.tab_mut().vim_state.take_count();
-            for _ in 0..count {
-                editor.move_cursor_left();
-            }
-            true
-        }
-        "l" | "right" => {
-            let count = editor.tab_mut().vim_state.take_count();
-            for _ in 0..count {
-                editor.move_cursor_right();
-            }
-            true
-        }
-        "j" | "down" => {
-            let count = editor.tab_mut().vim_state.take_count();
-            for _ in 0..count {
-                editor.move_cursor_down();
-            }
-            true
-        }
-        "k" | "up" => {
-            let count = editor.tab_mut().vim_state.take_count();
-            for _ in 0..count {
-                editor.move_cursor_up();
-            }
-            true
-        }
-        "home" => {
-            editor.move_cursor_home();
-            true
-        }
-        "end" => {
-            editor.move_cursor_end();
-            true
-        }
-        "pageup" => {
-            editor.push_cursor_history();
-            editor.move_cursor_page_up(crate::keyboard::PAGE_ROWS);
-            true
-        }
-        "pagedown" => {
-            editor.push_cursor_history();
-            editor.move_cursor_page_down(crate::keyboard::PAGE_ROWS);
-            true
-        }
-        "0" => {
-            if editor.tab().vim_state.count.is_some() {
-                // Part of a number prefix
-                editor.tab_mut().vim_state.accumulate_count(0);
-                true
-            } else {
-                // 0: go to start of row
-                editor.move_cursor_home();
-                true
-            }
-        }
-        "w" => {
-            let count = editor.tab_mut().vim_state.take_count();
-            for _ in 0..count {
-                editor.move_cursor_word_forward();
-            }
-            true
-        }
-        "b" if !shift => {
-            let count = editor.tab_mut().vim_state.take_count();
-            for _ in 0..count {
-                editor.move_cursor_word_backward();
-            }
-            true
-        }
+        // g: pending key for gg
         "g" if !shift => {
             editor.tab_mut().vim_state.pending_key = Some('g');
-            true
-        }
-
-        // Digits 1-9 for count prefix
-        "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" if !shift => {
-            let digit = key.parse::<u8>().unwrap();
-            editor.tab_mut().vim_state.accumulate_count(digit);
             true
         }
 
@@ -472,81 +492,18 @@ fn handle_visual_mode(
     let shift = event.keystroke.modifiers.shift;
     let ctrl = event.keystroke.modifiers.control;
 
+    // Common movement keys (h/l/j/k, arrows, page, word, Ctrl+f/b, digits, etc.)
+    if handle_movement(editor, key, shift, ctrl) {
+        return true;
+    }
+
     match key {
         "escape" => {
             editor.clear_selection();
             editor.tab_mut().vim_state.enter_mode(VimMode::Normal);
             true
         }
-        // Movement keys (selection_start stays fixed, cursor_position moves)
-        "h" | "left" => {
-            let count = editor.tab_mut().vim_state.take_count();
-            for _ in 0..count {
-                editor.move_cursor_left();
-            }
-            true
-        }
-        "l" | "right" => {
-            let count = editor.tab_mut().vim_state.take_count();
-            for _ in 0..count {
-                editor.move_cursor_right();
-            }
-            true
-        }
-        "j" | "down" => {
-            let count = editor.tab_mut().vim_state.take_count();
-            for _ in 0..count {
-                editor.move_cursor_down();
-            }
-            true
-        }
-        "k" | "up" => {
-            let count = editor.tab_mut().vim_state.take_count();
-            for _ in 0..count {
-                editor.move_cursor_up();
-            }
-            true
-        }
-        "home" => {
-            editor.move_cursor_home();
-            true
-        }
-        "end" => {
-            editor.move_cursor_end();
-            true
-        }
-        "pageup" => {
-            editor.push_cursor_history();
-            editor.move_cursor_page_up(crate::keyboard::PAGE_ROWS);
-            true
-        }
-        "pagedown" => {
-            editor.push_cursor_history();
-            editor.move_cursor_page_down(crate::keyboard::PAGE_ROWS);
-            true
-        }
-        "0" => {
-            if editor.tab().vim_state.count.is_some() {
-                editor.tab_mut().vim_state.accumulate_count(0);
-            } else {
-                editor.move_cursor_home();
-            }
-            true
-        }
-        "w" => {
-            let count = editor.tab_mut().vim_state.take_count();
-            for _ in 0..count {
-                editor.move_cursor_word_forward();
-            }
-            true
-        }
-        "b" if !shift && !ctrl => {
-            let count = editor.tab_mut().vim_state.take_count();
-            for _ in 0..count {
-                editor.move_cursor_word_backward();
-            }
-            true
-        }
+        // Visual-specific: g/gg/G
         "g" if !shift => {
             if editor.tab().vim_state.pending_key == Some('g') {
                 editor.tab_mut().vim_state.pending_key = None;
@@ -563,35 +520,6 @@ fn handle_visual_mode(
             editor.push_cursor_history();
             editor.move_cursor_file_end();
             editor.tab_mut().vim_state.reset_pending();
-            true
-        }
-        "f" if ctrl => {
-            editor.push_cursor_history();
-            let count = editor.tab_mut().vim_state.take_count();
-            for _ in 0..count {
-                editor.move_cursor_page_down(crate::keyboard::PAGE_ROWS);
-            }
-            true
-        }
-        "b" if ctrl => {
-            editor.push_cursor_history();
-            let count = editor.tab_mut().vim_state.take_count();
-            for _ in 0..count {
-                editor.move_cursor_page_up(crate::keyboard::PAGE_ROWS);
-            }
-            true
-        }
-
-        // Digits for count
-        "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" if !shift => {
-            let digit = key.parse::<u8>().unwrap();
-            editor.tab_mut().vim_state.accumulate_count(digit);
-            true
-        }
-
-        // $ end of row
-        "4" | "$" if shift || key == "$" => {
-            editor.move_cursor_end();
             true
         }
 
@@ -839,44 +767,14 @@ fn handle_operator_motion(
     }
 }
 
-/// Apply a motion key and return whether it was a valid motion
+/// Apply a motion key and return whether it was a valid motion.
+/// Reuses handle_movement for common motions, plus G for file-end.
 fn apply_motion(editor: &mut HexEditor, key: &str, shift: bool) -> bool {
+    if handle_movement(editor, key, shift, false) {
+        return true;
+    }
     match key {
-        "h" => {
-            editor.move_cursor_left();
-            true
-        }
-        "l" => {
-            editor.move_cursor_right();
-            true
-        }
-        "j" => {
-            editor.move_cursor_down();
-            true
-        }
-        "k" => {
-            editor.move_cursor_up();
-            true
-        }
-        "w" => {
-            editor.move_cursor_word_forward();
-            true
-        }
-        "b" if !shift => {
-            editor.move_cursor_word_backward();
-            true
-        }
-        "0" => {
-            editor.move_cursor_home();
-            true
-        }
-        "4" | "$" if shift || key == "$" => {
-            // $
-            editor.move_cursor_end();
-            true
-        }
         "g" | "G" if shift || key == "G" => {
-            // G: file end
             editor.move_cursor_file_end();
             true
         }
