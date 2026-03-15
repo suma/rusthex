@@ -39,8 +39,8 @@ thread_local! {
     static PENDING_ACTIONS: RefCell<Vec<Box<dyn Action>>> = RefCell::new(Vec::new());
     /// Command-ID -> cloned gpui Action mapping, populated at menu creation time.
     static MENU_ACTION_MAP: RefCell<HashMap<u16, Box<dyn Action>>> = RefCell::new(HashMap::new());
-    /// Popup menus and HWND stored at install time.
-    static MENU_BAR_DATA: RefCell<Option<MenuBarState>> = RefCell::new(None);
+    /// Popup menus and HWND stored at install time, keyed by HWND for multi-window support.
+    static MENU_BAR_DATA: RefCell<HashMap<isize, MenuBarState>> = RefCell::new(HashMap::new());
 }
 
 // ---------------------------------------------------------------------------
@@ -53,10 +53,14 @@ pub fn drain_pending_actions() -> Vec<Box<dyn Action>> {
 }
 
 /// Return the labels for the top-level menus (e.g. "File", "Edit", "View").
-pub fn menu_labels() -> Vec<String> {
+pub fn menu_labels(window: &Window) -> Vec<String> {
+    let key = match get_hwnd_key(window) {
+        Some(k) => k,
+        None => return Vec::new(),
+    };
     MENU_BAR_DATA.with(|data| {
         data.borrow()
-            .as_ref()
+            .get(&key)
             .map_or_else(Vec::new, |state| {
                 state.popups.iter().map(|(label, _)| label.clone()).collect()
             })
@@ -69,10 +73,14 @@ pub fn menu_labels() -> Vec<String> {
 /// `TrackPopupMenu` runs its own message pump, so the call blocks until the
 /// user selects an item or dismisses the popup.  `WM_COMMAND` is sent to the
 /// subclassed HWND and handled by `menu_subclass_proc`.
-pub fn show_popup_menu(menu_index: usize) {
+pub fn show_popup_menu(menu_index: usize, window: &Window) {
+    let key = match get_hwnd_key(window) {
+        Some(k) => k,
+        None => return,
+    };
     MENU_BAR_DATA.with(|data| {
         let data = data.borrow();
-        let Some(state) = data.as_ref() else { return };
+        let Some(state) = data.get(&key) else { return };
         let Some((_, hmenu)) = state.popups.get(menu_index) else { return };
 
         unsafe {
@@ -129,8 +137,9 @@ pub fn install_native_menu(window: &Window, menus: &[Menu]) {
         // Store popup menus for later use by show_popup_menu().
         // Do NOT call SetMenu() — the DirectComposition topmost visual would
         // cover the Win32 HMENU.  The menu bar is rendered in gpui instead.
+        let key = hwnd.0 as isize;
         MENU_BAR_DATA.with(|data| {
-            *data.borrow_mut() = Some(MenuBarState { hwnd, popups });
+            data.borrow_mut().insert(key, MenuBarState { hwnd, popups });
         });
 
         let _ = SetWindowSubclass(hwnd, Some(menu_subclass_proc), SUBCLASS_ID, 0);
@@ -147,6 +156,20 @@ fn get_hwnd(window: &Window) -> Option<HWND> {
     match handle.as_raw() {
         RawWindowHandle::Win32(win32) => Some(HWND(win32.hwnd.get() as *mut _)),
         _ => None,
+    }
+}
+
+/// Extract a HashMap key (isize) from a gpui `Window` for multi-window lookup.
+fn get_hwnd_key(window: &Window) -> Option<isize> {
+    get_hwnd(window).map(|h| h.0 as isize)
+}
+
+/// Remove menu state for a closed window.
+pub fn remove_menu_for_window(window: &Window) {
+    if let Some(key) = get_hwnd_key(window) {
+        MENU_BAR_DATA.with(|data| {
+            data.borrow_mut().remove(&key);
+        });
     }
 }
 

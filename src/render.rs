@@ -277,8 +277,8 @@ impl HexEditor {
     /// so the menu bar is drawn as a gpui div and popups are shown via
     /// `TrackPopupMenu` on click.
     #[cfg(target_os = "windows")]
-    pub(crate) fn render_menu_bar(&self, cx: &mut gpui::Context<Self>) -> impl IntoElement {
-        let labels = crate::windows_menu::menu_labels();
+    pub(crate) fn render_menu_bar(&self, window: &mut Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+        let labels = crate::windows_menu::menu_labels(window);
         let bg_elevated = self.theme.bg_elevated;
         let border_primary = self.theme.border_primary;
         let text_muted = self.theme.text_muted;
@@ -302,8 +302,8 @@ impl HexEditor {
                     .hover(move |h| h.bg(bg_hover).text_color(text_primary))
                     .on_mouse_down(
                         gpui::MouseButton::Left,
-                        cx.listener(move |_this, _event: &gpui::MouseDownEvent, _window, cx| {
-                            crate::windows_menu::show_popup_menu(i);
+                        cx.listener(move |_this, _event: &gpui::MouseDownEvent, window, cx| {
+                            crate::windows_menu::show_popup_menu(i, window);
                             cx.notify();
                         }),
                     )
@@ -3250,7 +3250,7 @@ impl Render for HexEditor {
 
         // Windows: custom-rendered menu bar (DirectComposition covers Win32 HMENU)
         #[cfg(target_os = "windows")]
-        let root = root.child(self.render_menu_bar(cx));
+        let root = root.child(self.render_menu_bar(window, cx));
 
         root.child(self.render_header(cx, &title))
             .when(self.tabs.len() > 1, |parent| {
