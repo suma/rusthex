@@ -34,6 +34,8 @@ pub struct VimState {
     pub pending_key: Option<char>,
     pub command_buffer: String,
     pub yank_buffer: Vec<u8>,
+    /// First hex nibble for `r` command in Hex pane (waiting for second digit)
+    pub replace_first_nibble: Option<u8>,
 }
 
 impl VimState {
@@ -45,6 +47,7 @@ impl VimState {
             pending_key: None,
             command_buffer: String::new(),
             yank_buffer: Vec::new(),
+            replace_first_nibble: None,
         }
     }
 
@@ -54,6 +57,7 @@ impl VimState {
         self.count = None;
         self.pending_operator = None;
         self.pending_key = None;
+        self.replace_first_nibble = None;
         if mode != VimMode::Command {
             self.command_buffer.clear();
         }
@@ -75,6 +79,7 @@ impl VimState {
         self.count = None;
         self.pending_operator = None;
         self.pending_key = None;
+        self.replace_first_nibble = None;
     }
 }
 
@@ -265,6 +270,12 @@ fn handle_normal_mode(
         }
     }
 
+    // Check for pending 'r' key (replace single byte) — must be before
+    // handle_movement so that hex digits are not consumed as count prefix
+    if editor.tab().vim_state.pending_key == Some('r') {
+        return handle_replace_char(editor, event);
+    }
+
     // Common movement keys (h/l/j/k, arrows, page, word, Ctrl+f/b, digits, etc.)
     if handle_movement(editor, key, shift, ctrl) {
         return true;
@@ -283,12 +294,6 @@ fn handle_normal_mode(
         }
         // Other key after g: reset and fall through
         editor.tab_mut().vim_state.reset_pending();
-    }
-
-    // Check for pending 'r' key (replace single byte)
-    if editor.tab().vim_state.pending_key == Some('r') {
-        editor.tab_mut().vim_state.pending_key = None;
-        return handle_replace_char(editor, event);
     }
 
     // Check for pending operator (d, y, c) waiting for motion
@@ -814,27 +819,48 @@ fn handle_replace_char(editor: &mut HexEditor, event: &KeyDownEvent) -> bool {
 
     match editor.tab().edit_pane {
         EditPane::Hex => {
-            // For hex pane, need two hex digits for replacement
-            // For simplicity, treat the input as a single hex digit replacement
-            // and replace with the digit repeated: e.g. 'a' → 0xAA
-            // Actually, let's use the character's byte value for ASCII pane behavior
-            // and for hex pane, only accept hex digits
-            if c.is_ascii_hexdigit() {
-                let digit = c.to_digit(16).unwrap() as u8;
-                let new_byte = (digit << 4) | digit; // e.g., 'a' → 0xAA
-                let _ = editor.tab_mut().document.set_byte(pos, new_byte);
+            if !c.is_ascii_hexdigit() {
+                editor.tab_mut().vim_state.reset_pending();
+                return true;
+            }
+            let digit = c.to_digit(16).unwrap() as u8;
+
+            if let Some(first) = editor.tab().vim_state.replace_first_nibble {
+                // Second hex digit: compose byte and apply
+                let new_byte = (first << 4) | digit;
+                let count = editor.tab_mut().vim_state.take_count();
+                let doc_len = editor.tab().document.len();
+                for i in 0..count {
+                    let target = pos + i;
+                    if target >= doc_len {
+                        break;
+                    }
+                    let _ = editor.tab_mut().document.set_byte(target, new_byte);
+                }
                 editor.invalidate_render_cache();
+                editor.tab_mut().vim_state.reset_pending();
+            } else {
+                // First hex digit: store and wait for second
+                editor.tab_mut().vim_state.replace_first_nibble = Some(digit);
             }
         }
         EditPane::Ascii | EditPane::Bitmap => {
             if c >= ' ' && c <= '~' {
-                let _ = editor.tab_mut().document.set_byte(pos, c as u8);
+                let count = editor.tab_mut().vim_state.take_count();
+                let doc_len = editor.tab().document.len();
+                for i in 0..count {
+                    let target = pos + i;
+                    if target >= doc_len {
+                        break;
+                    }
+                    let _ = editor.tab_mut().document.set_byte(target, c as u8);
+                }
                 editor.invalidate_render_cache();
             }
+            editor.tab_mut().vim_state.reset_pending();
         }
     }
 
-    editor.tab_mut().vim_state.reset_pending();
     true
 }
 
@@ -1091,5 +1117,27 @@ mod tests {
         assert_eq!(parse_address("abc"), None);
         assert_eq!(parse_address(""), None);
         assert_eq!(parse_address("0xZZ"), None);
+    }
+
+    #[test]
+    fn replace_first_nibble_defaults_to_none() {
+        let state = VimState::new();
+        assert!(state.replace_first_nibble.is_none());
+    }
+
+    #[test]
+    fn reset_pending_clears_replace_first_nibble() {
+        let mut state = VimState::new();
+        state.replace_first_nibble = Some(0xA);
+        state.reset_pending();
+        assert!(state.replace_first_nibble.is_none());
+    }
+
+    #[test]
+    fn enter_mode_clears_replace_first_nibble() {
+        let mut state = VimState::new();
+        state.replace_first_nibble = Some(0xF);
+        state.enter_mode(VimMode::Normal);
+        assert!(state.replace_first_nibble.is_none());
     }
 }
