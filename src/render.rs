@@ -3069,9 +3069,9 @@ impl Render for HexEditor {
             )
             // Action handlers (dispatched from menu bar and key bindings)
             .on_action(cx.listener(|this, _: &actions::Quit, window, cx| {
-                this.save_layout();
-                ipc::cleanup_socket();
                 if this.force_close || !this.has_any_unsaved_changes() {
+                    this.save_layout();
+                    ipc::cleanup_socket();
                     cx.quit();
                 } else {
                     this.confirm_close_with_unsaved(window, cx);

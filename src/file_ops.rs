@@ -136,6 +136,8 @@ impl HexEditor {
                 if answer == 0 {
                     // User clicked "Discard and Quit"
                     let _ = entity.update(cx, |editor, cx| {
+                        editor.save_layout();
+                        crate::ipc::cleanup_socket();
                         editor.force_close = true;
                         cx.quit();
                     });

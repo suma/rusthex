@@ -686,20 +686,14 @@ fn main() {
                 let weak_entity = entity.downgrade();
                 window.on_window_should_close(cx, move |window, cx| {
                     if let Some(entity) = weak_entity.upgrade() {
-                        // Save layout before closing
-                        let _ = entity.update(cx, |editor, _cx| {
-                            editor.save_layout();
-                        });
-
                         let editor = entity.read(cx);
 
-                        // If force_close is set, allow closing
-                        if editor.force_close {
-                            return true;
-                        }
-
-                        // If no unsaved changes, allow closing
-                        if !editor.has_any_unsaved_changes() {
+                        // If force_close is set or no unsaved changes, save layout and allow closing
+                        if editor.force_close || !editor.has_any_unsaved_changes() {
+                            let _ = entity.update(cx, |editor, _cx| {
+                                editor.save_layout();
+                            });
+                            ipc::cleanup_socket();
                             return true;
                         }
 
