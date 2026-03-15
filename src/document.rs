@@ -1574,4 +1574,775 @@ mod tests {
         assert_eq!(doc.len(), 4);
         assert_eq!(doc.get_byte(0), Some(0xDE));
     }
+
+    // =========================================
+    // Edge cases: empty document operations
+    // =========================================
+
+    #[test]
+    fn test_set_byte_on_empty_doc_fails() {
+        let mut doc = Document::new();
+        assert!(doc.set_byte(0, 0xFF).is_err());
+    }
+
+    #[test]
+    fn test_delete_on_empty_doc_fails() {
+        let mut doc = Document::new();
+        assert!(doc.delete_bytes(0, 1).is_err());
+    }
+
+    #[test]
+    fn test_get_slice_on_empty_doc() {
+        let doc = Document::new();
+        assert_eq!(doc.get_slice(0..0), Some(vec![]));
+        assert_eq!(doc.get_slice(0..1), None);
+    }
+
+    #[test]
+    fn test_to_vec_empty_doc() {
+        let doc = Document::new();
+        assert_eq!(doc.to_vec(), Vec::<u8>::new());
+    }
+
+    #[test]
+    fn test_undo_on_empty_doc_returns_none() {
+        let mut doc = Document::new();
+        assert!(doc.undo().is_none());
+    }
+
+    #[test]
+    fn test_redo_on_empty_doc_returns_none() {
+        let mut doc = Document::new();
+        assert!(doc.redo().is_none());
+    }
+
+    // =========================================
+    // Edge cases: single-byte document
+    // =========================================
+
+    #[test]
+    fn test_single_byte_set() {
+        let mut doc = Document::with_data(vec![0x00]);
+        doc.set_byte(0, 0xFF).unwrap();
+        assert_eq!(doc.get_byte(0), Some(0xFF));
+        assert_eq!(doc.len(), 1);
+    }
+
+    #[test]
+    fn test_single_byte_delete() {
+        let mut doc = Document::with_data(vec![0x42]);
+        doc.delete_bytes(0, 1).unwrap();
+        assert_eq!(doc.len(), 0);
+        assert!(doc.is_empty());
+        assert_eq!(doc.get_byte(0), None);
+    }
+
+    #[test]
+    fn test_single_byte_insert_before() {
+        let mut doc = Document::with_data(vec![0x02]);
+        doc.insert_bytes(0, &[0x01]).unwrap();
+        assert_eq!(doc.to_vec(), vec![0x01, 0x02]);
+    }
+
+    #[test]
+    fn test_single_byte_insert_after() {
+        let mut doc = Document::with_data(vec![0x01]);
+        doc.insert_bytes(1, &[0x02]).unwrap();
+        assert_eq!(doc.to_vec(), vec![0x01, 0x02]);
+    }
+
+    // =========================================
+    // Edge cases: boundary byte values
+    // =========================================
+
+    #[test]
+    fn test_all_byte_values_roundtrip() {
+        let data: Vec<u8> = (0..=255).collect();
+        let doc = Document::with_data(data.clone());
+        assert_eq!(doc.to_vec(), data);
+    }
+
+    #[test]
+    fn test_set_byte_to_zero() {
+        let mut doc = Document::with_data(vec![0xFF]);
+        doc.set_byte(0, 0x00).unwrap();
+        assert_eq!(doc.get_byte(0), Some(0x00));
+    }
+
+    #[test]
+    fn test_set_byte_to_max() {
+        let mut doc = Document::with_data(vec![0x00]);
+        doc.set_byte(0, 0xFF).unwrap();
+        assert_eq!(doc.get_byte(0), Some(0xFF));
+    }
+
+    // =========================================
+    // Edge cases: consecutive undo/redo
+    // =========================================
+
+    #[test]
+    fn test_multiple_undo_past_beginning() {
+        let mut doc = Document::with_data(vec![0x01, 0x02]);
+        doc.set_byte(0, 0xAA).unwrap();
+
+        assert!(doc.undo().is_some());
+        assert!(doc.undo().is_none()); // no more undos
+        assert!(doc.undo().is_none()); // still none
+        assert_eq!(doc.to_vec(), vec![0x01, 0x02]);
+    }
+
+    #[test]
+    fn test_multiple_redo_past_end() {
+        let mut doc = Document::with_data(vec![0x01]);
+        doc.set_byte(0, 0xAA).unwrap();
+        doc.undo();
+
+        assert!(doc.redo().is_some());
+        assert!(doc.redo().is_none()); // no more redos
+        assert!(doc.redo().is_none());
+        assert_eq!(doc.get_byte(0), Some(0xAA));
+    }
+
+    #[test]
+    fn test_undo_redo_undo_redo_cycle() {
+        let original = vec![0x01, 0x02, 0x03];
+        let mut doc = Document::with_data(original.clone());
+        doc.set_byte(0, 0xFF).unwrap();
+
+        for _ in 0..5 {
+            doc.undo();
+            assert_eq!(doc.to_vec(), original);
+            doc.redo();
+            assert_eq!(doc.get_byte(0), Some(0xFF));
+        }
+    }
+
+    // =========================================
+    // Edge cases: undo/redo with insert and delete
+    // =========================================
+
+    #[test]
+    fn test_undo_insert_into_empty_restores_empty() {
+        let mut doc = Document::new();
+        doc.insert_bytes(0, &[0x01, 0x02, 0x03]).unwrap();
+        assert_eq!(doc.len(), 3);
+
+        doc.undo();
+        assert_eq!(doc.len(), 0);
+        assert!(doc.is_empty());
+        assert_eq!(doc.to_vec(), Vec::<u8>::new());
+    }
+
+    #[test]
+    fn test_undo_delete_all_restores_content() {
+        let original = vec![0x01, 0x02, 0x03, 0x04, 0x05];
+        let mut doc = Document::with_data(original.clone());
+        doc.delete_bytes(0, 5).unwrap();
+        assert!(doc.is_empty());
+
+        doc.undo();
+        assert_eq!(doc.to_vec(), original);
+    }
+
+    #[test]
+    fn test_redo_insert_after_undo() {
+        let mut doc = Document::new();
+        doc.insert_bytes(0, &[0xAA, 0xBB]).unwrap();
+        doc.undo();
+        assert!(doc.is_empty());
+
+        doc.redo();
+        assert_eq!(doc.to_vec(), vec![0xAA, 0xBB]);
+    }
+
+    #[test]
+    fn test_redo_delete_after_undo() {
+        let mut doc = Document::with_data(vec![0x01, 0x02, 0x03]);
+        doc.delete_bytes(1, 1).unwrap();
+        doc.undo();
+        assert_eq!(doc.to_vec(), vec![0x01, 0x02, 0x03]);
+
+        doc.redo();
+        assert_eq!(doc.to_vec(), vec![0x01, 0x03]);
+    }
+
+    // =========================================
+    // Edge cases: new edit after undo clears redo
+    // =========================================
+
+    #[test]
+    fn test_insert_after_undo_clears_redo() {
+        let mut doc = Document::with_data(vec![0x01, 0x02, 0x03]);
+        doc.set_byte(0, 0xFF).unwrap();
+        doc.undo();
+
+        doc.insert_bytes(0, &[0xAA]).unwrap();
+        assert!(!doc.can_redo());
+        assert_eq!(doc.get_byte(0), Some(0xAA));
+    }
+
+    #[test]
+    fn test_delete_after_undo_clears_redo() {
+        let mut doc = Document::with_data(vec![0x01, 0x02, 0x03]);
+        doc.set_byte(0, 0xFF).unwrap();
+        doc.undo();
+
+        doc.delete_bytes(0, 1).unwrap();
+        assert!(!doc.can_redo());
+        assert_eq!(doc.to_vec(), vec![0x02, 0x03]);
+    }
+
+    // =========================================
+    // Edge cases: rapid sequential edits (piece fragmentation)
+    // =========================================
+
+    #[test]
+    fn test_many_single_byte_edits() {
+        let mut doc = Document::with_data(vec![0x00; 256]);
+        // Set every byte to its index
+        for i in 0..256 {
+            doc.set_byte(i, i as u8).unwrap();
+        }
+        let expected: Vec<u8> = (0..=255).collect();
+        assert_eq!(doc.to_vec(), expected);
+    }
+
+    #[test]
+    fn test_many_single_byte_inserts_at_beginning() {
+        let mut doc = Document::new();
+        // Insert bytes in reverse order at position 0
+        for i in (0u8..50).rev() {
+            doc.insert_bytes(0, &[i]).unwrap();
+        }
+        let expected: Vec<u8> = (0..50).collect();
+        assert_eq!(doc.to_vec(), expected);
+    }
+
+    #[test]
+    fn test_many_single_byte_inserts_at_end() {
+        let mut doc = Document::new();
+        for i in 0u8..50 {
+            doc.insert_bytes(doc.len(), &[i]).unwrap();
+        }
+        let expected: Vec<u8> = (0..50).collect();
+        assert_eq!(doc.to_vec(), expected);
+    }
+
+    #[test]
+    fn test_alternating_insert_delete() {
+        let mut doc = Document::with_data(vec![0x00; 10]);
+        // Insert then delete repeatedly
+        for _ in 0..20 {
+            doc.insert_bytes(5, &[0xFF]).unwrap();
+            doc.delete_bytes(5, 1).unwrap();
+        }
+        assert_eq!(doc.len(), 10);
+        assert_eq!(doc.to_vec(), vec![0x00; 10]);
+    }
+
+    // =========================================
+    // Edge cases: operations after delete-all
+    // =========================================
+
+    #[test]
+    fn test_insert_after_delete_all() {
+        let mut doc = Document::with_data(vec![0x01, 0x02, 0x03]);
+        doc.delete_bytes(0, 3).unwrap();
+        assert!(doc.is_empty());
+
+        doc.insert_bytes(0, &[0xAA, 0xBB]).unwrap();
+        assert_eq!(doc.to_vec(), vec![0xAA, 0xBB]);
+    }
+
+    #[test]
+    fn test_set_byte_after_delete_all_fails() {
+        let mut doc = Document::with_data(vec![0x01, 0x02, 0x03]);
+        doc.delete_bytes(0, 3).unwrap();
+        assert!(doc.set_byte(0, 0xFF).is_err());
+    }
+
+    // =========================================
+    // Edge cases: get_slice across complex piece boundaries
+    // =========================================
+
+    #[test]
+    fn test_get_slice_single_byte() {
+        let doc = Document::with_data(vec![0x01, 0x02, 0x03]);
+        assert_eq!(doc.get_slice(1..2), Some(vec![0x02]));
+    }
+
+    #[test]
+    fn test_get_slice_after_multiple_edits() {
+        let mut doc = Document::with_data(vec![0x00; 20]);
+        doc.set_byte(5, 0xAA).unwrap();
+        doc.set_byte(10, 0xBB).unwrap();
+        doc.insert_bytes(8, &[0xCC, 0xDD]).unwrap();
+        // Original: 00*20
+        // After set(5, AA): 00 00 00 00 00 AA 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+        // After set(10, BB): 00 00 00 00 00 AA 00 00 00 00 BB 00 00 00 00 00 00 00 00 00
+        // After insert(8, CC DD): 00 00 00 00 00 AA 00 00 CC DD 00 00 BB 00 ...
+        let full = doc.to_vec();
+        assert_eq!(doc.len(), 22);
+
+        // Verify slices match full vector
+        for start in 0..doc.len() {
+            for end in start..=doc.len() {
+                assert_eq!(
+                    doc.get_slice(start..end),
+                    Some(full[start..end].to_vec()),
+                    "Mismatch at slice {}..{}",
+                    start,
+                    end
+                );
+            }
+        }
+    }
+
+    // =========================================
+    // Edge cases: replace_bytes boundary conditions
+    // =========================================
+
+    #[test]
+    fn test_replace_at_beginning() {
+        let mut doc = Document::with_data(vec![0x01, 0x02, 0x03, 0x04, 0x05]);
+        doc.replace_bytes(0, 2, &[0xAA, 0xBB, 0xCC]).unwrap();
+        assert_eq!(doc.to_vec(), vec![0xAA, 0xBB, 0xCC, 0x03, 0x04, 0x05]);
+    }
+
+    #[test]
+    fn test_replace_at_end() {
+        let mut doc = Document::with_data(vec![0x01, 0x02, 0x03, 0x04, 0x05]);
+        doc.replace_bytes(3, 2, &[0xAA]).unwrap();
+        assert_eq!(doc.to_vec(), vec![0x01, 0x02, 0x03, 0xAA]);
+    }
+
+    #[test]
+    fn test_replace_entire_document() {
+        let mut doc = Document::with_data(vec![0x01, 0x02, 0x03]);
+        doc.replace_bytes(0, 3, &[0xAA, 0xBB]).unwrap();
+        assert_eq!(doc.to_vec(), vec![0xAA, 0xBB]);
+        assert_eq!(doc.len(), 2);
+    }
+
+    #[test]
+    fn test_replace_with_empty_is_delete() {
+        let mut doc = Document::with_data(vec![0x01, 0x02, 0x03, 0x04, 0x05]);
+        doc.replace_bytes(1, 3, &[]).unwrap();
+        assert_eq!(doc.to_vec(), vec![0x01, 0x05]);
+    }
+
+    #[test]
+    fn test_replace_zero_count_is_insert() {
+        let mut doc = Document::with_data(vec![0x01, 0x02, 0x03]);
+        doc.replace_bytes(1, 0, &[0xAA, 0xBB]).unwrap();
+        assert_eq!(doc.to_vec(), vec![0x01, 0xAA, 0xBB, 0x02, 0x03]);
+    }
+
+    #[test]
+    fn test_replace_out_of_bounds() {
+        let mut doc = Document::with_data(vec![0x01, 0x02, 0x03]);
+        assert!(doc.replace_bytes(2, 5, &[0xFF]).is_err());
+    }
+
+    #[test]
+    fn test_replace_undo_redo() {
+        let original = vec![0x01, 0x02, 0x03, 0x04, 0x05];
+        let mut doc = Document::with_data(original.clone());
+        doc.replace_bytes(1, 2, &[0xAA, 0xBB, 0xCC]).unwrap();
+        let replaced = doc.to_vec();
+
+        doc.undo();
+        assert_eq!(doc.to_vec(), original);
+
+        doc.redo();
+        assert_eq!(doc.to_vec(), replaced);
+    }
+
+    // =========================================
+    // Edge cases: has_unsaved_changes tracking
+    // =========================================
+
+    #[test]
+    fn test_unsaved_changes_after_insert() {
+        let mut doc = Document::with_data(vec![0x01]);
+        assert!(!doc.has_unsaved_changes());
+        doc.insert_bytes(0, &[0x00]).unwrap();
+        assert!(doc.has_unsaved_changes());
+    }
+
+    #[test]
+    fn test_unsaved_changes_after_delete() {
+        let mut doc = Document::with_data(vec![0x01, 0x02]);
+        assert!(!doc.has_unsaved_changes());
+        doc.delete_bytes(0, 1).unwrap();
+        assert!(doc.has_unsaved_changes());
+    }
+
+    #[test]
+    fn test_unsaved_changes_false_after_undo_all_edits() {
+        let mut doc = Document::with_data(vec![0x01, 0x02]);
+        doc.set_byte(0, 0xFF).unwrap();
+        doc.insert_bytes(0, &[0xAA]).unwrap();
+        doc.delete_bytes(2, 1).unwrap();
+
+        // Undo all three operations
+        doc.undo();
+        doc.undo();
+        doc.undo();
+        assert!(!doc.has_unsaved_changes());
+    }
+
+    #[test]
+    fn test_unsaved_changes_true_after_partial_undo() {
+        let mut doc = Document::with_data(vec![0x01, 0x02]);
+        doc.set_byte(0, 0xAA).unwrap();
+        doc.set_byte(1, 0xBB).unwrap();
+
+        doc.undo(); // undo second edit
+        assert!(doc.has_unsaved_changes()); // first edit still there
+    }
+
+    // =========================================
+    // Edge cases: undo stack limit
+    // =========================================
+
+    #[test]
+    fn test_undo_stack_limit() {
+        let mut doc = Document::with_data(vec![0x00]);
+        // Default max_undo_levels is 1000
+        // Perform more edits than the limit
+        for i in 0..1010u16 {
+            doc.set_byte(0, (i % 256) as u8).unwrap();
+        }
+        // Should be able to undo up to max_undo_levels, not more
+        let mut undo_count = 0;
+        while doc.undo().is_some() {
+            undo_count += 1;
+        }
+        assert_eq!(undo_count, 1000);
+    }
+
+    // =========================================
+    // Edge cases: can_undo / can_redo states
+    // =========================================
+
+    #[test]
+    fn test_can_undo_redo_initial_state() {
+        let doc = Document::new();
+        assert!(!doc.can_undo());
+        assert!(!doc.can_redo());
+    }
+
+    #[test]
+    fn test_can_undo_after_edit() {
+        let mut doc = Document::with_data(vec![0x01]);
+        doc.set_byte(0, 0xFF).unwrap();
+        assert!(doc.can_undo());
+        assert!(!doc.can_redo());
+    }
+
+    #[test]
+    fn test_can_redo_after_undo() {
+        let mut doc = Document::with_data(vec![0x01]);
+        doc.set_byte(0, 0xFF).unwrap();
+        doc.undo();
+        assert!(!doc.can_undo());
+        assert!(doc.can_redo());
+    }
+
+    // =========================================
+    // Edge cases: is_modified tracking
+    // =========================================
+
+    #[test]
+    fn test_is_modified_untouched_byte() {
+        let doc = Document::with_data(vec![0x01, 0x02, 0x03]);
+        assert!(!doc.is_modified(0));
+        assert!(!doc.is_modified(1));
+        assert!(!doc.is_modified(2));
+    }
+
+    #[test]
+    fn test_is_modified_after_set() {
+        let mut doc = Document::with_data(vec![0x01, 0x02, 0x03]);
+        doc.set_byte(1, 0xFF).unwrap();
+        assert!(!doc.is_modified(0));
+        assert!(doc.is_modified(1));
+        assert!(!doc.is_modified(2));
+    }
+
+    #[test]
+    fn test_is_modified_after_insert() {
+        let mut doc = Document::with_data(vec![0x01, 0x03]);
+        doc.insert_bytes(1, &[0x02]).unwrap();
+        // Inserted byte should be "modified"
+        assert!(!doc.is_modified(0));
+        assert!(doc.is_modified(1));
+        assert!(!doc.is_modified(2));
+    }
+
+    #[test]
+    fn test_is_modified_out_of_bounds() {
+        let doc = Document::with_data(vec![0x01]);
+        assert!(!doc.is_modified(100));
+    }
+
+    // =========================================
+    // Edge cases: coalesce_pieces
+    // =========================================
+
+    #[test]
+    fn test_coalesce_empty_pieces() {
+        let mut doc = Document::new();
+        doc.coalesce_pieces(); // should not panic
+        assert_eq!(doc.pieces.len(), 0);
+    }
+
+    #[test]
+    fn test_coalesce_single_piece() {
+        let mut doc = Document::with_data(vec![0x01, 0x02, 0x03]);
+        doc.coalesce_pieces();
+        assert_eq!(doc.pieces.len(), 1);
+    }
+
+    #[test]
+    fn test_coalesce_non_adjacent_same_source() {
+        let mut doc = Document::new();
+        // Two pieces from same source but not contiguous
+        doc.pieces = vec![
+            Piece {
+                source: PieceSource::Original,
+                start: 0,
+                length: 3,
+            },
+            Piece {
+                source: PieceSource::Original,
+                start: 5, // gap: not adjacent to 0+3=3
+                length: 3,
+            },
+        ];
+        doc.coalesce_pieces();
+        assert_eq!(doc.pieces.len(), 2); // should NOT merge
+    }
+
+    // =========================================
+    // Edge cases: write_to with fragmented pieces
+    // =========================================
+
+    #[test]
+    fn test_write_to_after_heavy_fragmentation() {
+        let mut doc = Document::with_data(vec![0x00; 100]);
+        // Create lots of piece splits
+        for i in (0..100).step_by(3) {
+            doc.set_byte(i, 0xFF).unwrap();
+        }
+        doc.insert_bytes(50, &[0xAA; 10]).unwrap();
+        doc.delete_bytes(20, 5).unwrap();
+
+        // write_to should always match to_vec
+        let mut buf = Vec::new();
+        doc.write_to(&mut buf).unwrap();
+        assert_eq!(buf, doc.to_vec());
+    }
+
+    #[test]
+    fn test_write_range_to_after_fragmentation() {
+        let mut doc = Document::with_data(vec![0x00; 50]);
+        for i in 0..50 {
+            doc.set_byte(i, i as u8).unwrap();
+        }
+        let full = doc.to_vec();
+
+        // Test various sub-ranges
+        for &(start, end) in &[(0, 10), (10, 30), (25, 50), (0, 50), (49, 50)] {
+            let mut buf = Vec::new();
+            doc.write_range_to(start..end, &mut buf).unwrap();
+            assert_eq!(buf, full[start..end].to_vec(), "Range {}..{}", start, end);
+        }
+    }
+
+    // =========================================
+    // Edge cases: undo returns correct offset
+    // =========================================
+
+    #[test]
+    fn test_undo_returns_edit_offset() {
+        let mut doc = Document::with_data(vec![0x01, 0x02, 0x03, 0x04, 0x05]);
+
+        doc.set_byte(3, 0xFF).unwrap();
+        assert_eq!(doc.undo(), Some(3));
+
+        doc.insert_bytes(1, &[0xAA]).unwrap();
+        assert_eq!(doc.undo(), Some(1));
+
+        doc.delete_bytes(2, 2).unwrap();
+        assert_eq!(doc.undo(), Some(2));
+    }
+
+    #[test]
+    fn test_redo_returns_edit_offset() {
+        let mut doc = Document::with_data(vec![0x01, 0x02, 0x03]);
+        doc.set_byte(2, 0xFF).unwrap();
+        doc.undo();
+        assert_eq!(doc.redo(), Some(2));
+    }
+
+    // =========================================
+    // Edge cases: large data operations
+    // =========================================
+
+    #[test]
+    fn test_large_insert() {
+        let mut doc = Document::with_data(vec![0x01, 0x02]);
+        let large_data = vec![0xFF; 10_000];
+        doc.insert_bytes(1, &large_data).unwrap();
+
+        assert_eq!(doc.len(), 10_002);
+        assert_eq!(doc.get_byte(0), Some(0x01));
+        assert_eq!(doc.get_byte(1), Some(0xFF));
+        assert_eq!(doc.get_byte(10_000), Some(0xFF));
+        assert_eq!(doc.get_byte(10_001), Some(0x02));
+    }
+
+    #[test]
+    fn test_large_document_random_access() {
+        let size = 100_000;
+        let data: Vec<u8> = (0..size).map(|i| (i % 256) as u8).collect();
+        let doc = Document::with_data(data.clone());
+
+        // Random access pattern (not sequential)
+        let positions = [0, 99_999, 50_000, 1, 99_998, 12_345, 67_890];
+        for &pos in &positions {
+            assert_eq!(
+                doc.get_byte(pos),
+                Some((pos % 256) as u8),
+                "Mismatch at position {}",
+                pos
+            );
+        }
+    }
+
+    #[test]
+    fn test_large_document_sequential_then_random() {
+        let data: Vec<u8> = (0..10_000).map(|i| (i % 256) as u8).collect();
+        let mut doc = Document::with_data(data);
+
+        // Create some fragmentation
+        doc.set_byte(5000, 0xFF).unwrap();
+        doc.insert_bytes(2500, &[0xAA, 0xBB]).unwrap();
+
+        // Sequential read (warms cache)
+        for i in 0..doc.len() {
+            assert!(doc.get_byte(i).is_some());
+        }
+
+        // Random access (cache should handle gracefully)
+        assert!(doc.get_byte(9999).is_some());
+        assert!(doc.get_byte(0).is_some());
+        assert!(doc.get_byte(5001).is_some());
+    }
+
+    // =========================================
+    // Edge cases: delete_bytes spanning multiple pieces
+    // =========================================
+
+    #[test]
+    fn test_delete_spanning_three_pieces() {
+        let mut doc = Document::with_data(vec![0x01, 0x02, 0x03, 0x04, 0x05]);
+        // Create 3 pieces: set byte 1 and byte 3
+        doc.set_byte(1, 0xAA).unwrap();
+        doc.set_byte(3, 0xBB).unwrap();
+        // pieces: [orig:0], [add:AA], [orig:2], [add:BB], [orig:4]
+
+        // Delete across all modified pieces (bytes 0..4)
+        doc.delete_bytes(0, 4).unwrap();
+        assert_eq!(doc.to_vec(), vec![0x05]);
+    }
+
+    #[test]
+    fn test_delete_partial_piece_left() {
+        let mut doc = Document::with_data(vec![0x01, 0x02, 0x03, 0x04, 0x05]);
+        doc.delete_bytes(0, 3).unwrap();
+        assert_eq!(doc.to_vec(), vec![0x04, 0x05]);
+    }
+
+    #[test]
+    fn test_delete_partial_piece_right() {
+        let mut doc = Document::with_data(vec![0x01, 0x02, 0x03, 0x04, 0x05]);
+        doc.delete_bytes(3, 2).unwrap();
+        assert_eq!(doc.to_vec(), vec![0x01, 0x02, 0x03]);
+    }
+
+    #[test]
+    fn test_delete_single_byte_from_middle() {
+        let mut doc = Document::with_data(vec![0x01, 0x02, 0x03]);
+        doc.delete_bytes(1, 1).unwrap();
+        assert_eq!(doc.to_vec(), vec![0x01, 0x03]);
+    }
+
+    // =========================================
+    // Edge cases: complex operation sequences
+    // =========================================
+
+    #[test]
+    fn test_insert_set_delete_undo_all_redo_all() {
+        let original = vec![0x01, 0x02, 0x03];
+        let mut doc = Document::with_data(original.clone());
+
+        doc.insert_bytes(1, &[0xAA, 0xBB]).unwrap(); // [01, AA, BB, 02, 03]
+        let after_insert = doc.to_vec();
+
+        doc.set_byte(0, 0xFF).unwrap(); // [FF, AA, BB, 02, 03]
+        let after_set = doc.to_vec();
+
+        doc.delete_bytes(3, 2).unwrap(); // [FF, AA, BB]
+        let after_delete = doc.to_vec();
+
+        // Undo step by step
+        doc.undo();
+        assert_eq!(doc.to_vec(), after_set);
+
+        doc.undo();
+        assert_eq!(doc.to_vec(), after_insert);
+
+        doc.undo();
+        assert_eq!(doc.to_vec(), original);
+
+        // Redo step by step
+        doc.redo();
+        assert_eq!(doc.to_vec(), after_insert);
+
+        doc.redo();
+        assert_eq!(doc.to_vec(), after_set);
+
+        doc.redo();
+        assert_eq!(doc.to_vec(), after_delete);
+    }
+
+    #[test]
+    fn test_empty_insert_is_noop() {
+        let mut doc = Document::with_data(vec![0x01, 0x02]);
+        doc.insert_bytes(1, &[]).unwrap();
+        assert_eq!(doc.len(), 2);
+        assert!(!doc.has_unsaved_changes());
+        assert!(!doc.can_undo());
+    }
+
+    #[test]
+    fn test_delete_zero_is_noop() {
+        let mut doc = Document::with_data(vec![0x01, 0x02]);
+        doc.delete_bytes(1, 0).unwrap();
+        assert_eq!(doc.len(), 2);
+        assert!(!doc.has_unsaved_changes());
+        assert!(!doc.can_undo());
+    }
+
+    #[test]
+    fn test_replace_empty_by_empty_is_noop() {
+        let mut doc = Document::with_data(vec![0x01, 0x02]);
+        doc.replace_bytes(1, 0, &[]).unwrap();
+        assert_eq!(doc.len(), 2);
+        assert!(!doc.has_unsaved_changes());
+        assert!(!doc.can_undo());
+    }
 }
