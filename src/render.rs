@@ -163,7 +163,6 @@ impl HexEditor {
                     .child(
                         // Text encoding dropdown selector
                         div()
-                            .relative()
                             .flex()
                             .gap_1()
                             .items_center()
@@ -175,46 +174,49 @@ impl HexEditor {
                             )
                             .child(
                                 div()
-                                    .id("encoding-dropdown-button")
-                                    .px_2()
-                                    .rounded_sm()
-                                    .cursor_pointer()
-                                    .bg(t.bg_hover)
-                                    .text_color(t.text_primary)
-                                    .hover(|h| h.bg(t_bg_hover_tertiary))
-                                    .on_mouse_down(gpui::MouseButton::Left, cx.listener(|this, _event: &gpui::MouseDownEvent, _window, cx| {
-                                        this.encoding_dropdown_open = !this.encoding_dropdown_open;
-                                        this.theme_dropdown_open = false;
-                                        cx.notify();
-                                    }))
-                                    .child(format!("{} \u{25BC}", self.text_encoding.label()))
-                            )
-                            .when(self.encoding_dropdown_open, |el| {
-                                el.child(deferred(
-                                    dropdown_menu_container(t_bg_elevated, t_border_dropdown)
-                                        .children(TextEncoding::all().iter().map(|enc| {
-                                            let is_selected = self.text_encoding == *enc;
-                                            let enc_copy = *enc;
-                                            dropdown_menu_item(
-                                                format!("enc-{}", enc.label()),
-                                                enc.label().to_string(),
-                                                is_selected,
-                                                t_bg_elevated, t_accent_primary, t_bg_hover_secondary,
-                                                t_text_secondary, t_text_on_accent,
-                                            )
-                                            .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event: &gpui::MouseDownEvent, _window, cx| {
-                                                this.set_encoding(enc_copy);
-                                                this.encoding_dropdown_open = false;
+                                    .relative()
+                                    .child(
+                                        div()
+                                            .id("encoding-dropdown-button")
+                                            .px_2()
+                                            .rounded_sm()
+                                            .cursor_pointer()
+                                            .bg(t.bg_hover)
+                                            .text_color(t.text_primary)
+                                            .hover(|h| h.bg(t_bg_hover_tertiary))
+                                            .on_mouse_down(gpui::MouseButton::Left, cx.listener(|this, _event: &gpui::MouseDownEvent, _window, cx| {
+                                                this.encoding_dropdown_open = !this.encoding_dropdown_open;
+                                                this.theme_dropdown_open = false;
                                                 cx.notify();
                                             }))
-                                        }))
-                                ).with_priority(100))
-                            })
+                                            .child(format!("{} \u{25BC}", self.text_encoding.label()))
+                                    )
+                                    .when(self.encoding_dropdown_open, |el| {
+                                        el.child(deferred(
+                                            dropdown_menu_container(t_bg_elevated, t_border_dropdown)
+                                                .children(TextEncoding::all().iter().map(|enc| {
+                                                    let is_selected = self.text_encoding == *enc;
+                                                    let enc_copy = *enc;
+                                                    dropdown_menu_item(
+                                                        format!("enc-{}", enc.label()),
+                                                        enc.label().to_string(),
+                                                        is_selected,
+                                                        t_bg_elevated, t_accent_primary, t_bg_hover_secondary,
+                                                        t_text_secondary, t_text_on_accent,
+                                                    )
+                                                    .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event: &gpui::MouseDownEvent, _window, cx| {
+                                                        this.set_encoding(enc_copy);
+                                                        this.encoding_dropdown_open = false;
+                                                        cx.notify();
+                                                    }))
+                                                }))
+                                        ).with_priority(100))
+                                    })
+                            )
                     )
                     .child(
                         // Theme dropdown selector
                         div()
-                            .relative()
                             .flex()
                             .gap_1()
                             .items_center()
@@ -226,41 +228,45 @@ impl HexEditor {
                             )
                             .child(
                                 div()
-                                    .id("theme-dropdown-button")
-                                    .px_2()
-                                    .rounded_sm()
-                                    .cursor_pointer()
-                                    .bg(t.bg_hover)
-                                    .text_color(t.text_primary)
-                                    .hover(|h| h.bg(t_bg_hover_tertiary))
-                                    .on_mouse_down(gpui::MouseButton::Left, cx.listener(|this, _event: &gpui::MouseDownEvent, _window, cx| {
-                                        this.theme_dropdown_open = !this.theme_dropdown_open;
-                                        this.encoding_dropdown_open = false;
-                                        cx.notify();
-                                    }))
-                                    .child(format!("{} \u{25BC}", current_theme_name.label()))
-                            )
-                            .when(self.theme_dropdown_open, |el| {
-                                el.child(deferred(
-                                    dropdown_menu_container(t_bg_elevated, t_border_dropdown)
-                                        .children(ThemeName::all().iter().map(|name| {
-                                            let is_selected = *name == current_theme_name;
-                                            let name_copy = *name;
-                                            dropdown_menu_item(
-                                                format!("theme-{}", name.label()),
-                                                name.label().to_string(),
-                                                is_selected,
-                                                t_bg_elevated, t_accent_primary, t_bg_hover_secondary,
-                                                t_text_secondary, t_text_on_accent,
-                                            )
-                                            .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event: &gpui::MouseDownEvent, _window, cx| {
-                                                this.set_theme(name_copy);
-                                                this.theme_dropdown_open = false;
+                                    .relative()
+                                    .child(
+                                        div()
+                                            .id("theme-dropdown-button")
+                                            .px_2()
+                                            .rounded_sm()
+                                            .cursor_pointer()
+                                            .bg(t.bg_hover)
+                                            .text_color(t.text_primary)
+                                            .hover(|h| h.bg(t_bg_hover_tertiary))
+                                            .on_mouse_down(gpui::MouseButton::Left, cx.listener(|this, _event: &gpui::MouseDownEvent, _window, cx| {
+                                                this.theme_dropdown_open = !this.theme_dropdown_open;
+                                                this.encoding_dropdown_open = false;
                                                 cx.notify();
                                             }))
-                                        }))
-                                ).with_priority(100))
-                            })
+                                            .child(format!("{} \u{25BC}", current_theme_name.label()))
+                                    )
+                                    .when(self.theme_dropdown_open, |el| {
+                                        el.child(deferred(
+                                            dropdown_menu_container(t_bg_elevated, t_border_dropdown)
+                                                .children(ThemeName::all().iter().map(|name| {
+                                                    let is_selected = *name == current_theme_name;
+                                                    let name_copy = *name;
+                                                    dropdown_menu_item(
+                                                        format!("theme-{}", name.label()),
+                                                        name.label().to_string(),
+                                                        is_selected,
+                                                        t_bg_elevated, t_accent_primary, t_bg_hover_secondary,
+                                                        t_text_secondary, t_text_on_accent,
+                                                    )
+                                                    .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _event: &gpui::MouseDownEvent, _window, cx| {
+                                                        this.set_theme(name_copy);
+                                                        this.theme_dropdown_open = false;
+                                                        cx.notify();
+                                                    }))
+                                                }))
+                                        ).with_priority(100))
+                                    })
+                            )
                     )
             )
     }
