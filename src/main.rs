@@ -589,25 +589,6 @@ fn main() {
         // Initialize gpui-component (theme, popup menu, etc.)
         gpui_component::init(cx);
 
-        // Shared weak reference for Quit handler to save layout
-        let quit_entity: Arc<std::sync::Mutex<Option<gpui::WeakEntity<HexEditor>>>> =
-            Arc::new(std::sync::Mutex::new(None));
-        let quit_entity_clone = Arc::clone(&quit_entity);
-
-        // Register global Quit action handler
-        cx.on_action(move |_: &actions::Quit, cx| {
-            // Save layout before quitting
-            if let Some(weak) = quit_entity_clone.lock().unwrap().as_ref() {
-                if let Some(entity) = weak.upgrade() {
-                    let _ = entity.update(cx, |editor: &mut HexEditor, _cx| {
-                        editor.save_layout();
-                    });
-                }
-            }
-            ipc::cleanup_socket();
-            cx.quit();
-        });
-
         // Register key bindings (for menu shortcut display)
         cx.bind_keys([
             // File
@@ -700,9 +681,6 @@ fn main() {
                 entity.update(cx, |_editor, cx| {
                     cx.focus_self(window);
                 });
-
-                // Store weak reference for Quit handler
-                *quit_entity.lock().unwrap() = Some(entity.downgrade());
 
                 // Set up window close confirmation for unsaved changes
                 let weak_entity = entity.downgrade();

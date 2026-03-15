@@ -4,6 +4,7 @@ use crate::actions;
 use crate::encoding::{DisplayChar, decode_for_display};
 use crate::keyboard;
 use crate::pattern;
+use crate::ipc;
 use crate::ui::{self, EditMode, EditPane, HexNibble, TextEncoding};
 use gpui::{
     ExternalPaths, Font, FontFeatures, FontStyle, FontWeight, Pixels, SharedString, Window,
@@ -3061,6 +3062,15 @@ impl Render for HexEditor {
                 }),
             )
             // Action handlers (dispatched from menu bar and key bindings)
+            .on_action(cx.listener(|this, _: &actions::Quit, window, cx| {
+                this.save_layout();
+                ipc::cleanup_socket();
+                if this.force_close || !this.has_any_unsaved_changes() {
+                    cx.quit();
+                } else {
+                    this.confirm_close_with_unsaved(window, cx);
+                }
+            }))
             .on_action(cx.listener(|this, _: &actions::Open, _window, cx| {
                 this.open_file_dialog(cx);
             }))
