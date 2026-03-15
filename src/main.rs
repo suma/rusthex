@@ -581,22 +581,148 @@ impl Focusable for HexEditor {
     }
 }
 
+/// Open a new editor window, optionally loading a file.
+///
+/// This is called from main() for the initial window, from on_reopen for Dock clicks,
+/// and from the NewWindow action handler.
+pub fn open_new_window(cx: &mut App, file_path: Option<PathBuf>) {
+    use std::sync::atomic::AtomicBool;
+
+    static IPC_STARTED: AtomicBool = AtomicBool::new(false);
+
+    let settings = Settings::load();
+    let w = px(settings.window.width as f32);
+    let h = px(settings.window.height as f32);
+    let bounds = match (settings.window.x, settings.window.y) {
+        (Some(x), Some(y)) => Bounds {
+            origin: point(px(x as f32), px(y as f32)),
+            size: size(w, h),
+        },
+        _ => Bounds::centered(None, size(w, h), cx),
+    };
+
+    cx.open_window(
+        WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(bounds)),
+            ..Default::default()
+        },
+        move |window, cx| {
+            let entity = cx.new(|cx| {
+                let mut editor = HexEditor::new(cx);
+                if let Some(path) = file_path {
+                    match editor.load_file(path.clone()) {
+                        Ok(_) => {}
+                        Err(e) => {
+                            eprintln!("Failed to load file: {}", e);
+                        }
+                    }
+                }
+                editor
+            });
+
+            // Install Win32 native menu bar (gpui's set_menus doesn't create HMENU on Windows)
+            #[cfg(target_os = "windows")]
+            windows_menu::install_native_menu(window, &build_menus());
+
+            // Start IPC server once (first window only)
+            if !IPC_STARTED.swap(true, Ordering::SeqCst) {
+                entity.update(cx, |editor, cx| {
+                    ipc::start_ipc_server(&cx.entity(), cx);
+                    let _ = editor;
+                });
+            }
+
+            // Detect file type and log the result
+            entity.update(cx, |editor, cx| {
+                if editor.tab().document.len() > 0 {
+                    editor.detect_file_type(cx);
+                }
+            });
+
+            // Set initial focus
+            entity.update(cx, |_editor, cx| {
+                cx.focus_self(window);
+            });
+
+            // Set up window close handler — close window only, don't quit app
+            let weak_entity = entity.downgrade();
+            window.on_window_should_close(cx, move |window, cx| {
+                if let Some(entity) = weak_entity.upgrade() {
+                    let editor = entity.read(cx);
+
+                    if editor.force_close || !editor.has_any_unsaved_changes() {
+                        let _ = entity.update(cx, |editor, _cx| {
+                            editor.save_layout();
+                        });
+                        return true;
+                    }
+
+                    // Has unsaved changes - show confirmation dialog
+                    let _ = entity.update(cx, |editor, cx| {
+                        editor.confirm_close_window(window, cx);
+                    });
+
+                    return false;
+                }
+                true
+            });
+
+            entity
+        },
+    )
+    .unwrap();
+    cx.activate(true);
+}
+
+/// Show file picker and open the selected file in a new window.
+/// Works at the App level so it can be called even with no windows open.
+fn open_in_new_window_global(cx: &mut App) {
+    let receiver = cx.prompt_for_paths(gpui::PathPromptOptions {
+        files: true,
+        directories: false,
+        multiple: false,
+        prompt: Some(SharedString::from("Open in New Window")),
+    });
+
+    cx.spawn(async move |cx| {
+        if let Ok(Ok(Some(paths))) = receiver.await {
+            if let Some(path) = paths.into_iter().next() {
+                cx.update(|cx| {
+                    open_new_window(cx, Some(path));
+                })
+                .ok();
+            }
+        }
+    })
+    .detach();
+}
+
 fn main() {
     // Get command line arguments
     let args: Vec<String> = std::env::args().collect();
 
-    Application::new().run(move |cx: &mut App| {
+    let app = Application::new();
+
+    // Dock icon click when no windows are open — open a new empty window
+    app.on_reopen(|cx| {
+        open_new_window(cx, None);
+    });
+
+    app.run(move |cx: &mut App| {
         // Initialize gpui-component (theme, popup menu, etc.)
         gpui_component::init(cx);
 
         // Register key bindings (for menu shortcut display)
         cx.bind_keys([
             // File
+            KeyBinding::new("cmd-n", actions::NewWindow, None),
             KeyBinding::new("cmd-o", actions::Open, None),
+            KeyBinding::new("cmd-shift-o", actions::OpenInNewWindow, None),
             KeyBinding::new("cmd-s", actions::Save, None),
             KeyBinding::new("cmd-shift-s", actions::SaveAs, None),
             KeyBinding::new("cmd-t", actions::NewTab, None),
             KeyBinding::new("cmd-w", actions::CloseTab, None),
+            KeyBinding::new("cmd-shift-w", actions::CloseWindow, None),
             KeyBinding::new("cmd-q", actions::Quit, None),
             // Edit
             KeyBinding::new("cmd-z", actions::Undo, None),
@@ -624,95 +750,21 @@ fn main() {
         // Set native menu bar (works on macOS; on Windows, stored but not rendered by gpui)
         cx.set_menus(build_menus());
 
-        // Load settings for window size and position
-        let settings = Settings::load();
-        let w = px(settings.window.width as f32);
-        let h = px(settings.window.height as f32);
-        let bounds = match (settings.window.x, settings.window.y) {
-            (Some(x), Some(y)) => Bounds {
-                origin: point(px(x as f32), px(y as f32)),
-                size: size(w, h),
-            },
-            _ => Bounds::centered(None, size(w, h), cx),
+        // Global action handlers — work even when no window is open
+        cx.on_action(|_: &actions::NewWindow, cx| {
+            open_new_window(cx, None);
+        });
+        cx.on_action(|_: &actions::OpenInNewWindow, cx| {
+            open_in_new_window_global(cx);
+        });
+
+        // Open initial window with optional file argument
+        let file_path = if args.len() > 1 {
+            Some(PathBuf::from(&args[1]))
+        } else {
+            None
         };
-        cx.open_window(
-            WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(bounds)),
-                ..Default::default()
-            },
-            move |window, cx| {
-                let args_clone = args.clone();
-                let entity = cx.new(|cx| {
-                    // If file path is provided, load it; otherwise use sample data
-                    let editor = if args_clone.len() > 1 {
-                        let file_path = PathBuf::from(&args_clone[1]);
-                        let mut editor = HexEditor::new(cx);
-                        match editor.load_file(file_path.clone()) {
-                            Ok(_) => editor,
-                            Err(e) => {
-                                eprintln!("Failed to load file: {}", e);
-                                HexEditor::with_sample_data(cx)
-                            }
-                        }
-                    } else {
-                        HexEditor::with_sample_data(cx)
-                    };
-                    editor
-                });
-
-                // Install Win32 native menu bar (gpui's set_menus doesn't create HMENU on Windows)
-                #[cfg(target_os = "windows")]
-                windows_menu::install_native_menu(window, &build_menus());
-
-                // Start IPC server for rusthex-mcp communication
-                entity.update(cx, |editor, cx| {
-                    ipc::start_ipc_server(&cx.entity(), cx);
-                    let _ = editor; // suppress unused warning
-                });
-
-                // Detect file type and log the result
-                entity.update(cx, |editor, cx| {
-                    if editor.tab().document.len() > 0 {
-                        editor.detect_file_type(cx);
-                    }
-                });
-
-                // Set initial focus
-                entity.update(cx, |_editor, cx| {
-                    cx.focus_self(window);
-                });
-
-                // Set up window close confirmation for unsaved changes
-                let weak_entity = entity.downgrade();
-                window.on_window_should_close(cx, move |window, cx| {
-                    if let Some(entity) = weak_entity.upgrade() {
-                        let editor = entity.read(cx);
-
-                        // If force_close is set or no unsaved changes, save layout and allow closing
-                        if editor.force_close || !editor.has_any_unsaved_changes() {
-                            let _ = entity.update(cx, |editor, _cx| {
-                                editor.save_layout();
-                            });
-                            ipc::cleanup_socket();
-                            return true;
-                        }
-
-                        // Has unsaved changes - show confirmation dialog
-                        let _ = entity.update(cx, |editor, cx| {
-                            editor.confirm_close_with_unsaved(window, cx);
-                        });
-
-                        // Prevent closing for now - dialog will handle quit if confirmed
-                        return false;
-                    }
-                    true
-                });
-
-                entity
-            },
-        )
-        .unwrap();
-        cx.activate(true);
+        open_new_window(cx, file_path);
     });
 }
 
@@ -733,7 +785,9 @@ fn build_menus() -> Vec<Menu> {
         Menu {
             name: SharedString::from("File"),
             items: vec![
+                MenuItem::action("New Window", actions::NewWindow),
                 MenuItem::action("Open...", actions::Open),
+                MenuItem::action("Open in New Window...", actions::OpenInNewWindow),
                 MenuItem::separator(),
                 MenuItem::action("Save", actions::Save),
                 MenuItem::action("Save As...", actions::SaveAs),
@@ -741,6 +795,7 @@ fn build_menus() -> Vec<Menu> {
                 MenuItem::separator(),
                 MenuItem::action("New Tab", actions::NewTab),
                 MenuItem::action("Close Tab", actions::CloseTab),
+                MenuItem::action("Close Window", actions::CloseWindow),
             ],
         },
         Menu {

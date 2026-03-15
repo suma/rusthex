@@ -3074,11 +3074,14 @@ impl Render for HexEditor {
                     ipc::cleanup_socket();
                     cx.quit();
                 } else {
-                    this.confirm_close_with_unsaved(window, cx);
+                    this.confirm_quit_app(window, cx);
                 }
             }))
             .on_action(cx.listener(|this, _: &actions::Open, _window, cx| {
                 this.open_file_dialog(cx);
+            }))
+            .on_action(cx.listener(|_this, _: &actions::OpenInNewWindow, _window, cx| {
+                crate::open_in_new_window_global(cx);
             }))
             .on_action(cx.listener(|this, _: &actions::Save, window, cx| {
                 this.save_with_confirmation(window, cx);
@@ -3097,9 +3100,30 @@ impl Render for HexEditor {
                 this.new_tab();
                 cx.notify();
             }))
-            .on_action(cx.listener(|this, _: &actions::CloseTab, _window, cx| {
-                this.close_tab();
-                cx.notify();
+            .on_action(cx.listener(|this, _: &actions::CloseTab, window, cx| {
+                if this.tabs.len() <= 1 {
+                    // Last tab — close window instead
+                    if this.force_close || !this.has_any_unsaved_changes() {
+                        this.save_layout();
+                        window.remove_window();
+                    } else {
+                        this.confirm_close_window(window, cx);
+                    }
+                } else {
+                    this.close_tab();
+                    cx.notify();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &actions::CloseWindow, window, cx| {
+                if this.force_close || !this.has_any_unsaved_changes() {
+                    this.save_layout();
+                    window.remove_window();
+                } else {
+                    this.confirm_close_window(window, cx);
+                }
+            }))
+            .on_action(cx.listener(|_this, _: &actions::NewWindow, _window, cx| {
+                crate::open_new_window(cx, None);
             }))
             .on_action(cx.listener(|this, _: &actions::Undo, _window, cx| {
                 if let Some(offset) = this.tab_mut().document.undo() {

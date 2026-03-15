@@ -100,11 +100,10 @@ impl HexEditor {
             .collect()
     }
 
-    /// Show confirmation dialog before closing with unsaved changes
-    pub fn confirm_close_with_unsaved(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Show confirmation dialog before quitting the app with unsaved changes
+    pub fn confirm_quit_app(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let unsaved_files = self.get_unsaved_file_names();
         if unsaved_files.is_empty() {
-            // No unsaved changes, just quit
             self.force_close = true;
             cx.quit();
             return;
@@ -142,7 +141,52 @@ impl HexEditor {
                         cx.quit();
                     });
                 }
-                // If Cancel (answer == 1), do nothing - window stays open
+            }
+        })
+        .detach();
+    }
+
+    /// Show confirmation dialog before closing a window with unsaved changes
+    pub fn confirm_close_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let unsaved_files = self.get_unsaved_file_names();
+        if unsaved_files.is_empty() {
+            self.save_layout();
+            self.force_close = true;
+            window.remove_window();
+            return;
+        }
+
+        let message = if unsaved_files.len() == 1 {
+            format!("'{}' has unsaved changes.", unsaved_files[0])
+        } else {
+            format!(
+                "{} files have unsaved changes:\n{}",
+                unsaved_files.len(),
+                unsaved_files.join(", ")
+            )
+        };
+
+        let receiver = window.prompt(
+            PromptLevel::Warning,
+            "Unsaved Changes",
+            Some(&format!(
+                "{}\n\nDo you want to discard changes and close?",
+                message
+            )),
+            &["Discard and Close", "Cancel"],
+            cx,
+        );
+
+        cx.spawn_in(window, async move |entity, cx| {
+            if let Ok(answer) = receiver.await {
+                if answer == 0 {
+                    // User clicked "Discard and Close"
+                    let _ = entity.update_in(cx, |editor, window, _cx| {
+                        editor.save_layout();
+                        editor.force_close = true;
+                        window.remove_window();
+                    });
+                }
             }
         })
         .detach();

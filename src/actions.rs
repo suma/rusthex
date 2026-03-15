@@ -6,13 +6,16 @@ actions!(
     rusthex,
     [
         // File
+        NewWindow,
         Open,
+        OpenInNewWindow,
         Save,
         SaveAs,
         SaveSelectionAs,
         OpenSelectionInNewTab,
         NewTab,
         CloseTab,
+        CloseWindow,
         Quit,
         // Edit
         Undo,
