@@ -158,3 +158,256 @@ impl Default for RenderCache {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    fn sample_state() -> CacheState {
+        CacheState {
+            cursor_position: 0,
+            selection_start: None,
+            selection_end: None,
+            search_results_count: 0,
+            current_search_index: None,
+            document_len: 256,
+            bytes_per_row: 16,
+            text_encoding: TextEncoding::Ascii,
+        }
+    }
+
+    // -- is_valid --
+
+    #[test]
+    fn new_cache_is_invalid() {
+        let cache = RenderCache::new();
+        assert!(!cache.is_valid(&sample_state()));
+    }
+
+    #[test]
+    fn cache_valid_after_set_state() {
+        let mut cache = RenderCache::new();
+        let state = sample_state();
+        cache.set_state(state.clone());
+        assert!(cache.is_valid(&state));
+    }
+
+    #[test]
+    fn cache_invalid_when_state_changes() {
+        let mut cache = RenderCache::new();
+        let state = sample_state();
+        cache.set_state(state);
+
+        let mut new_state = sample_state();
+        new_state.cursor_position = 10;
+        assert!(!cache.is_valid(&new_state));
+    }
+
+    #[test]
+    fn cache_invalid_after_mark_modified() {
+        let mut cache = RenderCache::new();
+        let state = sample_state();
+        cache.set_state(state.clone());
+
+        cache.mark_modified(5);
+        assert!(!cache.is_valid(&state));
+    }
+
+    #[test]
+    fn cache_invalid_after_invalidate() {
+        let mut cache = RenderCache::new();
+        cache.set_state(sample_state());
+        cache.invalidate();
+        assert!(!cache.is_valid(&sample_state()));
+    }
+
+    // -- row_needs_rebuild --
+
+    #[test]
+    fn row_needs_rebuild_when_modified() {
+        let mut cache = RenderCache::new();
+        cache.mark_modified(20); // byte 20 is in row 1 (bytes_per_row=16)
+        assert!(cache.row_needs_rebuild(1, 16));
+    }
+
+    #[test]
+    fn row_no_rebuild_when_different_row_modified() {
+        let mut cache = RenderCache::new();
+        cache.mark_modified(20); // row 1
+        assert!(!cache.row_needs_rebuild(0, 16)); // row 0
+        assert!(!cache.row_needs_rebuild(2, 16)); // row 2
+    }
+
+    #[test]
+    fn row_needs_rebuild_boundary_bytes() {
+        let mut cache = RenderCache::new();
+        // Row 1 = bytes 16..32
+        cache.mark_modified(16); // first byte of row 1
+        assert!(cache.row_needs_rebuild(1, 16));
+
+        let mut cache2 = RenderCache::new();
+        cache2.mark_modified(31); // last byte of row 1
+        assert!(cache2.row_needs_rebuild(1, 16));
+    }
+
+    #[test]
+    fn row_no_rebuild_when_no_modifications() {
+        let cache = RenderCache::new();
+        assert!(!cache.row_needs_rebuild(0, 16));
+    }
+
+    // -- get_row / cache_row --
+
+    #[test]
+    fn cache_and_retrieve_row() {
+        let mut cache = RenderCache::new();
+        let row = RowRenderData {
+            address: "00000000".to_string(),
+            bytes: vec![],
+            is_cursor_row: true,
+        };
+        cache.cache_row(0, row);
+        let retrieved = cache.get_row(0);
+        assert!(retrieved.is_some());
+        assert!(retrieved.unwrap().is_cursor_row);
+    }
+
+    #[test]
+    fn get_row_returns_none_for_uncached() {
+        let cache = RenderCache::new();
+        assert!(cache.get_row(0).is_none());
+    }
+
+    #[test]
+    fn invalidate_clears_rows() {
+        let mut cache = RenderCache::new();
+        cache.cache_row(0, RowRenderData {
+            address: "00000000".to_string(),
+            bytes: vec![],
+            is_cursor_row: false,
+        });
+        cache.invalidate();
+        assert!(cache.get_row(0).is_none());
+    }
+
+    // -- set_state clears modified_offsets --
+
+    #[test]
+    fn set_state_clears_modifications() {
+        let mut cache = RenderCache::new();
+        cache.mark_modified(5);
+        let state = sample_state();
+        cache.set_state(state.clone());
+        // After set_state, modified_offsets should be cleared
+        assert!(cache.is_valid(&state));
+    }
+
+    // -- build_row_data --
+
+    #[test]
+    fn build_row_data_basic() {
+        let data: Vec<u8> = (0..32).collect();
+        let search_set = HashSet::new();
+
+        let row = RenderCache::build_row_data(
+            0,      // row
+            16,     // bytes_per_row
+            32,     // document_len
+            5,      // cursor_position
+            None,   // selection_range
+            &search_set,
+            None,   // current_search_range
+            8,      // address_chars
+            |i| data.get(i).copied(),
+            |_| false,
+        );
+
+        assert_eq!(row.address, "00000000");
+        assert_eq!(row.bytes.len(), 16);
+        assert!(row.is_cursor_row); // cursor at byte 5 -> row 0
+        assert!(row.bytes[5].is_cursor);
+        assert!(!row.bytes[0].is_cursor);
+    }
+
+    #[test]
+    fn build_row_data_with_selection() {
+        let data: Vec<u8> = (0..32).collect();
+        let search_set = HashSet::new();
+
+        let row = RenderCache::build_row_data(
+            0, 16, 32, 0,
+            Some((2, 5)),
+            &search_set,
+            None, 8,
+            |i| data.get(i).copied(),
+            |_| false,
+        );
+
+        assert!(!row.bytes[1].is_selected);
+        assert!(row.bytes[2].is_selected);
+        assert!(row.bytes[3].is_selected);
+        assert!(row.bytes[5].is_selected);
+        assert!(!row.bytes[6].is_selected);
+    }
+
+    #[test]
+    fn build_row_data_with_search_match() {
+        let data: Vec<u8> = (0..32).collect();
+        let mut search_set = HashSet::new();
+        search_set.insert(3);
+        search_set.insert(4);
+
+        let row = RenderCache::build_row_data(
+            0, 16, 32, 0,
+            None,
+            &search_set,
+            Some((3, 5)), // current search range
+            8,
+            |i| data.get(i).copied(),
+            |_| false,
+        );
+
+        assert!(row.bytes[3].is_search_match);
+        assert!(row.bytes[3].is_current_search);
+        assert!(row.bytes[4].is_search_match);
+        assert!(row.bytes[4].is_current_search);
+        assert!(!row.bytes[5].is_current_search); // end is exclusive
+    }
+
+    #[test]
+    fn build_row_data_second_row() {
+        let data: Vec<u8> = (0..32).collect();
+        let search_set = HashSet::new();
+
+        let row = RenderCache::build_row_data(
+            1, 16, 32, 20, // cursor at byte 20 -> row 1
+            None, &search_set, None, 8,
+            |i| data.get(i).copied(),
+            |_| false,
+        );
+
+        assert_eq!(row.address, "00000010");
+        assert_eq!(row.bytes.len(), 16);
+        assert!(row.is_cursor_row);
+        assert_eq!(row.bytes[0].value, 16); // first byte of row 1
+        assert!(row.bytes[4].is_cursor); // byte 20 = row 1, col 4
+    }
+
+    #[test]
+    fn build_row_data_modified_byte() {
+        let data: Vec<u8> = (0..32).collect();
+        let search_set = HashSet::new();
+
+        let row = RenderCache::build_row_data(
+            0, 16, 32, 0,
+            None, &search_set, None, 8,
+            |i| data.get(i).copied(),
+            |i| i == 7, // byte 7 is modified
+        );
+
+        assert!(!row.bytes[6].is_modified);
+        assert!(row.bytes[7].is_modified);
+        assert!(!row.bytes[8].is_modified);
+    }
+}

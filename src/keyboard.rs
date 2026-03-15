@@ -514,3 +514,93 @@ fn handle_navigation_and_input(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -- apply_shift --
+
+    #[test]
+    fn apply_shift_lowercase_to_uppercase() {
+        assert_eq!(apply_shift('a'), 'A');
+        assert_eq!(apply_shift('z'), 'Z');
+        assert_eq!(apply_shift('m'), 'M');
+    }
+
+    #[test]
+    fn apply_shift_digits_to_symbols() {
+        assert_eq!(apply_shift('1'), '!');
+        assert_eq!(apply_shift('2'), '@');
+        assert_eq!(apply_shift('3'), '#');
+        assert_eq!(apply_shift('4'), '$');
+        assert_eq!(apply_shift('5'), '%');
+        assert_eq!(apply_shift('6'), '^');
+        assert_eq!(apply_shift('7'), '&');
+        assert_eq!(apply_shift('8'), '*');
+        assert_eq!(apply_shift('9'), '(');
+        assert_eq!(apply_shift('0'), ')');
+    }
+
+    #[test]
+    fn apply_shift_punctuation() {
+        assert_eq!(apply_shift('-'), '_');
+        assert_eq!(apply_shift('='), '+');
+        assert_eq!(apply_shift('['), '{');
+        assert_eq!(apply_shift(']'), '}');
+        assert_eq!(apply_shift('\\'), '|');
+        assert_eq!(apply_shift(';'), ':');
+        assert_eq!(apply_shift('\''), '"');
+        assert_eq!(apply_shift(','), '<');
+        assert_eq!(apply_shift('.'), '>');
+        assert_eq!(apply_shift('/'), '?');
+        assert_eq!(apply_shift('`'), '~');
+    }
+
+    #[test]
+    fn apply_shift_already_uppercase_unchanged() {
+        assert_eq!(apply_shift('A'), 'A');
+        assert_eq!(apply_shift('Z'), 'Z');
+    }
+
+    #[test]
+    fn apply_shift_unmapped_char_unchanged() {
+        assert_eq!(apply_shift(' '), ' ');
+        assert_eq!(apply_shift('!'), '!');
+    }
+
+    // -- is_printable_ascii --
+
+    #[test]
+    fn printable_ascii_space_and_tilde() {
+        assert!(is_printable_ascii(' '));
+        assert!(is_printable_ascii('~'));
+    }
+
+    #[test]
+    fn printable_ascii_letters_and_digits() {
+        assert!(is_printable_ascii('A'));
+        assert!(is_printable_ascii('z'));
+        assert!(is_printable_ascii('0'));
+        assert!(is_printable_ascii('9'));
+    }
+
+    #[test]
+    fn non_printable_ascii_control_chars() {
+        assert!(!is_printable_ascii('\0'));
+        assert!(!is_printable_ascii('\n'));
+        assert!(!is_printable_ascii('\t'));
+        assert!(!is_printable_ascii('\x1F')); // unit separator (just before space)
+    }
+
+    #[test]
+    fn non_printable_ascii_del() {
+        assert!(!is_printable_ascii('\x7F')); // DEL (just after tilde)
+    }
+
+    #[test]
+    fn non_printable_ascii_non_ascii() {
+        assert!(!is_printable_ascii('\u{80}'));
+        assert!(!is_printable_ascii('あ'));
+    }
+}

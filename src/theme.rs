@@ -269,3 +269,57 @@ impl Theme {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn from_str_dark() {
+        assert_eq!(ThemeName::from_str("dark"), ThemeName::Dark);
+        assert_eq!(ThemeName::from_str("Dark"), ThemeName::Dark);
+        assert_eq!(ThemeName::from_str("DARK"), ThemeName::Dark);
+    }
+
+    #[test]
+    fn from_str_light() {
+        assert_eq!(ThemeName::from_str("light"), ThemeName::Light);
+        assert_eq!(ThemeName::from_str("Light"), ThemeName::Light);
+    }
+
+    #[test]
+    fn from_str_monokai() {
+        assert_eq!(ThemeName::from_str("monokai"), ThemeName::Monokai);
+        assert_eq!(ThemeName::from_str("Monokai"), ThemeName::Monokai);
+    }
+
+    #[test]
+    fn from_str_unknown_defaults_to_dark() {
+        assert_eq!(ThemeName::from_str("unknown"), ThemeName::Dark);
+        assert_eq!(ThemeName::from_str(""), ThemeName::Dark);
+    }
+
+    #[test]
+    fn label_matches_expected() {
+        assert_eq!(ThemeName::Dark.label(), "Dark");
+        assert_eq!(ThemeName::Light.label(), "Light");
+        assert_eq!(ThemeName::Monokai.label(), "Monokai");
+    }
+
+    #[test]
+    fn all_contains_all_variants() {
+        let all = ThemeName::all();
+        assert_eq!(all.len(), 3);
+        assert!(all.contains(&ThemeName::Dark));
+        assert!(all.contains(&ThemeName::Light));
+        assert!(all.contains(&ThemeName::Monokai));
+    }
+
+    #[test]
+    fn from_name_creates_theme() {
+        // Verify each theme variant can be created without panic
+        let _ = Theme::from_name(ThemeName::Dark);
+        let _ = Theme::from_name(ThemeName::Light);
+        let _ = Theme::from_name(ThemeName::Monokai);
+    }
+}

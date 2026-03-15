@@ -1016,4 +1016,264 @@ mod tests {
         assert_eq!(TextEncoding::from_label("invalid"), None);
         assert_eq!(TextEncoding::from_label(""), None);
     }
+
+    // -- TextEncoding::next cycle --
+
+    #[test]
+    fn text_encoding_next_cycles_through_all() {
+        let mut enc = TextEncoding::Ascii;
+        let all = TextEncoding::all();
+        for expected in all.iter().skip(1) {
+            enc = enc.next();
+            assert_eq!(enc, *expected);
+        }
+        // After last, wraps back to Ascii
+        enc = enc.next();
+        assert_eq!(enc, TextEncoding::Ascii);
+    }
+
+    // -- address_chars --
+
+    #[test]
+    fn address_chars_small_file() {
+        assert_eq!(address_chars(0), 8);
+        assert_eq!(address_chars(1), 8);
+        assert_eq!(address_chars(0xFFFF_FFFF), 8);
+    }
+
+    #[test]
+    fn address_chars_large_file() {
+        assert_eq!(address_chars(0x1_0000_0000), 12);
+        assert_eq!(address_chars(0xFFFF_FFFF_FFFF), 12);
+    }
+
+    #[test]
+    fn address_chars_very_large_file() {
+        assert_eq!(address_chars(0x1_0000_0000_0000), 16);
+    }
+
+    // -- format_address --
+
+    #[test]
+    fn format_address_8_chars() {
+        assert_eq!(format_address(0, 8), "00000000");
+        assert_eq!(format_address(255, 8), "000000FF");
+        assert_eq!(format_address(0xDEADBEEF, 8), "DEADBEEF");
+    }
+
+    #[test]
+    fn format_address_12_chars() {
+        assert_eq!(format_address(0, 12), "000000000000");
+        assert_eq!(format_address(0x1_0000_0000, 12), "000100000000");
+    }
+
+    #[test]
+    fn format_address_16_chars() {
+        assert_eq!(format_address(0, 16), "0000000000000000");
+    }
+
+    // -- row_count --
+
+    #[test]
+    fn row_count_exact_multiple() {
+        assert_eq!(row_count(32, 16), 2);
+        assert_eq!(row_count(16, 16), 1);
+    }
+
+    #[test]
+    fn row_count_partial_row() {
+        assert_eq!(row_count(17, 16), 2);
+        assert_eq!(row_count(1, 16), 1);
+    }
+
+    #[test]
+    fn row_count_empty() {
+        // (0 + 16 - 1) / 16 = 0
+        assert_eq!(row_count(0, 16), 0);
+    }
+
+    // -- format_byte_* --
+
+    #[test]
+    fn format_byte_hex_values() {
+        assert_eq!(format_byte_hex(0), "0x00");
+        assert_eq!(format_byte_hex(255), "0xFF");
+        assert_eq!(format_byte_hex(0xAB), "0xAB");
+    }
+
+    #[test]
+    fn format_byte_dec_values() {
+        assert_eq!(format_byte_dec(0), "0");
+        assert_eq!(format_byte_dec(255), "255");
+        assert_eq!(format_byte_dec(42), "42");
+    }
+
+    #[test]
+    fn format_byte_bin_values() {
+        assert_eq!(format_byte_bin(0), "00000000");
+        assert_eq!(format_byte_bin(255), "11111111");
+        assert_eq!(format_byte_bin(0b10101010), "10101010");
+    }
+
+    // -- format_file_size --
+
+    #[test]
+    fn format_file_size_bytes() {
+        assert_eq!(format_file_size(0), "0 B");
+        assert_eq!(format_file_size(512), "512 B");
+        assert_eq!(format_file_size(1023), "1023 B");
+    }
+
+    #[test]
+    fn format_file_size_kilobytes() {
+        assert_eq!(format_file_size(1024), "1.0 KB");
+        assert_eq!(format_file_size(1536), "1.5 KB");
+    }
+
+    #[test]
+    fn format_file_size_megabytes() {
+        assert_eq!(format_file_size(1024 * 1024), "1.0 MB");
+    }
+
+    #[test]
+    fn format_file_size_gigabytes() {
+        assert_eq!(format_file_size(1024 * 1024 * 1024), "1.0 GB");
+    }
+
+    // -- DataInspectorValues::from_bytes --
+
+    #[test]
+    fn data_inspector_single_byte() {
+        let data = vec![0xFF];
+        let vals = DataInspectorValues::from_bytes(
+            |i| data.get(i).copied(), 0, 1, Endian::Little,
+        ).unwrap();
+        assert_eq!(vals.uint8, 0xFF);
+        assert_eq!(vals.int8, -1);
+        assert!(vals.int16.is_none());
+        assert!(vals.uint32.is_none());
+        assert!(vals.float64.is_none());
+    }
+
+    #[test]
+    fn data_inspector_little_endian_16bit() {
+        let data = vec![0x01, 0x00];
+        let vals = DataInspectorValues::from_bytes(
+            |i| data.get(i).copied(), 0, 2, Endian::Little,
+        ).unwrap();
+        assert_eq!(vals.uint16, Some(1));
+        assert_eq!(vals.int16, Some(1));
+    }
+
+    #[test]
+    fn data_inspector_big_endian_16bit() {
+        let data = vec![0x00, 0x01];
+        let vals = DataInspectorValues::from_bytes(
+            |i| data.get(i).copied(), 0, 2, Endian::Big,
+        ).unwrap();
+        assert_eq!(vals.uint16, Some(1));
+        assert_eq!(vals.int16, Some(1));
+    }
+
+    #[test]
+    fn data_inspector_32bit_values() {
+        // 0x00000001 in little-endian
+        let data = vec![0x01, 0x00, 0x00, 0x00];
+        let vals = DataInspectorValues::from_bytes(
+            |i| data.get(i).copied(), 0, 4, Endian::Little,
+        ).unwrap();
+        assert_eq!(vals.uint32, Some(1));
+        assert_eq!(vals.int32, Some(1));
+        assert!(vals.float32.is_some());
+    }
+
+    #[test]
+    fn data_inspector_64bit_values() {
+        let data = vec![0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+        let vals = DataInspectorValues::from_bytes(
+            |i| data.get(i).copied(), 0, 8, Endian::Little,
+        ).unwrap();
+        assert_eq!(vals.uint64, Some(1));
+        assert_eq!(vals.int64, Some(1));
+        assert!(vals.float64.is_some());
+    }
+
+    #[test]
+    fn data_inspector_empty_returns_none() {
+        let data: Vec<u8> = vec![];
+        let vals = DataInspectorValues::from_bytes(
+            |i| data.get(i).copied(), 0, 0, Endian::Little,
+        );
+        assert!(vals.is_none());
+    }
+
+    // -- calculate_visible_range --
+
+    #[test]
+    fn visible_range_zero_rows() {
+        let range = calculate_visible_range(px(0.0), px(100.0), 0, 24.0, None);
+        assert_eq!(range.render_start, 0);
+        assert_eq!(range.render_end, 0);
+    }
+
+    #[test]
+    fn visible_range_no_scroll() {
+        let range = calculate_visible_range(px(0.0), px(240.0), 100, 24.0, None);
+        assert_eq!(range.render_start, 0);
+        assert!(range.render_end > 0);
+        assert_eq!(range.visible_rows, 10);
+    }
+
+    #[test]
+    fn visible_range_with_anchor() {
+        let range = calculate_visible_range(px(-240.0), px(240.0), 100, 24.0, Some(50));
+        // With anchor at row 50, render should start near 50
+        assert!(range.render_start <= 50);
+        assert!(range.render_end > 50);
+    }
+
+    // -- calculate_scroll_to_row --
+
+    #[test]
+    fn scroll_to_row_already_visible() {
+        // Row 5 is visible when first_visible=0, visible_rows=20
+        let result = calculate_scroll_to_row(5, px(0.0), 20, 100, 24.0);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn scroll_to_row_needs_scroll_down() {
+        // Row 25 is not visible when first_visible=0, visible_rows=20
+        let result = calculate_scroll_to_row(25, px(0.0), 20, 100, 24.0);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn scroll_to_row_empty_document() {
+        let result = calculate_scroll_to_row(0, px(0.0), 0, 0, 24.0);
+        assert!(result.is_none());
+    }
+
+    // -- calculate_scroll_offset --
+
+    #[test]
+    fn scroll_offset_at_top() {
+        let offset = calculate_scroll_offset(0, 20, 100, 24.0);
+        assert_eq!(f32::from(offset), 0.0);
+    }
+
+    #[test]
+    fn scroll_offset_non_zero() {
+        let offset = calculate_scroll_offset(10, 20, 100, 24.0);
+        // Should be negative (scrolled down)
+        assert!(f32::from(offset) < 0.0);
+    }
+
+    #[test]
+    fn scroll_offset_clamps_to_max() {
+        // Target row beyond what makes sense gets clamped
+        let offset = calculate_scroll_offset(999, 20, 100, 24.0);
+        let max_offset = calculate_scroll_offset(80, 20, 100, 24.0);
+        assert_eq!(f32::from(offset), f32::from(max_offset));
+    }
 }
