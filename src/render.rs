@@ -15,6 +15,32 @@ use gpui_component::scroll::{Scrollbar, ScrollbarShow};
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
 
+/// Embedded application icon (64x64), decoded once and cached.
+fn app_icon_image() -> std::sync::Arc<gpui::RenderImage> {
+    use std::sync::{Arc, OnceLock};
+    static ICON: OnceLock<Arc<gpui::RenderImage>> = OnceLock::new();
+    ICON.get_or_init(|| {
+        use image::{Delay, Frame, ImageBuffer, Rgba};
+        use smallvec::smallvec;
+        use std::time::Duration;
+
+        const ICON_PNG: &[u8] = include_bytes!("../assets/icon64.png");
+        let decoded = image::load_from_memory(ICON_PNG).expect("embedded icon64.png is valid");
+        let rgba = decoded.to_rgba8();
+        let (w, h) = rgba.dimensions();
+        let buf: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::from_raw(w, h, rgba.into_raw())
+            .expect("buffer size matches dimensions");
+        let frame = Frame::from_parts(
+            buf,
+            0,
+            0,
+            Delay::from_saturating_duration(Duration::ZERO),
+        );
+        Arc::new(gpui::RenderImage::new(smallvec![frame]))
+    })
+    .clone()
+}
+
 /// Render a single label-value row for the data inspector panel.
 fn inspector_row(
     label: &str,
@@ -2623,6 +2649,12 @@ impl HexEditor {
                     // Stop clicks inside the dialog from closing it via the overlay handler
                     .on_mouse_down(gpui::MouseButton::Left, |_event, _window, _cx| {})
                     .child(
+                        img(app_icon_image())
+                            .w(px(64.0))
+                            .h(px(64.0)),
+                    )
+                    .child(div().h(px(4.0)))
+                    .child(
                         div()
                             .text_xl()
                             .text_color(t.accent_primary)
@@ -2633,13 +2665,6 @@ impl HexEditor {
                             .text_sm()
                             .text_color(t.text_muted)
                             .child(format!("v{}", env!("CARGO_PKG_VERSION"))),
-                    )
-                    .child(div().h(px(8.0)))
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(t.text_primary)
-                            .child("A hex editor built with Rust and gpui"),
                     )
                     .child(div().h(px(4.0)))
                     .child(
