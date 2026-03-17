@@ -77,15 +77,28 @@ impl HexEditor {
         }
     }
 
-    /// Open a file in a new tab
+    /// Check if a tab is an initial/pristine tab (no file loaded, no unsaved changes)
+    fn is_initial_tab(tab: &EditorTab) -> bool {
+        tab.document.file_path().is_none() && !tab.document.has_unsaved_changes()
+    }
+
+    /// Open a file in a new tab.
+    /// If there is exactly one initial (empty, unmodified, no file) tab, replace it instead.
     pub fn open_file_in_new_tab(&mut self, path: PathBuf) -> std::io::Result<()> {
         let mut doc = Document::new();
         doc.load(path)?;
         let mut tab = EditorTab::with_document(doc);
         tab.pattern.available_patterns =
             pattern::scan_hexpat_dir(&self.settings.pattern.hexpat_dir);
-        self.tabs.push(tab);
-        self.active_tab = self.tabs.len() - 1;
+
+        // Replace the initial tab if it's the only one and is pristine
+        if self.tabs.len() == 1 && Self::is_initial_tab(&self.tabs[0]) {
+            self.tabs[0] = tab;
+            self.active_tab = 0;
+        } else {
+            self.tabs.push(tab);
+            self.active_tab = self.tabs.len() - 1;
+        }
         Ok(())
     }
 
