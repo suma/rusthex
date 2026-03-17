@@ -2626,7 +2626,7 @@ impl HexEditor {
                         div()
                             .text_xl()
                             .text_color(t.accent_primary)
-                            .child("rusthex"),
+                            .child("Pheasant"),
                     )
                     .child(
                         div()
@@ -2910,7 +2910,7 @@ impl Render for HexEditor {
             .tab()
             .document
             .file_name()
-            .unwrap_or("Rust Hex Editor")
+            .unwrap_or("Pheasant")
             .to_string();
 
         // Build render params for helper methods

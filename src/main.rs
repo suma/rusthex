@@ -411,7 +411,7 @@ impl HexEditor {
         let mut data = Vec::new();
 
         // Add header text
-        data.extend_from_slice(b"Rust Hex Editor - Sample Binary File\n");
+        data.extend_from_slice(b"Pheasant - Sample Binary File\n");
         data.extend_from_slice(b"=====================================\n\n");
 
         // Add multiple lines of varied data
@@ -773,13 +773,13 @@ fn build_menus() -> Vec<Menu> {
     vec![
         // Application menu (macOS displays the first menu as the app-name menu)
         Menu {
-            name: SharedString::from("rusthex"),
+            name: SharedString::from("Pheasant"),
             items: vec![
-                MenuItem::action("About rusthex", actions::About),
+                MenuItem::action("About Pheasant", actions::About),
                 MenuItem::separator(),
                 MenuItem::os_submenu("Services", SystemMenuType::Services),
                 MenuItem::separator(),
-                MenuItem::action("Quit rusthex", actions::Quit),
+                MenuItem::action("Quit Pheasant", actions::Quit),
             ],
         },
         Menu {

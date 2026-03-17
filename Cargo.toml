@@ -35,5 +35,9 @@ windows = { version = "0.61", features = [
     "Win32_Graphics_Gdi",
 ] }
 
+[[bin]]
+name = "Pheasant"
+path = "src/main.rs"
+
 [dev-dependencies]
 tempfile = "3"
