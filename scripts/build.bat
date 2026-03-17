@@ -1,7 +1,7 @@
 @echo off
 setlocal
 
-echo === RustHex Build Script for Windows ===
+echo === Pheasant Build Script for Windows ===
 
 :: Rustがインストールされているか確認
 where cargo >nul 2>nul
@@ -15,7 +15,7 @@ if "%1"=="release" (
     echo Building release version...
     cargo build --release
     if %errorlevel% equ 0 (
-        echo Build successful: target\release\rusthex.exe
+        echo Build successful: target\release\Pheasant.exe
     )
 ) else if "%1"=="run" (
     echo Running application...
@@ -39,7 +39,7 @@ if "%1"=="release" (
     echo Building debug version...
     cargo build
     if %errorlevel% equ 0 (
-        echo Build successful: target\debug\rusthex.exe
+        echo Build successful: target\debug\Pheasant.exe
     )
 )
 

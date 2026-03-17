@@ -1,13 +1,13 @@
 #!/bin/bash
 #
-# macOS App Bundle Packaging Script for RustHex
+# macOS App Bundle Packaging Script for Pheasant
 # Target: aarch64-apple-darwin (Apple Silicon)
 #
 
 set -e
 
 # Configuration
-APP_NAME="RustHex"
+APP_NAME="Pheasant"
 BUNDLE_ID="com.github.suma.rusthex"
 VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
 TARGET="aarch64-apple-darwin"
@@ -15,7 +15,7 @@ BUILD_DIR="target/${TARGET}/release"
 DIST_DIR="dist"
 APP_BUNDLE="${DIST_DIR}/${APP_NAME}.app"
 
-echo "=== RustHex macOS Packaging Script ==="
+echo "=== Pheasant macOS Packaging Script ==="
 echo "Version: ${VERSION}"
 echo "Target: ${TARGET}"
 echo ""
@@ -30,7 +30,7 @@ fi
 echo "Building release binary..."
 cargo build --release --target ${TARGET}
 
-if [ ! -f "${BUILD_DIR}/rusthex" ]; then
+if [ ! -f "${BUILD_DIR}/Pheasant" ]; then
     echo "Error: Build failed - binary not found"
     exit 1
 fi
@@ -42,7 +42,7 @@ mkdir -p "${APP_BUNDLE}/Contents/MacOS"
 mkdir -p "${APP_BUNDLE}/Contents/Resources"
 
 # Copy binary
-cp "${BUILD_DIR}/rusthex" "${APP_BUNDLE}/Contents/MacOS/${APP_NAME}"
+cp "${BUILD_DIR}/Pheasant" "${APP_BUNDLE}/Contents/MacOS/${APP_NAME}"
 chmod +x "${APP_BUNDLE}/Contents/MacOS/${APP_NAME}"
 
 # Create Info.plist
@@ -90,7 +90,7 @@ cat > "${APP_BUNDLE}/Contents/Info.plist" << EOF
         </dict>
     </array>
     <key>NSAppleEventsUsageDescription</key>
-    <string>RustHex needs access to handle file operations.</string>
+    <string>Pheasant needs access to handle file operations.</string>
 </dict>
 </plist>
 EOF
@@ -98,12 +98,29 @@ EOF
 # Create PkgInfo
 echo -n "APPL????" > "${APP_BUNDLE}/Contents/PkgInfo"
 
-# Check if icon exists, if not create a placeholder message
-if [ -f "assets/AppIcon.icns" ]; then
-    cp "assets/AppIcon.icns" "${APP_BUNDLE}/Contents/Resources/"
-    echo "Icon: Copied AppIcon.icns"
+# Generate .icns from assets/icon.png using macOS iconutil
+if [ -f "assets/icon.png" ]; then
+    echo "Generating AppIcon.icns from assets/icon.png..."
+    ICONSET_DIR=$(mktemp -d)/AppIcon.iconset
+    mkdir -p "${ICONSET_DIR}"
+
+    # Generate all required icon sizes from the source PNG
+    sips -z 16 16     "assets/icon.png" --out "${ICONSET_DIR}/icon_16x16.png"      > /dev/null
+    sips -z 32 32     "assets/icon.png" --out "${ICONSET_DIR}/icon_16x16@2x.png"   > /dev/null
+    sips -z 32 32     "assets/icon.png" --out "${ICONSET_DIR}/icon_32x32.png"      > /dev/null
+    sips -z 64 64     "assets/icon.png" --out "${ICONSET_DIR}/icon_32x32@2x.png"   > /dev/null
+    sips -z 128 128   "assets/icon.png" --out "${ICONSET_DIR}/icon_128x128.png"    > /dev/null
+    sips -z 256 256   "assets/icon.png" --out "${ICONSET_DIR}/icon_128x128@2x.png" > /dev/null
+    sips -z 256 256   "assets/icon.png" --out "${ICONSET_DIR}/icon_256x256.png"    > /dev/null
+    sips -z 512 512   "assets/icon.png" --out "${ICONSET_DIR}/icon_256x256@2x.png" > /dev/null
+    sips -z 512 512   "assets/icon.png" --out "${ICONSET_DIR}/icon_512x512.png"    > /dev/null
+    sips -z 1024 1024 "assets/icon.png" --out "${ICONSET_DIR}/icon_512x512@2x.png" > /dev/null
+
+    iconutil -c icns "${ICONSET_DIR}" -o "${APP_BUNDLE}/Contents/Resources/AppIcon.icns"
+    rm -rf "$(dirname "${ICONSET_DIR}")"
+    echo "Icon: Generated AppIcon.icns"
 else
-    echo "Note: No icon found at assets/AppIcon.icns - app will use default icon"
+    echo "Warning: assets/icon.png not found - app will use default icon"
 fi
 
 echo ""
