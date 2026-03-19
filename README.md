@@ -211,6 +211,12 @@ timeout = 60
 | **Analyze** ||
 | Cmd+E | Analyze selection with external command |
 
+## Supported Platforms
+
+- **macOS** — Primary development platform. Fully supported.
+- **Windows** — Fully supported. Requires Visual Studio Build Tools (C++ compiler).
+- **Linux** — Should work but not regularly tested. Requires a Vulkan-capable GPU driver.
+
 ## Installation
 
 ### Prerequisites
