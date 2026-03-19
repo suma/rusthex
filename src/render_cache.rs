@@ -66,6 +66,7 @@ impl RenderCache {
     }
 
     /// Mark a byte offset as modified (needs re-render)
+    #[cfg(test)]
     pub fn mark_modified(&mut self, offset: usize) {
         self.modified_offsets.insert(offset);
     }

@@ -404,35 +404,6 @@ impl HexEditor {
         let _ = self.settings.save();
     }
 
-    fn with_sample_data(cx: &mut Context<Self>) -> Self {
-        let mut editor = Self::new(cx);
-        // Sample data: Generate more data to test scrolling
-        let mut data = Vec::new();
-
-        // Add header text
-        data.extend_from_slice(b"Pheasant - Sample Binary File\n");
-        data.extend_from_slice(b"=====================================\n\n");
-
-        // Add multiple lines of varied data
-        for i in 0..100 {
-            data.extend_from_slice(format!("Line {:03}: ", i).as_bytes());
-            // Add printable characters
-            for j in 0..16 {
-                let byte = (0x41 + ((i + j) % 26)) as u8; // A-Z cycling
-                data.push(byte);
-            }
-            data.push(b'\n');
-
-            // Add some binary data
-            for j in 0..16 {
-                data.push(((i * 16 + j) % 256) as u8);
-            }
-        }
-
-        editor.tab_mut().document = Document::with_data(data);
-        editor
-    }
-
     /// Schedule a debounced search execution
     ///
     /// Waits for a short delay after the last keystroke before starting the search.
@@ -568,10 +539,6 @@ impl HexEditor {
         self.tab_mut().render_cache.invalidate();
     }
 
-    /// Mark a byte offset as modified in the render cache
-    pub fn mark_byte_modified(&mut self, offset: usize) {
-        self.tab_mut().render_cache.mark_modified(offset);
-    }
 }
 
 impl Focusable for HexEditor {

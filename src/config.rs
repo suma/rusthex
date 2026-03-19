@@ -233,6 +233,7 @@ impl Settings {
     }
 
     /// Load settings from a TOML string (for testing)
+    #[cfg(test)]
     pub fn load_from_str(content: &str) -> Self {
         match toml::from_str(content) {
             Ok(settings) => {
