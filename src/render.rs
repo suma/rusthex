@@ -2657,9 +2657,17 @@ impl HexEditor {
                     .child(
                         div()
                             .text_xl()
+                            .font_weight(FontWeight::BOLD)
                             .text_color(t.accent_primary)
                             .child("Pheasant"),
                     )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(t.text_primary)
+                            .child("Fast, lightweight, GPU-accelerated hex editor"),
+                    )
+                    .child(div().h(px(4.0)))
                     .child(
                         div()
                             .text_sm()
