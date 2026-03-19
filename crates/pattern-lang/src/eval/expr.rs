@@ -999,7 +999,7 @@ impl<'a> Evaluator<'a> {
                 if let Some(arg) = arg_vals.first() {
                     let ty = TypeExpr {
                         kind: TypeExprKind::Builtin(builtin),
-                        span: func.span.clone(),
+                        span: func.span,
                     };
                     return self
                         .cast_value(arg, &ty)
@@ -1273,7 +1273,7 @@ impl<'a> Evaluator<'a> {
         if size == 0
             || addr
                 .checked_add(size)
-                .map_or(true, |end| end > self.data.size())
+                .is_none_or(|end| end > self.data.size())
         {
             return Ok(Value::Unsigned(0));
         }
@@ -1294,7 +1294,7 @@ impl<'a> Evaluator<'a> {
         if size == 0
             || addr
                 .checked_add(size)
-                .map_or(true, |end| end > self.data.size())
+                .is_none_or(|end| end > self.data.size())
         {
             return Ok(Value::Signed(0));
         }
@@ -1356,7 +1356,7 @@ impl<'a> Evaluator<'a> {
         // Pattern is a string argument (bytes of the string are the search pattern)
         let bytes: Vec<u8> = match args.get(3) {
             Some(Value::String(s)) => s.bytes().collect(),
-            Some(v) => {
+            Some(_v) => {
                 // Fallback: treat as sequence of byte args like find_sequence_in_range
                 flatten_args(&args[3..])
                     .iter()
@@ -1387,7 +1387,7 @@ impl<'a> Evaluator<'a> {
         if size == 0
             || addr
                 .checked_add(size)
-                .map_or(true, |end| end > self.data.size())
+                .is_none_or(|end| end > self.data.size())
         {
             return Ok(Value::String(String::new()));
         }
@@ -1429,7 +1429,7 @@ impl<'a> Evaluator<'a> {
                 Value::Signed(v) => *v as u8,
                 _ => return Value::Bool(false),
             };
-            Value::Bool(c >= 0x20 && c <= 0x7E)
+            Value::Bool((0x20..=0x7E).contains(&c))
         } else {
             Value::Bool(false)
         }

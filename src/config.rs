@@ -10,16 +10,13 @@ use std::path::PathBuf;
 
 /// Default endianness for data inspector
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum DefaultEndian {
+    #[default]
     Little,
     Big,
 }
 
-impl Default for DefaultEndian {
-    fn default() -> Self {
-        DefaultEndian::Little
-    }
-}
 
 /// Display settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -138,6 +135,7 @@ impl Default for LayoutSettings {
 /// Pattern language settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct PatternSettings {
     /// Directory path containing .hexpat files
     pub hexpat_dir: String,
@@ -145,14 +143,6 @@ pub struct PatternSettings {
     pub include_dirs: Vec<String>,
 }
 
-impl Default for PatternSettings {
-    fn default() -> Self {
-        Self {
-            hexpat_dir: String::new(),
-            include_dirs: Vec::new(),
-        }
-    }
-}
 
 /// Analyze selection settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -179,6 +169,7 @@ impl Default for AnalyzeSettings {
 /// Application settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct Settings {
     /// Display settings
     pub display: DisplaySettings,
@@ -194,18 +185,6 @@ pub struct Settings {
     pub analyze: AnalyzeSettings,
 }
 
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            display: DisplaySettings::default(),
-            editor: EditorSettings::default(),
-            window: WindowSettings::default(),
-            layout: LayoutSettings::default(),
-            pattern: PatternSettings::default(),
-            analyze: AnalyzeSettings::default(),
-        }
-    }
-}
 
 impl Settings {
     /// Get the configuration file path
@@ -216,8 +195,8 @@ impl Settings {
     /// Load settings from the configuration file
     /// Returns default settings if the file doesn't exist or is invalid
     pub fn load() -> Self {
-        if let Some(path) = Self::config_path() {
-            if path.exists() {
+        if let Some(path) = Self::config_path()
+            && path.exists() {
                 match std::fs::read_to_string(&path) {
                     Ok(content) => {
                         match toml::from_str(&content) {
@@ -237,7 +216,6 @@ impl Settings {
                     }
                 }
             }
-        }
         Self::default()
     }
 
@@ -248,7 +226,7 @@ impl Settings {
                 std::fs::create_dir_all(parent)?;
             }
             let content = toml::to_string_pretty(self)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                .map_err(|e| std::io::Error::other(e))?;
             std::fs::write(&path, content)?;
         }
         Ok(())

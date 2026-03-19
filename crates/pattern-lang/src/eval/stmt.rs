@@ -145,7 +145,7 @@ impl<'a> Evaluator<'a> {
                 self.scope.push();
                 let mut try_failed = false;
                 for s in &d.try_body {
-                    if let Err(_) = self.eval_stmt(s) {
+                    if self.eval_stmt(s).is_err() {
                         try_failed = true;
                         break;
                     }

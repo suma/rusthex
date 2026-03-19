@@ -63,8 +63,8 @@ impl HexEditor {
         );
 
         cx.spawn_in(window, async move |entity, cx| {
-            if let Ok(answer) = receiver.await {
-                if answer == 0 {
+            if let Ok(answer) = receiver.await
+                && answer == 0 {
                     // User clicked "Save"
                     let _ = entity.update(cx, |editor, cx| {
                         match editor.save_file() {
@@ -79,7 +79,6 @@ impl HexEditor {
                         cx.notify();
                     });
                 }
-            }
         })
         .detach();
     }
@@ -131,8 +130,8 @@ impl HexEditor {
         );
 
         cx.spawn_in(window, async move |entity, cx| {
-            if let Ok(answer) = receiver.await {
-                if answer == 0 {
+            if let Ok(answer) = receiver.await
+                && answer == 0 {
                     // User clicked "Discard and Quit"
                     let _ = entity.update(cx, |editor, cx| {
                         editor.save_layout();
@@ -141,7 +140,6 @@ impl HexEditor {
                         cx.quit();
                     });
                 }
-            }
         })
         .detach();
     }
@@ -178,8 +176,8 @@ impl HexEditor {
         );
 
         cx.spawn_in(window, async move |entity, cx| {
-            if let Ok(answer) = receiver.await {
-                if answer == 0 {
+            if let Ok(answer) = receiver.await
+                && answer == 0 {
                     // User clicked "Discard and Close"
                     let _ = entity.update_in(cx, |editor, window, _cx| {
                         editor.save_layout();
@@ -187,7 +185,6 @@ impl HexEditor {
                         window.remove_window();
                     });
                 }
-            }
         })
         .detach();
     }
@@ -204,8 +201,8 @@ impl HexEditor {
         let receiver = cx.prompt_for_paths(options);
 
         cx.spawn(async move |entity, cx| {
-            if let Ok(Ok(Some(paths))) = receiver.await {
-                if let Some(path) = paths.into_iter().next() {
+            if let Ok(Ok(Some(paths))) = receiver.await
+                && let Some(path) = paths.into_iter().next() {
                     let _ = entity.update(cx, |editor, cx| {
                         match editor.open_file_in_new_tab(path.clone()) {
                             Ok(_) => {
@@ -219,7 +216,6 @@ impl HexEditor {
                         cx.notify();
                     });
                 }
-            }
         })
         .detach();
     }
@@ -494,7 +490,7 @@ impl HexEditor {
         let json_str = if prompt.is_empty() {
             json.to_string()
         } else {
-            format!("{}\n{}", prompt, json.to_string())
+            format!("{}\n{}", prompt, json)
         };
 
         self.log(

@@ -220,7 +220,7 @@ impl<'a> Evaluator<'a> {
         let name_key = self.interner.intern(name);
         let mut node = PatternNode::new(
             name,
-            &format!("{}*", type_name_of(target_ty, &self.interner)),
+            format!("{}*", type_name_of(target_ty, &self.interner)),
             offset,
             ptr_bytes,
             PatternValue::Pointer {
@@ -744,14 +744,14 @@ impl<'a> Evaluator<'a> {
                     !parent_template_args.is_empty() && !template_params.is_empty();
                 if has_template_args {
                     self.scope.push();
-                    self.register_template_args(&template_params, parent_template_args)?;
+                    self.register_template_args(template_params, parent_template_args)?;
                 }
                 // Read grandparent fields first
                 if let Some((gp_name, gp_args)) = &grandparent {
                     self.read_parent_fields(*gp_name, gp_args, current_offset, children, endian)?;
                 }
                 // Read parent body fields
-                self.read_struct_body(&body, current_offset, children, endian)?;
+                self.read_struct_body(body, current_offset, children, endian)?;
                 if has_template_args {
                     self.scope.pop();
                 }
@@ -812,7 +812,7 @@ impl<'a> Evaluator<'a> {
             // LSB-first (default): extract bits from least significant upward
             let byte_start = bit_offset / 8;
             let bit_in_start_byte = bit_offset % 8;
-            let needed_bytes = (bit_in_start_byte + width + 7) / 8;
+            let needed_bytes = (bit_in_start_byte + width).div_ceil(8);
             let bytes = self.read_data_bytes(offset + byte_start, needed_bytes)?;
             let raw = bytes_to_unsigned(&bytes, Endianness::Little);
             let mask = if width >= 128 {
@@ -1088,11 +1088,11 @@ impl<'a> Evaluator<'a> {
         let result = match &*typedef {
             TypeDef::Struct { parent, body, .. } => {
                 // Check for tail-recursive struct pattern and optimize to loop
-                if let Some(tail_info) = self.detect_tail_recursive_struct(type_name, &body) {
+                if let Some(tail_info) = self.detect_tail_recursive_struct(type_name, body) {
                     // Tail-recursive: undo the recursion_depth bump and use loop
                     self.recursion_depth -= 1;
                     return self.read_struct_tail_recursive(
-                        type_name, name, offset, endian, attributes, &parent, &body, tail_info,
+                        type_name, name, offset, endian, attributes, parent, body, tail_info,
                     );
                 }
 
@@ -1113,7 +1113,7 @@ impl<'a> Evaluator<'a> {
                     Ok(())
                 };
                 let body_result = parent_result.and_then(|_| {
-                    self.read_struct_body(&body, &mut current_offset, &mut children, endian)
+                    self.read_struct_body(body, &mut current_offset, &mut children, endian)
                 });
 
                 self.scope.pop();
@@ -1186,7 +1186,7 @@ impl<'a> Evaluator<'a> {
                 members,
                 ..
             } => {
-                match self.read_type(&underlying, name, offset, endian, &[]) {
+                match self.read_type(underlying, name, offset, endian, &[]) {
                     Err(e) => Err(e),
                     Ok((value_node, size)) => {
                         let raw_val_result: Result<u128, EvalError> = match &value_node.value {
@@ -1323,7 +1323,7 @@ impl<'a> Evaluator<'a> {
                     )))
                 }
             }
-            TypeDef::Alias { ty: Some(ty), .. } => self.read_type(&ty, name, offset, endian, &[]),
+            TypeDef::Alias { ty: Some(ty), .. } => self.read_type(ty, name, offset, endian, &[]),
             TypeDef::Alias {
                 ty: None,
                 name: alias_name,

@@ -244,7 +244,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn lex_octal_number(&mut self, start: usize) -> Token {
-        self.lex_radix_number(start, 8, |b| b >= b'0' && b <= b'7', "octal")
+        self.lex_radix_number(start, 8, |b| (b'0'..=b'7').contains(&b), "octal")
     }
 
     fn lex_binary_number(&mut self, start: usize) -> Token {

@@ -365,11 +365,9 @@ impl HexEditor {
                 cx.listener(|this, _event, _window, cx| {
                     // Complete the drag operation
                     if let (Some(from), Some(to)) = (this.dragging_tab_index, this.tab_drop_target)
-                    {
-                        if from != to {
+                        && from != to {
                             this.reorder_tab(from, to);
                         }
-                    }
                     this.dragging_tab_index = None;
                     this.tab_drop_target = None;
                     cx.notify();
@@ -424,12 +422,11 @@ impl HexEditor {
                             .on_mouse_move(cx.listener(
                                 move |this, event: &gpui::MouseMoveEvent, _window, cx| {
                                     // Update drop target when dragging over tabs
-                                    if this.dragging_tab_index.is_some() && event.dragging() {
-                                        if this.tab_drop_target != Some(idx) {
+                                    if this.dragging_tab_index.is_some() && event.dragging()
+                                        && this.tab_drop_target != Some(idx) {
                                             this.tab_drop_target = Some(idx);
                                             cx.notify();
                                         }
-                                    }
                                 },
                             ))
                             .child(tab_name)
@@ -680,7 +677,7 @@ impl HexEditor {
         let render_end = params.render_end;
         let row_count = params.row_count;
         let font_name = &params.font_name;
-        let address_width = params.address_width;
+        let _address_width = params.address_width;
         let top_spacer_height = params.top_spacer_height;
         let bottom_spacer_height = params.bottom_spacer_height;
         let viewport_bounds = params.viewport_bounds;
@@ -1107,7 +1104,7 @@ impl HexEditor {
             // Bitmap panel (when visible)
             .when(bitmap_visible, |container| {
                 let doc_len = self.tab().document.len();
-                let bitmap_height = (doc_len + bitmap_width_pixels - 1) / bitmap_width_pixels;
+                let bitmap_height = doc_len.div_ceil(bitmap_width_pixels);
 
                 // Calculate pixel size based on panel width
                 // Account for scrollbar (12px) and gaps (8px padding + 4px gap)
@@ -1238,7 +1235,7 @@ impl HexEditor {
                                                     let row_height = this.row_height();
                                                     let visible_rows = this.content_view_rows;
                                                     let doc_len = this.tab().document.len();
-                                                    let total_rows = (doc_len + bytes_per_row - 1) / bytes_per_row;
+                                                    let total_rows = doc_len.div_ceil(bytes_per_row);
 
                                                     // Center the cursor row in view
                                                     let target_row = cursor_row.saturating_sub(visible_rows / 2);
@@ -2607,7 +2604,7 @@ impl HexEditor {
                 )
             })
             // No data message
-            .when(self.tab().document.len() == 0, |el| {
+            .when(self.tab().document.is_empty(), |el| {
                 el.child(div().text_color(t.text_muted).child("No data available"))
             })
     }
@@ -3031,8 +3028,8 @@ impl Render for HexEditor {
                     }
 
                     // Handle bitmap viewport indicator drag at root level
-                    if this.drag_pane == Some(EditPane::Bitmap) && this.is_dragging {
-                        if let (Some(start_y), Some(start_row)) =
+                    if this.drag_pane == Some(EditPane::Bitmap) && this.is_dragging
+                        && let (Some(start_y), Some(start_row)) =
                             (this.bitmap.drag_start_y, this.bitmap.drag_start_row)
                         {
                             let mouse_y: f32 = event.position.y.into();
@@ -3060,7 +3057,7 @@ impl Render for HexEditor {
 
                             // Calculate scroll offset and apply
                             let doc_len = this.tab().document.len();
-                            let total_rows = (doc_len + bytes_per_row - 1) / bytes_per_row;
+                            let total_rows = doc_len.div_ceil(bytes_per_row);
                             let row_height = this.row_height();
                             let visible_rows = this.content_view_rows;
 
@@ -3076,12 +3073,11 @@ impl Render for HexEditor {
                             this.tab_mut().scroll_offset = new_y_offset;
                             cx.notify();
                         }
-                    }
 
                     // Handle hex/ASCII drag selection at root level
                     // Root-level handler ensures events fire even when mouse moves outside hex-content div
-                    if let Some(pane @ (EditPane::Hex | EditPane::Ascii)) = this.drag_pane {
-                        if this.is_dragging {
+                    if let Some(pane @ (EditPane::Hex | EditPane::Ascii)) = this.drag_pane
+                        && this.is_dragging {
                             let doc_len = this.tab().document.len();
                             if doc_len == 0 {
                                 return;
@@ -3107,7 +3103,6 @@ impl Render for HexEditor {
                                 cx.notify();
                             }
                         }
-                    }
                 }),
             )
             // Action handlers (dispatched from menu bar and key bindings)
@@ -3132,7 +3127,7 @@ impl Render for HexEditor {
             .on_action(cx.listener(|this, _: &actions::SaveAs, _window, cx| {
                 this.save_as_dialog(cx);
             }))
-            .when(self.has_selection() && self.tab().document.len() > 0, |el| {
+            .when(self.has_selection() && !self.tab().document.is_empty(), |el| {
                 el.on_action(cx.listener(|this, _: &actions::SaveSelectionAs, _window, cx| {
                     this.save_selection_as_dialog(cx);
                 }))
@@ -3186,7 +3181,7 @@ impl Render for HexEditor {
                 }
                 cx.notify();
             }))
-            .when(self.has_selection() && self.tab().document.len() > 0, |el| {
+            .when(self.has_selection() && !self.tab().document.is_empty(), |el| {
                 el.on_action(cx.listener(|this, _: &actions::Copy, _window, cx| {
                     this.copy_selection(cx);
                 }))
@@ -3207,7 +3202,7 @@ impl Render for HexEditor {
                 this.paste_from_clipboard(cx);
             }))
             .on_action(cx.listener(|this, _: &actions::SelectAll, _window, cx| {
-                if this.tab().document.len() > 0 {
+                if !this.tab().document.is_empty() {
                     this.tab_mut().selection_start = Some(0);
                     let end_pos = this.tab().document.len().saturating_sub(1);
                     this.tab_mut().cursor_position = end_pos;
@@ -3280,7 +3275,7 @@ impl Render for HexEditor {
                 this.prev_search_result();
                 cx.notify();
             }))
-            .when(self.has_selection() && self.tab().document.len() > 0, |el| {
+            .when(self.has_selection() && !self.tab().document.is_empty(), |el| {
                 el.on_action(cx.listener(|this, _: &actions::AnalyzeSelection, _window, cx| {
                     this.analyze_selection(cx);
                 }))

@@ -645,7 +645,7 @@ fn execute_command(
             } else {
                 editor.log(
                     crate::log_panel::LogLevel::Warning,
-                    &format!("Unknown command: :{}", cmd),
+                    format!("Unknown command: :{}", cmd),
                 );
             }
         }
@@ -706,7 +706,7 @@ fn handle_operator_motion(
                 // Just yank, no delete
                 editor.log(
                     crate::log_panel::LogLevel::Info,
-                    &format!("Yanked {} bytes", byte_count),
+                    format!("Yanked {} bytes", byte_count),
                 );
             }
             VimOperator::Change => {
@@ -752,7 +752,7 @@ fn handle_operator_motion(
                 editor.move_position(cursor_before);
                 editor.log(
                     crate::log_panel::LogLevel::Info,
-                    &format!("Yanked {} bytes", byte_count),
+                    format!("Yanked {} bytes", byte_count),
                 );
             }
             VimOperator::Change => {
@@ -845,7 +845,7 @@ fn handle_replace_char(editor: &mut HexEditor, event: &KeyDownEvent) -> bool {
             }
         }
         EditPane::Ascii | EditPane::Bitmap => {
-            if c >= ' ' && c <= '~' {
+            if (' '..='~').contains(&c) {
                 let count = editor.tab_mut().vim_state.take_count();
                 let doc_len = editor.tab().document.len();
                 for i in 0..count {
@@ -964,7 +964,7 @@ fn yank_selection(editor: &mut HexEditor) {
         editor.tab_mut().vim_state.yank_buffer = bytes;
         editor.log(
             crate::log_panel::LogLevel::Info,
-            &format!("Yanked {} bytes", len),
+            format!("Yanked {} bytes", len),
         );
     }
 }
@@ -999,7 +999,7 @@ fn paste_bytes(editor: &mut HexEditor, after: bool) {
     editor.move_position(pos + buf.len() - 1);
     editor.log(
         crate::log_panel::LogLevel::Info,
-        &format!("Pasted {} bytes", buf.len()),
+        format!("Pasted {} bytes", buf.len()),
     );
 }
 

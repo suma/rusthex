@@ -685,7 +685,7 @@ pub(crate) fn substitute_type(ty: &TypeExpr, params: &[Name], args: &[TemplateAr
                     Some(TemplateArg::Expr(expr)) if matches!(&expr.kind, ExprKind::Ident(_)) => {
                         if let ExprKind::Ident(name) = &expr.kind {
                             return TypeExpr {
-                                kind: TypeExprKind::Named(vec![name.clone()]),
+                                kind: TypeExprKind::Named(vec![*name]),
                                 span: expr.span,
                             };
                         }

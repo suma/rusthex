@@ -25,7 +25,7 @@ impl<'a> SliceDataSource<'a> {
 impl<'a> DataSource for SliceDataSource<'a> {
     fn read_bytes(&self, offset: u64, size: u64) -> Result<Vec<u8>, EvalError> {
         let start = offset as usize;
-        let end = start.checked_add(size as usize).unwrap_or(usize::MAX);
+        let end = start.saturating_add(size as usize);
         if end > self.data.len() {
             return Err(EvalError::read_oob(format!(
                 "read out of bounds: offset={}, size={}, data_len={}",

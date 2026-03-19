@@ -1643,7 +1643,7 @@ impl<'a> Parser<'a> {
         map_op: impl Fn(&TokenKind) -> Option<BinOp>,
     ) -> Result<Expr, ParseError> {
         let mut lhs = next_fn(self)?;
-        while let Some(op) = map_op(&self.peek()) {
+        while let Some(op) = map_op(self.peek()) {
             self.advance();
             let rhs = next_fn(self)?;
             lhs = Expr {

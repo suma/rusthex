@@ -32,15 +32,11 @@ impl HexEditor {
         if relative_pos < 0 {
             // Moving backward
             let diff = relative_pos.unsigned_abs() as usize;
-            if current_pos < diff {
-                0
-            } else {
-                current_pos - diff
-            }
+            current_pos.saturating_sub(diff)
         } else {
             // Moving forward
             let diff = relative_pos as usize;
-            if current_pos.checked_add(diff).map_or(true, |p| p > max_pos) {
+            if current_pos.checked_add(diff).is_none_or(|p| p > max_pos) {
                 max_pos
             } else {
                 current_pos + diff
@@ -206,7 +202,7 @@ impl HexEditor {
             self.move_position(prev);
         } else {
             let boundary = 8;
-            let prev = if current % boundary == 0 {
+            let prev = if current.is_multiple_of(boundary) {
                 current - boundary
             } else {
                 (current / boundary) * boundary

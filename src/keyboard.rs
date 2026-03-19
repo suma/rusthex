@@ -31,7 +31,7 @@ fn apply_shift(c: char) -> char {
 
 /// Returns true if the character is printable ASCII (space through tilde).
 fn is_printable_ascii(c: char) -> bool {
-    c >= ' ' && c <= '~'
+    (' '..='~').contains(&c)
 }
 
 /// Check if Ctrl (Windows/Linux) or Cmd (macOS) modifier is held
@@ -72,11 +72,10 @@ pub fn handle_key_event(
         return;
     }
     // Vim mode intercept (after Cmd/Ctrl shortcuts, before special keys)
-    if editor.settings.editor.vim_mode {
-        if crate::vim::handle_vim_key(editor, event, window, cx) {
+    if editor.settings.editor.vim_mode
+        && crate::vim::handle_vim_key(editor, event, window, cx) {
             return;
         }
-    }
     if handle_special_keys(editor, event, cx) {
         return;
     }
@@ -152,7 +151,7 @@ fn handle_command_shortcuts(
             }
         }
         ("a", false) => {
-            if editor.tab().document.len() > 0 {
+            if !editor.tab().document.is_empty() {
                 editor.tab_mut().selection_start = Some(0);
                 let end_pos = editor.tab().document.len().saturating_sub(1);
                 editor.tab_mut().cursor_position = end_pos;
@@ -262,7 +261,7 @@ fn handle_special_keys(
         "f3" if shift => editor.prev_search_result(),
         key if editor.compare.selection_visible => {
             if let Some(num) = key.chars().next().and_then(|c| c.to_digit(10)) {
-                if num >= 1 && num <= 9 {
+                if (1..=9).contains(&num) {
                     let index = (num as usize) - 1;
                     editor.select_compare_tab(index);
                 } else {
@@ -415,12 +414,11 @@ fn handle_navigation_and_input(
             if editor.pattern_dropdown_open {
                 // Select the highlighted pattern
                 let filtered = editor.get_filtered_patterns();
-                if let Some(idx) = editor.pattern_filter_index {
-                    if let Some((original_idx, _)) = filtered.get(idx) {
+                if let Some(idx) = editor.pattern_filter_index
+                    && let Some((original_idx, _)) = filtered.get(idx) {
                         let original_idx = *original_idx;
                         editor.select_pattern(original_idx);
                     }
-                }
                 cx.notify();
             } else if editor.tab().goto_address_visible {
                 editor.confirm_goto_address();

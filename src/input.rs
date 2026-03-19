@@ -83,7 +83,7 @@ impl HexEditor {
     /// Handle ASCII input
     pub fn input_ascii(&mut self, c: char) {
         // Only accept printable ASCII characters
-        if c < ' ' || c > '~' {
+        if !(' '..='~').contains(&c) {
             return;
         }
 
@@ -302,8 +302,8 @@ impl HexEditor {
             );
 
             cx.spawn_in(window, async move |entity, cx| {
-                if let Ok(answer) = receiver.await {
-                    if answer == 0 {
+                if let Ok(answer) = receiver.await
+                    && answer == 0 {
                         let _ = entity.update(cx, |editor, cx| {
                             let bytes = match editor.tab().document.get_slice(start..end + 1) {
                                 Some(b) if !b.is_empty() => b,
@@ -318,7 +318,6 @@ impl HexEditor {
                             cx.notify();
                         });
                     }
-                }
             })
             .detach();
         } else {

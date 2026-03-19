@@ -295,8 +295,8 @@ impl HexEditor {
     /// Run the currently selected pattern against the document
     fn run_pattern(&mut self) {
         let selected = self.tab().pattern.selected_index;
-        if let Some(idx) = selected {
-            if idx < self.tab().pattern.available_patterns.len() {
+        if let Some(idx) = selected
+            && idx < self.tab().pattern.available_patterns.len() {
                 let pattern_path = self.tab().pattern.available_patterns[idx].path.clone();
                 let hexpat_dir = std::path::PathBuf::from(&self.settings.pattern.hexpat_dir);
                 let result = pattern::evaluate_pattern(
@@ -307,7 +307,6 @@ impl HexEditor {
                 );
                 self.tab_mut().pattern.result = Some(result);
             }
-        }
     }
 
     /// Toggle a tree node expanded/collapsed
@@ -634,7 +633,7 @@ pub fn open_new_window(cx: &mut App, file_path: Option<PathBuf>) {
 
             // Detect file type and log the result
             entity.update(cx, |editor, cx| {
-                if editor.tab().document.len() > 0 {
+                if !editor.tab().document.is_empty() {
                     editor.detect_file_type(cx);
                 }
             });
@@ -651,14 +650,14 @@ pub fn open_new_window(cx: &mut App, file_path: Option<PathBuf>) {
                     let editor = entity.read(cx);
 
                     if editor.force_close || !editor.has_any_unsaved_changes() {
-                        let _ = entity.update(cx, |editor, _cx| {
+                        entity.update(cx, |editor, _cx| {
                             editor.save_layout();
                         });
                         return true;
                     }
 
                     // Has unsaved changes - show confirmation dialog
-                    let _ = entity.update(cx, |editor, cx| {
+                    entity.update(cx, |editor, cx| {
                         editor.confirm_close_window(window, cx);
                     });
 
@@ -685,14 +684,13 @@ fn open_in_new_window_global(cx: &mut App) {
     });
 
     cx.spawn(async move |cx| {
-        if let Ok(Ok(Some(paths))) = receiver.await {
-            if let Some(path) = paths.into_iter().next() {
+        if let Ok(Ok(Some(paths))) = receiver.await
+            && let Some(path) = paths.into_iter().next() {
                 cx.update(|cx| {
                     open_new_window(cx, Some(path));
                 })
                 .ok();
             }
-        }
     })
     .detach();
 }

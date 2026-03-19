@@ -142,14 +142,13 @@ pub fn scan_hexpat_dir(dir: &str) -> Vec<PatternFileInfo> {
     if let Ok(entries) = std::fs::read_dir(dir_path) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("hexpat") {
-                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+            if path.extension().and_then(|e| e.to_str()) == Some("hexpat")
+                && let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
                     patterns.push(PatternFileInfo {
                         name: stem.to_string(),
                         path,
                     });
                 }
-            }
         }
     }
     patterns.sort_by(|a, b| a.name.cmp(&b.name));
@@ -183,19 +182,17 @@ pub fn evaluate_pattern(
     // 1. User-configured include_dirs (highest priority)
     for dir in include_dirs {
         let path = PathBuf::from(dir);
-        if path.is_dir() {
-            if seen.insert(path.clone()) {
+        if path.is_dir()
+            && seen.insert(path.clone()) {
                 search_dirs.push(path);
             }
-        }
     }
 
     // 2. Auto-detected sibling "includes/" directory
-    if let Some(includes_dir) = hexpat_dir.parent().map(|p| p.join("includes")) {
-        if includes_dir.is_dir() && seen.insert(includes_dir.clone()) {
+    if let Some(includes_dir) = hexpat_dir.parent().map(|p| p.join("includes"))
+        && includes_dir.is_dir() && seen.insert(includes_dir.clone()) {
             search_dirs.push(includes_dir);
         }
-    }
 
     // 3. hexpat_dir itself
     let hexpat_path = hexpat_dir.to_path_buf();

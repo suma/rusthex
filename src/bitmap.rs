@@ -185,7 +185,7 @@ impl HexEditor {
     pub(crate) fn update_bitmap_cache(&mut self) {
         let doc_len = self.tab().document.len();
         let bitmap_width_pixels = self.bitmap.width;
-        let bitmap_height = (doc_len + bitmap_width_pixels - 1) / bitmap_width_pixels;
+        let bitmap_height = doc_len.div_ceil(bitmap_width_pixels);
 
         // Calculate pixel size
         let scrollbar_width = 12.0;

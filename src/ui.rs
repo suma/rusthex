@@ -170,7 +170,7 @@ pub fn format_address(offset: usize, chars: usize) -> String {
 
 /// Calculate row count from document length
 pub fn row_count(doc_len: usize, bytes_per_row: usize) -> usize {
-    (doc_len + bytes_per_row - 1) / bytes_per_row
+    doc_len.div_ceil(bytes_per_row)
 }
 
 /// Format byte value as hexadecimal

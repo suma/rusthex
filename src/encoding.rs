@@ -65,7 +65,7 @@ pub fn decode_for_display(data: &[u8], encoding: TextEncoding) -> Vec<DisplayCha
 fn decode_ascii(data: &[u8]) -> Vec<DisplayChar> {
     data.iter()
         .map(|&b| {
-            if b >= 0x20 && b <= 0x7E {
+            if (0x20..=0x7E).contains(&b) {
                 DisplayChar::Char(b as char)
             } else {
                 DisplayChar::NonPrintable
@@ -78,7 +78,7 @@ fn decode_ascii(data: &[u8]) -> Vec<DisplayChar> {
 fn decode_latin1(data: &[u8]) -> Vec<DisplayChar> {
     data.iter()
         .map(|&b| {
-            if b >= 0x20 && b <= 0x7E {
+            if (0x20..=0x7E).contains(&b) {
                 // Printable ASCII
                 DisplayChar::Char(b as char)
             } else if b >= 0xA0 {
@@ -199,8 +199,8 @@ fn decode_encoding_rs_granular(
             let slice = &data[i..i + len];
             let (s, _, had_errors) = encoding.decode(slice);
 
-            if !had_errors && !s.is_empty() {
-                if let Some(c) = s.chars().next() {
+            if !had_errors && !s.is_empty()
+                && let Some(c) = s.chars().next() {
                     if c.is_control() {
                         result[i] = DisplayChar::NonPrintable;
                     } else {
@@ -213,7 +213,6 @@ fn decode_encoding_rs_granular(
                     decoded = true;
                     break;
                 }
-            }
         }
 
         if !decoded {

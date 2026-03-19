@@ -263,11 +263,10 @@ fn verify_pattern_at(data: &[u8], pos: usize, pattern: &[PatternByte]) -> bool {
         return false;
     }
     for (j, pat_byte) in pattern.iter().enumerate() {
-        if let PatternByte::Exact(expected) = pat_byte {
-            if data[pos + j] != *expected {
+        if let PatternByte::Exact(expected) = pat_byte
+            && data[pos + j] != *expected {
                 return false;
             }
-        }
         // PatternByte::Any always matches
     }
     true
