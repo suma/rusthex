@@ -733,11 +733,11 @@ impl HexEditor {
                             .context_menu({
                                 let has_selection = self.has_selection();
                                 move |menu, _window, _cx| {
-                                    menu.menu("Copy", Box::new(actions::Copy))
-                                        .menu("Copy as ASCII Text", Box::new(actions::CopyAsAscii))
-                                        .menu("Copy as Hex String", Box::new(actions::CopyAsHexString))
-                                        .menu("Copy as C Array", Box::new(actions::CopyAsCArray))
-                                        .menu("Copy as Python", Box::new(actions::CopyAsPython))
+                                    menu.menu_with_enable("Copy", Box::new(actions::Copy), has_selection)
+                                        .menu_with_enable("Copy as ASCII Text", Box::new(actions::CopyAsAscii), has_selection)
+                                        .menu_with_enable("Copy as Hex String", Box::new(actions::CopyAsHexString), has_selection)
+                                        .menu_with_enable("Copy as C Array", Box::new(actions::CopyAsCArray), has_selection)
+                                        .menu_with_enable("Copy as Python", Box::new(actions::CopyAsPython), has_selection)
                                         .menu("Paste", Box::new(actions::Paste))
                                         .separator()
                                         .menu_with_enable("Save Selection As...", Box::new(actions::SaveSelectionAs), has_selection)
@@ -3122,13 +3122,15 @@ impl Render for HexEditor {
             .on_action(cx.listener(|this, _: &actions::SaveAs, _window, cx| {
                 this.save_as_dialog(cx);
             }))
-            .on_action(cx.listener(|this, _: &actions::SaveSelectionAs, _window, cx| {
-                this.save_selection_as_dialog(cx);
-            }))
-            .on_action(cx.listener(|this, _: &actions::OpenSelectionInNewTab, window, cx| {
-                this.open_selection_in_new_tab(window, cx);
-                cx.notify();
-            }))
+            .when(self.has_selection() && self.tab().document.len() > 0, |el| {
+                el.on_action(cx.listener(|this, _: &actions::SaveSelectionAs, _window, cx| {
+                    this.save_selection_as_dialog(cx);
+                }))
+                .on_action(cx.listener(|this, _: &actions::OpenSelectionInNewTab, window, cx| {
+                    this.open_selection_in_new_tab(window, cx);
+                    cx.notify();
+                }))
+            })
             .on_action(cx.listener(|this, _: &actions::NewTab, _window, cx| {
                 this.new_tab();
                 cx.notify();
@@ -3174,21 +3176,23 @@ impl Render for HexEditor {
                 }
                 cx.notify();
             }))
-            .on_action(cx.listener(|this, _: &actions::Copy, _window, cx| {
-                this.copy_selection(cx);
-            }))
-            .on_action(cx.listener(|this, _: &actions::CopyAsAscii, _window, cx| {
-                this.copy_as_ascii(cx);
-            }))
-            .on_action(cx.listener(|this, _: &actions::CopyAsHexString, _window, cx| {
-                this.copy_as_hex_string(cx);
-            }))
-            .on_action(cx.listener(|this, _: &actions::CopyAsCArray, _window, cx| {
-                this.copy_as_c_array(cx);
-            }))
-            .on_action(cx.listener(|this, _: &actions::CopyAsPython, _window, cx| {
-                this.copy_as_python(cx);
-            }))
+            .when(self.has_selection() && self.tab().document.len() > 0, |el| {
+                el.on_action(cx.listener(|this, _: &actions::Copy, _window, cx| {
+                    this.copy_selection(cx);
+                }))
+                .on_action(cx.listener(|this, _: &actions::CopyAsAscii, _window, cx| {
+                    this.copy_as_ascii(cx);
+                }))
+                .on_action(cx.listener(|this, _: &actions::CopyAsHexString, _window, cx| {
+                    this.copy_as_hex_string(cx);
+                }))
+                .on_action(cx.listener(|this, _: &actions::CopyAsCArray, _window, cx| {
+                    this.copy_as_c_array(cx);
+                }))
+                .on_action(cx.listener(|this, _: &actions::CopyAsPython, _window, cx| {
+                    this.copy_as_python(cx);
+                }))
+            })
             .on_action(cx.listener(|this, _: &actions::Paste, _window, cx| {
                 this.paste_from_clipboard(cx);
             }))
@@ -3266,12 +3270,14 @@ impl Render for HexEditor {
                 this.prev_search_result();
                 cx.notify();
             }))
-            .on_action(cx.listener(|this, _: &actions::AnalyzeSelection, _window, cx| {
-                this.analyze_selection(cx);
-            }))
-            .on_action(cx.listener(|this, _: &actions::AnalyzeBinary, _window, cx| {
-                this.analyze_binary(cx);
-            }))
+            .when(self.has_selection() && self.tab().document.len() > 0, |el| {
+                el.on_action(cx.listener(|this, _: &actions::AnalyzeSelection, _window, cx| {
+                    this.analyze_selection(cx);
+                }))
+                .on_action(cx.listener(|this, _: &actions::AnalyzeBinary, _window, cx| {
+                    this.analyze_binary(cx);
+                }))
+            })
             .on_action(cx.listener(|this, _: &actions::About, _window, cx| {
                 this.about_visible = !this.about_visible;
                 cx.notify();
