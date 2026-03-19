@@ -1,4 +1,4 @@
-# RustHex
+# Pheasant
 
 A modern hex editor built with Rust and [gpui](https://www.gpui.rs/), featuring GPU-accelerated rendering and efficient handling of large files.
 
