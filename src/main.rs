@@ -360,9 +360,9 @@ impl HexEditor {
             pattern_panel_width: self.pattern_panel_width,
             bitmap_visible: self.bitmap.visible,
             bitmap_panel_width: self.bitmap.panel_width,
-            bitmap_color_mode: self.bitmap.color_mode.to_config_str().to_string(),
+            bitmap_color_mode: self.bitmap.color_mode.as_config_str().to_string(),
             bitmap_width: self.bitmap.width,
-            text_encoding: self.text_encoding.to_config_str().to_string(),
+            text_encoding: self.text_encoding.as_config_str().to_string(),
             log_panel_visible: self.log_panel.visible,
             log_panel_height: self.log_panel.panel_height,
             log_panel_tab: match self.log_panel.active_tab {

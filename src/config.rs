@@ -226,7 +226,7 @@ impl Settings {
                 std::fs::create_dir_all(parent)?;
             }
             let content = toml::to_string_pretty(self)
-                .map_err(|e| std::io::Error::other(e))?;
+                .map_err(std::io::Error::other)?;
             std::fs::write(&path, content)?;
         }
         Ok(())

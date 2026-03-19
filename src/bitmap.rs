@@ -70,7 +70,7 @@ impl BitmapColorMode {
     }
 
     /// Get config string for this color mode
-    pub fn to_config_str(&self) -> &'static str {
+    pub fn as_config_str(self) -> &'static str {
         match self {
             BitmapColorMode::Grayscale => "grayscale",
             BitmapColorMode::Heatmap => "heatmap",
@@ -369,7 +369,7 @@ mod tests {
             BitmapColorMode::Heatmap,
             BitmapColorMode::Category,
         ] {
-            let s = mode.to_config_str();
+            let s = mode.as_config_str();
             let parsed = BitmapColorMode::from_config_str(s);
             assert_eq!(parsed, mode);
         }

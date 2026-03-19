@@ -246,11 +246,7 @@ pub fn format_value(value: &PatternValue) -> String {
             data, elem_type, ..
         } => {
             let elem_size = elem_type.size().unwrap_or(1) as usize;
-            let count = if elem_size > 0 {
-                data.len() / elem_size
-            } else {
-                0
-            };
+            let count = data.len().checked_div(elem_size).unwrap_or(0);
             format!("[{} elements]", count)
         }
     }

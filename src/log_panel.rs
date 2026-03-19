@@ -82,6 +82,7 @@ impl LogPanel {
     }
 
     /// Get the most recent log entry, if any
+    #[allow(dead_code)]
     pub fn latest(&self) -> Option<&LogEntry> {
         self.entries.back()
     }

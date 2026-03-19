@@ -21,9 +21,9 @@ pub enum DisplayChar {
 
 impl DisplayChar {
     /// Convert to display character
-    pub fn to_char(&self) -> char {
+    pub fn as_char(self) -> char {
         match self {
-            DisplayChar::Char(c) => *c,
+            DisplayChar::Char(c) => c,
             DisplayChar::Continuation => '·',
             DisplayChar::Invalid => '.',
             DisplayChar::NonPrintable => '.',
@@ -367,8 +367,8 @@ fn decode_utf32(data: &[u8], is_big_endian: bool) -> Vec<DisplayChar> {
         // Need at least 4 bytes
         if i + 3 >= data.len() {
             // Mark remaining bytes as Invalid
-            for j in i..data.len() {
-                result[j] = DisplayChar::Invalid;
+            for item in &mut result[i..data.len()] {
+                *item = DisplayChar::Invalid;
             }
             break;
         }
@@ -407,17 +407,17 @@ mod tests {
         let data = b"Hello";
         let result = decode_for_display(data, TextEncoding::Ascii);
         assert_eq!(result.len(), 5);
-        assert_eq!(result[0].to_char(), 'H');
-        assert_eq!(result[4].to_char(), 'o');
+        assert_eq!(result[0].as_char(), 'H');
+        assert_eq!(result[4].as_char(), 'o');
     }
 
     #[test]
     fn test_ascii_non_printable() {
         let data = &[0x00, 0x1F, 0x7F];
         let result = decode_for_display(data, TextEncoding::Ascii);
-        assert_eq!(result[0].to_char(), '.');
-        assert_eq!(result[1].to_char(), '.');
-        assert_eq!(result[2].to_char(), '.');
+        assert_eq!(result[0].as_char(), '.');
+        assert_eq!(result[1].as_char(), '.');
+        assert_eq!(result[2].as_char(), '.');
     }
 
     #[test]
@@ -426,7 +426,7 @@ mod tests {
         let data = &[0xE3, 0x81, 0x82];
         let result = decode_for_display(data, TextEncoding::Utf8);
         assert_eq!(result.len(), 3);
-        assert_eq!(result[0].to_char(), 'あ');
+        assert_eq!(result[0].as_char(), 'あ');
         assert!(result[1].is_continuation());
         assert!(result[2].is_continuation());
     }
@@ -436,8 +436,8 @@ mod tests {
         // Invalid UTF-8 sequence
         let data = &[0xFF, 0xFE];
         let result = decode_for_display(data, TextEncoding::Utf8);
-        assert_eq!(result[0].to_char(), '.');
-        assert_eq!(result[1].to_char(), '.');
+        assert_eq!(result[0].as_char(), '.');
+        assert_eq!(result[1].as_char(), '.');
     }
 
     #[test]
@@ -445,8 +445,8 @@ mod tests {
         // Latin-1 extended characters
         let data = &[0xC0, 0xE9]; // À, é
         let result = decode_for_display(data, TextEncoding::Latin1);
-        assert_eq!(result[0].to_char(), 'À');
-        assert_eq!(result[1].to_char(), 'é');
+        assert_eq!(result[0].as_char(), 'À');
+        assert_eq!(result[1].as_char(), 'é');
     }
 
     #[test]
@@ -455,7 +455,7 @@ mod tests {
         let data = &[0x30, 0x42];
         let result = decode_for_display(data, TextEncoding::Utf16Be);
         assert_eq!(result.len(), 2);
-        assert_eq!(result[0].to_char(), 'あ');
+        assert_eq!(result[0].as_char(), 'あ');
         assert!(result[1].is_continuation());
     }
 
@@ -466,7 +466,7 @@ mod tests {
         let data = &[0x3D, 0xD8, 0x00, 0xDE];
         let result = decode_for_display(data, TextEncoding::Utf16Le);
         assert_eq!(result.len(), 4);
-        assert_eq!(result[0].to_char(), '😀');
+        assert_eq!(result[0].as_char(), '😀');
         assert!(result[1].is_continuation());
         assert!(result[2].is_continuation());
         assert!(result[3].is_continuation());
@@ -478,7 +478,7 @@ mod tests {
         let data = &[0x00, 0x00, 0x30, 0x42];
         let result = decode_for_display(data, TextEncoding::Utf32Be);
         assert_eq!(result.len(), 4);
-        assert_eq!(result[0].to_char(), 'あ');
+        assert_eq!(result[0].as_char(), 'あ');
         assert!(result[1].is_continuation());
         assert!(result[2].is_continuation());
         assert!(result[3].is_continuation());
@@ -490,7 +490,7 @@ mod tests {
         let data = &[0x41, 0x00, 0x00, 0x00];
         let result = decode_for_display(data, TextEncoding::Utf32Le);
         assert_eq!(result.len(), 4);
-        assert_eq!(result[0].to_char(), 'A');
+        assert_eq!(result[0].as_char(), 'A');
         assert!(result[1].is_continuation());
         assert!(result[2].is_continuation());
         assert!(result[3].is_continuation());

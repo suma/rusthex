@@ -98,7 +98,7 @@ impl TextEncoding {
     }
 
     /// Get config string for this encoding (lowercase, used in config.toml)
-    pub fn to_config_str(&self) -> &'static str {
+    pub fn as_config_str(self) -> &'static str {
         match self {
             TextEncoding::Ascii => "ascii",
             TextEncoding::Latin1 => "latin1",
@@ -998,7 +998,7 @@ mod tests {
     #[test]
     fn text_encoding_from_label_roundtrip() {
         for enc in TextEncoding::all() {
-            let config_str = enc.to_config_str();
+            let config_str = enc.as_config_str();
             let parsed = TextEncoding::from_label(config_str);
             assert_eq!(parsed, Some(*enc), "roundtrip failed for {:?}", enc);
         }

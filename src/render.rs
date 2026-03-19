@@ -926,7 +926,7 @@ impl HexEditor {
                                     .children((row_start..row_end).enumerate().map(|(i, byte_idx)| {
                                         // Get display character from decoded data
                                         let display_char = decoded_chars.get(i).cloned().unwrap_or(DisplayChar::Invalid);
-                                        let ascii_char = display_char.to_char();
+                                        let ascii_char = display_char.as_char();
                                         let is_continuation = display_char.is_continuation();
 
                                         // Check if this byte is bookmarked
@@ -3039,8 +3039,7 @@ impl Render for HexEditor {
                             let bitmap_width = this.bitmap.width;
                             let bitmap_panel_width = this.bitmap.panel_width;
                             let pixel_size = ((bitmap_panel_width - 20.0) / bitmap_width as f32)
-                                .max(1.0)
-                                .min(4.0);
+                                .clamp(1.0, 4.0);
                             let delta_bitmap_rows = (delta_y / pixel_size) as isize;
 
                             // Convert bitmap rows to hex view rows
@@ -3165,22 +3164,26 @@ impl Render for HexEditor {
             .on_action(cx.listener(|_this, _: &actions::NewWindow, _window, cx| {
                 crate::open_new_window(cx, None);
             }))
-            .on_action(cx.listener(|this, _: &actions::Undo, _window, cx| {
-                if let Some(offset) = this.tab_mut().document.undo() {
-                    this.push_cursor_history();
-                    this.move_position(offset);
-                    this.log(crate::log_panel::LogLevel::Info, "Undo");
-                }
-                cx.notify();
-            }))
-            .on_action(cx.listener(|this, _: &actions::Redo, _window, cx| {
-                if let Some(offset) = this.tab_mut().document.redo() {
-                    this.push_cursor_history();
-                    this.move_position(offset);
-                    this.log(crate::log_panel::LogLevel::Info, "Redo");
-                }
-                cx.notify();
-            }))
+            .when(self.tab().document.can_undo(), |el| {
+                el.on_action(cx.listener(|this, _: &actions::Undo, _window, cx| {
+                    if let Some(offset) = this.tab_mut().document.undo() {
+                        this.push_cursor_history();
+                        this.move_position(offset);
+                        this.log(crate::log_panel::LogLevel::Info, "Undo");
+                    }
+                    cx.notify();
+                }))
+            })
+            .when(self.tab().document.can_redo(), |el| {
+                el.on_action(cx.listener(|this, _: &actions::Redo, _window, cx| {
+                    if let Some(offset) = this.tab_mut().document.redo() {
+                        this.push_cursor_history();
+                        this.move_position(offset);
+                        this.log(crate::log_panel::LogLevel::Info, "Redo");
+                    }
+                    cx.notify();
+                }))
+            })
             .when(self.has_selection() && !self.tab().document.is_empty(), |el| {
                 el.on_action(cx.listener(|this, _: &actions::Copy, _window, cx| {
                     this.copy_selection(cx);

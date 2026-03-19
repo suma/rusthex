@@ -166,6 +166,7 @@ impl Document {
     }
 
     /// Load document from file
+    #[allow(dead_code)]
     pub fn from_file(path: PathBuf) -> std::io::Result<Self> {
         let mut doc = Self::new();
         doc.load(path)?;

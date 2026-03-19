@@ -134,6 +134,7 @@ impl HexEditor {
     }
 
     /// Clear all bookmarks
+    #[allow(dead_code)]
     pub fn clear_bookmarks(&mut self) {
         let count = self.tab().bookmarks.len();
         self.tab_mut().bookmarks.clear();
