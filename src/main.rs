@@ -555,13 +555,16 @@ pub fn open_new_window(cx: &mut App, file_path: Option<PathBuf>) {
     use std::sync::atomic::AtomicBool;
 
     static IPC_STARTED: AtomicBool = AtomicBool::new(false);
+    static WINDOW_COUNT: AtomicU64 = AtomicU64::new(0);
 
     let settings = Settings::load();
     let w = px(settings.window.width as f32);
     let h = px(settings.window.height as f32);
+    let cascade = WINDOW_COUNT.fetch_add(1, Ordering::Relaxed);
+    let cascade_offset = (cascade % 10) as f32 * 22.0;
     let bounds = match (settings.window.x, settings.window.y) {
         (Some(x), Some(y)) => Bounds {
-            origin: point(px(x as f32), px(y as f32)),
+            origin: point(px(x as f32 + cascade_offset), px(y as f32 + cascade_offset)),
             size: size(w, h),
         },
         _ => Bounds::centered(None, size(w, h), cx),
