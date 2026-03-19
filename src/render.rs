@@ -82,6 +82,7 @@ fn inspector_float_row(
 /// Create a dropdown menu container with standard styling (absolute, bordered, shadow).
 fn dropdown_menu_container(bg: gpui::Hsla, border: gpui::Hsla) -> gpui::Div {
     div()
+        .occlude()
         .absolute()
         .top(px(24.0))
         .left_0()
@@ -2800,7 +2801,16 @@ impl Render for HexEditor {
         }
 
         // Cache window bounds for layout save on quit
-        self.cached_window_bounds = Some(window.bounds());
+        // Use viewport_size() for dimensions (content area only, excludes title bar)
+        // and bounds().origin for position. bounds().size includes the title bar,
+        // which causes the window to grow taller on each launch because
+        // initWithContentRect interprets the size as content area.
+        let window_origin = window.bounds().origin;
+        let content_size = window.viewport_size();
+        self.cached_window_bounds = Some(gpui::Bounds {
+            origin: window_origin,
+            size: content_size,
+        });
 
         // Calculate and cache font metrics for different text sizes
         let font = Font {
