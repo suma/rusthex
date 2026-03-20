@@ -3290,6 +3290,69 @@ impl Render for HexEditor {
                 this.about_visible = !this.about_visible;
                 cx.notify();
             }))
+            .on_action(cx.listener(|this, _: &actions::OpenSettings, _window, cx| {
+                if let Some(path) = crate::config::Settings::config_path() {
+                    if !path.exists() {
+                        let _ = this.settings.save();
+                    }
+                    let old_theme = this.settings.display.theme.clone();
+                    let (tx, rx) = std::sync::mpsc::channel::<()>();
+                    // Spawn editor process in a background thread to avoid blocking async runtime
+                    std::thread::spawn(move || {
+                        let child = {
+                            #[cfg(target_os = "macos")]
+                            {
+                                std::process::Command::new("open")
+                                    .arg("-W")
+                                    .arg("-a")
+                                    .arg("TextEdit")
+                                    .arg(&path)
+                                    .spawn()
+                            }
+                            #[cfg(target_os = "windows")]
+                            {
+                                std::process::Command::new("notepad.exe")
+                                    .arg(&path)
+                                    .spawn()
+                            }
+                            #[cfg(target_os = "linux")]
+                            {
+                                std::process::Command::new("xdg-open")
+                                    .arg(&path)
+                                    .spawn()
+                            }
+                        };
+                        if let Ok(mut child) = child {
+                            let _ = child.wait();
+                        }
+                        let _ = tx.send(());
+                    });
+                    cx.spawn(async move |entity, cx| {
+                        // Poll until the editor process exits
+                        loop {
+                            if rx.try_recv().is_ok() {
+                                break;
+                            }
+                            gpui::Timer::after(std::time::Duration::from_millis(200)).await;
+                        }
+                        // Reload settings after editor closes
+                        let _ = entity.update(cx, |editor, cx| {
+                            let new_settings = crate::config::Settings::load();
+                            editor.settings.display = new_settings.display.clone();
+                            editor.settings.editor = new_settings.editor;
+                            editor.settings.analyze = new_settings.analyze;
+                            editor.settings.pattern = new_settings.pattern;
+                            // Update theme if changed
+                            let new_theme_name = &new_settings.display.theme;
+                            if *new_theme_name != old_theme {
+                                let theme_name = crate::theme::ThemeName::from_str(new_theme_name);
+                                editor.set_theme(theme_name);
+                            }
+                            cx.notify();
+                        });
+                    }).detach();
+                }
+            }))
             .on_key_down(cx.listener(keyboard::handle_key_event))
             .on_drop(cx.listener(|editor, paths: &ExternalPaths, _window, cx| {
                 editor.handle_file_drop(paths, cx);
