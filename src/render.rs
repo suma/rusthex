@@ -1762,6 +1762,7 @@ impl HexEditor {
             self.row_height(),
             self.tab().scroll_offset,
             compare_visible_range.buffer_before,
+            f64::from(params.content_height),
         );
 
         let font_size = self.settings.display.font_size;
@@ -2812,6 +2813,18 @@ impl HexEditor {
     }
 
     /// Resolve scroll position by reconciling logical row anchor with actual scroll offset.
+    ///
+    /// Uses the stored `scroll_offset` (set when the scroll was calculated) instead of
+    /// recalculating from `scroll_logical_row` + current `content_view_rows`. This prevents
+    /// the logical row anchor from being spuriously cleared when `content_view_rows` fluctuates
+    /// by ±1 due to sub-pixel viewport height changes, which would alter `max_target_row`
+    /// clamping in `calculate_scroll_offset` and produce a different expected offset.
+    ///
+    /// For large files (ratio-based scrolling), when the logical row must be cleared due to
+    /// external scroll changes, immediately recompute and store a new logical row from the
+    /// actual offset. This prevents precision loss from the offset→row round-trip conversion
+    /// (1 pixel ≈ 40 rows for a file with 400M rows), which would cause the view to jump
+    /// by hundreds of rows.
     fn resolve_scroll_position(&mut self, row_count: usize) {
         let scroll_position = self.tab().scroll_handle.offset();
 
@@ -2820,27 +2833,45 @@ impl HexEditor {
                 self.tab_mut().scroll_logical_row = None;
                 self.user_scrolled = false;
                 self.tab_mut().scroll_offset = scroll_position.y;
+                self.recompute_logical_row_from_offset(row_count, scroll_position.y);
             } else {
-                let expected_offset = ui::calculate_scroll_offset(
-                    self.tab().scroll_logical_row.unwrap(),
-                    self.content_view_rows,
-                    row_count,
-                    self.row_height(),
-                );
+                let expected_offset = self.tab().scroll_offset;
                 let diff = (f32::from(scroll_position.y) - f32::from(expected_offset)).abs();
-                if diff > 2.0 {
-                    self.tab_mut().scroll_logical_row = None;
+                // Use a large threshold to distinguish scrollbar drag (hundreds of px)
+                // from gpui's internal scroll adjustments (< ~30px). For small diffs,
+                // force the offset back to preserve the authoritative logical_row.
+                // Without this, gpui's layout-pass clamping corrupts the logical_row
+                // via recompute, causing ~24-row jumps in 400M-row files.
+                if diff > 100.0 {
+                    // Large change: likely scrollbar drag or external scroll
                     self.tab_mut().scroll_offset = scroll_position.y;
+                    self.recompute_logical_row_from_offset(row_count, scroll_position.y);
                 } else {
+                    // Small change or no change: enforce our stored offset
                     self.tab_mut().scroll_handle.set_offset(
                         gpui::Point::new(scroll_position.x, expected_offset),
                     );
-                    self.tab_mut().scroll_offset = expected_offset;
                 }
             }
         } else {
             self.user_scrolled = false;
             self.tab_mut().scroll_offset = scroll_position.y;
+            self.recompute_logical_row_from_offset(row_count, scroll_position.y);
+        }
+    }
+
+    /// For large files (ratio-based virtual scrolling), compute scroll_logical_row from
+    /// the current scroll offset to serve as a stable anchor. Without this, every frame
+    /// would recompute first_visible_row from the offset, which has low precision
+    /// (~40 rows per pixel) and can drift between frames.
+    fn recompute_logical_row_from_offset(&mut self, row_count: usize, offset: gpui::Pixels) {
+        let row_height = self.row_height();
+        let actual_total_height = row_count as f64 * row_height;
+        if actual_total_height > 10_000_000.0 {
+            let scroll_abs = (-f64::from(f32::from(offset))).max(0.0);
+            let scroll_ratio = (scroll_abs / 10_000_000.0).clamp(0.0, 1.0);
+            let first_visible = (scroll_ratio * row_count as f64).floor() as usize;
+            self.tab_mut().scroll_logical_row = Some(first_visible);
         }
     }
 
@@ -2883,6 +2914,7 @@ impl HexEditor {
             self.row_height(),
             self.tab().scroll_offset,
             visible_range.buffer_before,
+            f64::from(content_height),
         );
 
         ViewportCalc {

@@ -434,9 +434,17 @@ pub fn calculate_visible_range(
         }
     };
 
-    // Clamp first_visible_row to ensure we can render full viewport at the end
+    // Clamp first_visible_row to ensure we can render full viewport at the end.
+    // When using an anchor, allow exceeding max by 1 to prevent visual jitter from
+    // ±1 visible_rows fluctuation near end of file. Without this tolerance, the anchor
+    // would be clamped to different values on alternating frames, causing all rows to
+    // shift by row_height pixels each frame.
     let max_first_row = total_rows.saturating_sub(visible_row_count);
-    let first_visible_row = first_visible_row.min(max_first_row);
+    let first_visible_row = if anchor_first_row.is_some() {
+        first_visible_row.min(max_first_row.saturating_add(1))
+    } else {
+        first_visible_row.min(max_first_row)
+    };
 
     // For ratio-based virtual scrolling, limit buffer rows so that
     // top_spacer = |scroll_offset| - buffer_before * row_height >= 0
@@ -547,6 +555,7 @@ pub fn calculate_scroll_offset(
 /// Scroll result containing both pixel offset and logical first visible row.
 /// The logical row is needed because for very large files, the f32 pixel offset
 /// loses precision during the row→offset→row round-trip conversion.
+#[cfg(test)]
 pub struct ScrollResult {
     pub offset: Pixels,
     pub target_first_row: usize,
@@ -555,12 +564,17 @@ pub struct ScrollResult {
 /// Calculate the scroll offset needed to make a row visible
 /// Returns Some(ScrollResult) if scrolling is needed, None if the row is already visible
 ///
+/// Note: This function uses offset-based row calculation which has low precision for
+/// very large files. For production use, `ensure_cursor_visible_by_row` computes
+/// the scroll target directly from `scroll_logical_row` instead.
+///
 /// Arguments:
 /// - cursor_row: The row to make visible
 /// - current_offset: Current Y scroll offset (negative when scrolled down)
 /// - visible_rows: Number of rows visible in the content area
 /// - total_rows: Total number of rows in the document
 /// - row_height: Height of each row in pixels (font_size + margin)
+#[cfg(test)]
 pub fn calculate_scroll_to_row(
     cursor_row: usize,
     current_offset: Pixels,
@@ -581,10 +595,14 @@ pub fn calculate_scroll_to_row(
     }
 
     // Calculate target row (first visible row after scrolling)
+    // Threshold of 2 (not 1) accounts for ±1 fluctuation in visible_rows
+    // caused by sub-pixel viewport height changes. Without this tolerance,
+    // a single Down keypress could be detected as distance=2 when visible_rows
+    // decreased by 1, triggering "large jump" behavior and a 2-row scroll.
     let target_row = if cursor_row < first_visible_row {
         // Scrolling up
         let distance = first_visible_row.saturating_sub(cursor_row);
-        if distance <= 1 {
+        if distance <= 2 {
             // Small movement (e.g., Up key): scroll by 1 row for smooth scrolling
             first_visible_row.saturating_sub(1)
         } else {
@@ -594,7 +612,7 @@ pub fn calculate_scroll_to_row(
     } else {
         // Scrolling down
         let distance = cursor_row.saturating_sub(last_visible_row);
-        if distance <= 1 {
+        if distance <= 2 {
             // Small movement (e.g., Down key): scroll by 1 row for smooth scrolling
             first_visible_row + 1
         } else {
@@ -627,6 +645,7 @@ pub fn calculate_scroll_to_row(
 /// - row_height: Height of each row in pixels (font_size + margin)
 /// - scroll_offset: Current scroll offset (for ratio-based spacer consistency)
 /// - buffer_before: Number of buffer rows before first_visible_row
+/// - viewport_height: Height of the viewport (content area) in pixels
 pub fn calculate_spacer_heights(
     render_start: usize,
     render_end: usize,
@@ -634,6 +653,7 @@ pub fn calculate_spacer_heights(
     row_height: f64,
     scroll_offset: Pixels,
     buffer_before: usize,
+    viewport_height: f64,
 ) -> (Pixels, Pixels) {
     if total_rows == 0 {
         return (px(0.0), px(0.0));
@@ -647,10 +667,14 @@ pub fn calculate_spacer_heights(
         let scroll_abs: f64 = (-f64::from(f32::from(scroll_offset))).max(0.0);
         let top_height = (scroll_abs - buffer_before as f64 * row_height).max(0.0) as f32;
 
-        // Bottom spacer: remaining space after top spacer and rendered rows
+        // Bottom spacer: remaining space after top spacer and rendered rows.
+        // Total content must be MAX_VIRTUAL_HEIGHT + viewport_height so that the
+        // maximum scroll offset (content - viewport = MAX_VIRTUAL_HEIGHT) allows
+        // reaching the last row via ratio-based mapping.
         let rendered_height = (render_end - render_start) as f64 * row_height;
         let bottom_height =
-            (MAX_VIRTUAL_HEIGHT - top_height as f64 - rendered_height).max(0.0) as f32;
+            (MAX_VIRTUAL_HEIGHT + viewport_height - top_height as f64 - rendered_height)
+                .max(0.0) as f32;
 
         (px(top_height), px(bottom_height))
     } else {
@@ -1254,6 +1278,44 @@ mod tests {
         assert!(result.is_none());
     }
 
+    #[test]
+    fn scroll_to_row_down_distance_1_scrolls_by_1() {
+        // first_visible=0, visible_rows=20, last_visible=19
+        // Cursor at row 20: distance=1 → should scroll by exactly 1 row
+        let result = calculate_scroll_to_row(20, px(0.0), 20, 100, 24.0);
+        let r = result.unwrap();
+        assert_eq!(r.target_first_row, 1);
+    }
+
+    #[test]
+    fn scroll_to_row_down_distance_2_scrolls_by_1() {
+        // Simulates visible_rows fluctuation: visible_rows=19 but cursor was placed
+        // when visible_rows=20, so cursor at row 20 has distance=2 from last_visible=18.
+        // Should still scroll by only 1 row (not a large jump).
+        let result = calculate_scroll_to_row(20, px(0.0), 19, 100, 24.0);
+        let r = result.unwrap();
+        assert_eq!(r.target_first_row, 1);
+    }
+
+    #[test]
+    fn scroll_to_row_up_distance_2_scrolls_by_1() {
+        // first_visible=10, visible_rows=19 (fluctuated from 20)
+        // Cursor at row 8: distance=2 from first_visible=10 → small movement
+        let offset = calculate_scroll_offset(10, 19, 100, 24.0);
+        let result = calculate_scroll_to_row(8, offset, 19, 100, 24.0);
+        let r = result.unwrap();
+        assert_eq!(r.target_first_row, 9);
+    }
+
+    #[test]
+    fn scroll_to_row_large_jump_down() {
+        // Cursor at row 50: distance=31 from last_visible=19 → large jump
+        let result = calculate_scroll_to_row(50, px(0.0), 20, 100, 24.0);
+        let r = result.unwrap();
+        // Should position cursor at bottom of visible area
+        assert_eq!(r.target_first_row, 31); // 50 - 19
+    }
+
     // -- calculate_scroll_offset --
 
     #[test]
@@ -1275,5 +1337,50 @@ mod tests {
         let offset = calculate_scroll_offset(999, 20, 100, 24.0);
         let max_offset = calculate_scroll_offset(80, 20, 100, 24.0);
         assert_eq!(f32::from(offset), f32::from(max_offset));
+    }
+
+    #[test]
+    fn visible_range_anchor_allowed_to_exceed_max_by_1() {
+        // Simulate: anchor=999,971 was set with visible_rows=29,
+        // but now visible_rows=30, so max_first_row=999,970.
+        // The anchor should be kept at 999,971 (max+1 tolerance) to prevent jitter.
+        let total_rows = 1_000_000;
+        let row_height = 30.0;
+        let content_height = px(900.0); // visible_rows = 30
+        let anchor = 999_971; // max_first_row + 1
+        let offset = calculate_scroll_offset(anchor, 29, total_rows, row_height);
+
+        let range = calculate_visible_range(offset, content_height, total_rows, row_height, Some(anchor));
+        // first_visible = render_start + buffer_before
+        let first_visible = range.render_start + range.buffer_before;
+        assert_eq!(first_visible, 999_971);
+        assert_eq!(range.visible_rows, 30);
+    }
+
+    #[test]
+    fn visible_range_anchor_clamped_when_exceeds_max_by_2() {
+        // Anchor exceeding max by 2+ should still be clamped
+        let total_rows = 1_000_000;
+        let row_height = 30.0;
+        let content_height = px(900.0); // visible_rows = 30, max_first_row = 999,970
+        let anchor = 999_972; // max + 2
+        let offset = calculate_scroll_offset(anchor, 28, total_rows, row_height);
+
+        let range = calculate_visible_range(offset, content_height, total_rows, row_height, Some(anchor));
+        let first_visible = range.render_start + range.buffer_before;
+        assert_eq!(first_visible, 999_971);
+    }
+
+    #[test]
+    fn visible_range_anchor_not_clamped_when_within_bounds() {
+        let total_rows = 1_000_000;
+        let row_height = 30.0;
+        let content_height = px(900.0); // visible_rows = 30
+        let anchor = 500_000;
+        let offset = calculate_scroll_offset(anchor, 30, total_rows, row_height);
+
+        let range = calculate_visible_range(offset, content_height, total_rows, row_height, Some(anchor));
+        let first_visible = range.render_start + range.buffer_before;
+        assert_eq!(first_visible, anchor);
     }
 }

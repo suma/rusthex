@@ -53,7 +53,13 @@ impl HexEditor {
         self.ensure_cursor_visible_by_row();
     }
 
-    /// Ensure cursor is visible by scrolling to its row
+    /// Ensure cursor is visible by scrolling to its row.
+    ///
+    /// For large files (ratio-based virtual scrolling), the scroll offset has very low
+    /// precision per row (~40 rows per pixel for 400M-row files). This function computes
+    /// the new scroll target directly from `scroll_logical_row` (the authoritative anchor)
+    /// rather than from the scroll offset, avoiding the offset→row round-trip precision loss
+    /// that would cause `calculate_scroll_to_row` to misjudge cursor visibility.
     pub fn ensure_cursor_visible_by_row(&mut self) {
         let cursor_row = self.tab().cursor_position / self.bytes_per_row();
         let total_rows = {
@@ -77,31 +83,61 @@ impl HexEditor {
             return;
         }
 
-        // When scroll_logical_row is set, use it directly for visibility check
-        // (bypasses f32 precision loss in offset-based visible range calculation)
-        if let Some(logical_row) = self.tab().scroll_logical_row {
+        // Determine the authoritative first visible row:
+        // prefer scroll_logical_row (exact) over offset-based calculation (imprecise for large files)
+        let first_visible = if let Some(logical_row) = self.tab().scroll_logical_row {
             let max_first_row = total_rows.saturating_sub(visible_rows);
-            let first_visible = logical_row.min(max_first_row);
-            let last_visible = first_visible + visible_rows.saturating_sub(1);
-            if cursor_row >= first_visible && cursor_row <= last_visible {
-                return; // Already visible
-            }
+            logical_row.min(max_first_row)
+        } else {
+            let (fv, _) = ui::calculate_visible_row_range(
+                current_offset.y,
+                visible_rows,
+                total_rows,
+                self.row_height(),
+            );
+            fv
+        };
+
+        let last_visible = first_visible + visible_rows.saturating_sub(1);
+
+        // Check if cursor is already visible
+        if cursor_row >= first_visible && cursor_row <= last_visible {
+            return;
         }
 
-        if let Some(result) = ui::calculate_scroll_to_row(
-            cursor_row,
-            current_offset.y,
-            visible_rows,
-            total_rows,
-            self.row_height(),
-        ) {
-            let new_offset = Point::new(current_offset.x, result.offset);
-            self.tab_mut().scroll_handle.set_offset(new_offset);
-            // Keep scroll_offset in sync for mouse drag calculations
-            self.tab_mut().scroll_offset = result.offset;
-            // Store logical row to bypass f32 precision loss in large files
-            self.tab_mut().scroll_logical_row = Some(result.target_first_row);
-        }
+        // Calculate new first_visible_row directly from the known first_visible,
+        // not from the scroll offset (which has low precision for large files).
+        // Threshold of 2 accounts for ±1 visible_rows fluctuation.
+        let target_row = if cursor_row < first_visible {
+            // Scrolling up
+            let distance = first_visible - cursor_row;
+            if distance <= 2 {
+                first_visible.saturating_sub(1)
+            } else {
+                // Large jump: put cursor at top
+                cursor_row
+            }
+        } else {
+            // Scrolling down
+            let distance = cursor_row - last_visible;
+            if distance <= 2 {
+                first_visible + 1
+            } else {
+                // Large jump: put cursor at bottom
+                cursor_row.saturating_sub(visible_rows.saturating_sub(1))
+            }
+        };
+
+        let max_target = total_rows.saturating_sub(visible_rows);
+        let target_row = target_row.min(max_target);
+
+        let new_offset =
+            ui::calculate_scroll_offset(target_row, visible_rows, total_rows, self.row_height());
+        self.tab_mut()
+            .scroll_handle
+            .set_offset(Point::new(current_offset.x, new_offset));
+        self.tab_mut().scroll_offset = new_offset;
+        self.tab_mut().scroll_logical_row = Some(target_row);
     }
 
     /// Move cursor by a relative byte offset, only if the position actually changes.
