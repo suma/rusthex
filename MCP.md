@@ -1,11 +1,11 @@
-# rusthex MCP Integration Guide
+# Pheasant MCP Integration Guide
 
-rusthex-mcp is an MCP server that allows MCP clients such as Claude Code to operate on binary files. When the rusthex GUI is running, it communicates via a Unix domain socket for in-memory editing with undo support. When the GUI is not running, it falls back to direct file I/O.
+Pheasant-mcp is an MCP server that allows MCP clients such as Claude Code to operate on binary files. When the Pheasant GUI is running, it communicates via a Unix domain socket for in-memory editing with undo support. When the GUI is not running, it falls back to direct file I/O.
 
 ## Architecture
 
 ```
-Claude Code ──stdio──▶ rusthex-mcp ──Unix socket──▶ rusthex GUI (in-memory)
+Claude Code ──stdio──▶ pheasant-mcp ──Unix socket──▶ Pheasant GUI (in-memory)
                            │
                            └── fallback: direct file I/O
 ```
@@ -14,8 +14,8 @@ The system consists of three crates:
 
 | Crate | Path | Role |
 |---|---|---|
-| **rusthex** (GUI) | `src/` | gpui-based hex editor. Starts an IPC server on launch. |
-| **rusthex-mcp** | `crates/rusthex-mcp/` | MCP server binary (stdio transport). Connects to GUI via socket. |
+| **Pheasant** (GUI) | `src/` | gpui-based hex editor. Starts an IPC server on launch. |
+| **pheasant-mcp** | `crates/rusthex-mcp/` | MCP server binary (stdio transport). Connects to GUI via socket. |
 | **rusthex-ipc** | `crates/rusthex-ipc/` | Shared library defining protocol types and `send_request()`. |
 
 ## Building
@@ -25,19 +25,16 @@ cargo build --release
 ```
 
 Output binaries:
-- GUI: `target/release/rusthex`
-- MCP server: `target/release/rusthex-mcp`
+- GUI: `target/release/Pheasant`
+- MCP server: `target/release/pheasant-mcp`
 
-## rusthex GUI
+## Pheasant GUI
 
 ### Running
 
 ```bash
 # Open with a file
-./target/release/rusthex /path/to/file.bin
-
-# Open with sample data
-./target/release/rusthex
+./target/release/Pheasant /path/to/file.bin
 ```
 
 ### IPC Server
@@ -68,7 +65,7 @@ If a stale socket file exists (e.g. from a crash), the GUI removes it on startup
 | `Cmd-Shift-I` | Toggle insert mode |
 | `Cmd-Shift-E` | Cycle text encoding |
 
-## rusthex-mcp
+## pheasant-mcp
 
 ### Registering with Claude Code
 
@@ -88,7 +85,7 @@ Add to `.claude/settings.json` or `.mcp.json`:
 
 #### GUI-connected mode (recommended)
 
-1. Open a file in the rusthex GUI: `./target/release/rusthex /path/to/file.bin`
+1. Open a file in the Pheasant GUI: `./target/release/Pheasant /path/to/file.bin`
 2. Use MCP tools from Claude Code
 
 When the GUI is running, tools automatically operate on in-memory state. Responses are prefixed with `[via GUI]`.
@@ -114,7 +111,7 @@ These tools automatically use in-memory operations for files open in the GUI. Fo
 
 #### GUI-Only Tools
 
-These tools require the rusthex GUI to be running. They return an error message if the GUI is not available.
+These tools require the Pheasant GUI to be running. They return an error message if the GUI is not available.
 
 | Tool | Parameters | Description |
 |---|---|---|
