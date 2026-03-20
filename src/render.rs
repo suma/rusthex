@@ -2895,6 +2895,85 @@ impl HexEditor {
         }
     }
 
+    /// Handle log panel resize drag. Returns true if handled.
+    fn handle_log_panel_drag(&mut self, mouse_y: f32) -> bool {
+        if let Some((start_y, start_height)) = self.log_panel.drag_state {
+            let delta_y = start_y - mouse_y;
+            let new_height = (start_height + delta_y)
+                .clamp(crate::log_panel::MIN_HEIGHT, crate::log_panel::MAX_HEIGHT);
+            self.log_panel.panel_height = new_height;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Handle bitmap viewport indicator drag. Returns true if handled.
+    fn handle_bitmap_drag(&mut self, mouse_y: f32) -> bool {
+        if self.drag_pane == Some(EditPane::Bitmap) && self.is_dragging
+            && let (Some(start_y), Some(start_row)) =
+                (self.bitmap.drag_start_y, self.bitmap.drag_start_row)
+        {
+            let delta_y = mouse_y - start_y;
+
+            let bitmap_width = self.bitmap.width;
+            let bitmap_panel_width = self.bitmap.panel_width;
+            let pixel_size =
+                ((bitmap_panel_width - 20.0) / bitmap_width as f32).clamp(1.0, 4.0);
+            let delta_bitmap_rows = (delta_y / pixel_size) as isize;
+
+            let bytes_per_row = self.bytes_per_row();
+            let delta_hex_rows =
+                delta_bitmap_rows * bitmap_width as isize / bytes_per_row as isize;
+
+            let new_row = if delta_hex_rows >= 0 {
+                start_row.saturating_add(delta_hex_rows as usize)
+            } else {
+                start_row.saturating_sub((-delta_hex_rows) as usize)
+            };
+
+            let doc_len = self.tab().document.len();
+            let total_rows = doc_len.div_ceil(bytes_per_row);
+            let row_height = self.row_height();
+            let visible_rows = self.content_view_rows;
+
+            let new_y_offset =
+                ui::calculate_scroll_offset(new_row, visible_rows, total_rows, row_height);
+            let current_offset = self.tab().scroll_handle.offset();
+            let new_offset = gpui::Point::new(current_offset.x, new_y_offset);
+            self.tab_mut().scroll_handle.set_offset(new_offset);
+            self.tab_mut().scroll_offset = new_y_offset;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Handle hex/ASCII pane drag selection.
+    fn handle_hex_ascii_drag(&mut self, mouse_x: f32, mouse_y: f32, pane: EditPane) {
+        let doc_len = self.tab().document.len();
+        if doc_len == 0 {
+            return;
+        }
+        let layout = ui::HitTestLayout {
+            outer_padding: 16.0, // p_4
+            header_height: self.calculate_header_height(),
+            content_top_padding: 16.0, // pt_4
+            scroll_offset: (-f32::from(self.tab().scroll_offset)).max(0.0),
+            row_height: self.cached_row_height,
+            char_width: self.cached_char_width,
+            bytes_per_row: self.bytes_per_row(),
+            doc_len,
+            addr_chars: ui::address_chars(doc_len),
+        };
+        let new_cursor = layout.byte_position_from_mouse(mouse_x, mouse_y, pane);
+
+        if self.tab().cursor_position != new_cursor {
+            self.tab_mut().cursor_position = new_cursor;
+            self.ensure_cursor_visible_by_row();
+        }
+    }
+
     /// Register all action handlers on the root div.
     fn build_action_handlers(
         &mut self,
@@ -3268,101 +3347,28 @@ impl Render for HexEditor {
                         cx.notify();
                         return;
                     }
-
-                    // Cancel log panel resize if mouse button was released outside
                     if this.log_panel.drag_state.is_some() && !event.dragging() {
                         this.log_panel.drag_state = None;
                         cx.notify();
                         return;
                     }
 
-                    // Handle log panel resize drag
-                    if let Some((start_y, start_height)) = this.log_panel.drag_state {
-                        let mouse_y: f32 = event.position.y.into();
-                        // Dragging up increases height (panel grows upward)
-                        let delta_y = start_y - mouse_y;
-                        let new_height = (start_height + delta_y)
-                            .clamp(crate::log_panel::MIN_HEIGHT, crate::log_panel::MAX_HEIGHT);
-                        this.log_panel.panel_height = new_height;
+                    let mouse_x: f32 = event.position.x.into();
+                    let mouse_y: f32 = event.position.y.into();
+
+                    if this.handle_log_panel_drag(mouse_y)
+                        || this.handle_bitmap_drag(mouse_y)
+                    {
                         cx.notify();
                         return;
                     }
 
-                    // Handle bitmap viewport indicator drag at root level
-                    if this.drag_pane == Some(EditPane::Bitmap) && this.is_dragging
-                        && let (Some(start_y), Some(start_row)) =
-                            (this.bitmap.drag_start_y, this.bitmap.drag_start_row)
-                        {
-                            let mouse_y: f32 = event.position.y.into();
-                            let delta_y = mouse_y - start_y;
-
-                            // Convert pixel delta to bitmap rows
-                            let bitmap_width = this.bitmap.width;
-                            let bitmap_panel_width = this.bitmap.panel_width;
-                            let pixel_size = ((bitmap_panel_width - 20.0) / bitmap_width as f32)
-                                .clamp(1.0, 4.0);
-                            let delta_bitmap_rows = (delta_y / pixel_size) as isize;
-
-                            // Convert bitmap rows to hex view rows
-                            let bytes_per_row = this.bytes_per_row();
-                            let delta_hex_rows =
-                                delta_bitmap_rows * bitmap_width as isize / bytes_per_row as isize;
-
-                            // Calculate new scroll position
-                            let new_row = if delta_hex_rows >= 0 {
-                                start_row.saturating_add(delta_hex_rows as usize)
-                            } else {
-                                start_row.saturating_sub((-delta_hex_rows) as usize)
-                            };
-
-                            // Calculate scroll offset and apply
-                            let doc_len = this.tab().document.len();
-                            let total_rows = doc_len.div_ceil(bytes_per_row);
-                            let row_height = this.row_height();
-                            let visible_rows = this.content_view_rows;
-
-                            let new_y_offset = ui::calculate_scroll_offset(
-                                new_row,
-                                visible_rows,
-                                total_rows,
-                                row_height,
-                            );
-                            let current_offset = this.tab().scroll_handle.offset();
-                            let new_offset = gpui::Point::new(current_offset.x, new_y_offset);
-                            this.tab_mut().scroll_handle.set_offset(new_offset);
-                            this.tab_mut().scroll_offset = new_y_offset;
-                            cx.notify();
-                        }
-
-                    // Handle hex/ASCII drag selection at root level
-                    // Root-level handler ensures events fire even when mouse moves outside hex-content div
                     if let Some(pane @ (EditPane::Hex | EditPane::Ascii)) = this.drag_pane
-                        && this.is_dragging {
-                            let doc_len = this.tab().document.len();
-                            if doc_len == 0 {
-                                return;
-                            }
-                            let layout = ui::HitTestLayout {
-                                outer_padding: 16.0, // p_4
-                                header_height: this.calculate_header_height(),
-                                content_top_padding: 16.0, // pt_4
-                                scroll_offset: (-f32::from(this.tab().scroll_offset)).max(0.0),
-                                row_height: this.cached_row_height,
-                                char_width: this.cached_char_width,
-                                bytes_per_row: this.bytes_per_row(),
-                                doc_len,
-                                addr_chars: ui::address_chars(doc_len),
-                            };
-                            let mouse_x: f32 = event.position.x.into();
-                            let mouse_y: f32 = event.position.y.into();
-                            let new_cursor = layout.byte_position_from_mouse(mouse_x, mouse_y, pane);
-
-                            if this.tab().cursor_position != new_cursor {
-                                this.tab_mut().cursor_position = new_cursor;
-                                this.ensure_cursor_visible_by_row();
-                                cx.notify();
-                            }
-                        }
+                        && this.is_dragging
+                    {
+                        this.handle_hex_ascii_drag(mouse_x, mouse_y, pane);
+                        cx.notify();
+                    }
                 }),
             )
             ;
