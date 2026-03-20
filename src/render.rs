@@ -3325,6 +3325,9 @@ impl Render for HexEditor {
             .unwrap_or("Pheasant")
             .to_string();
 
+        // Set window title to show current document name
+        window.set_window_title(&self.tab().display_name());
+
         // Build render params for helper methods
         let params = RenderParams {
             font_name: font_name.clone(),
