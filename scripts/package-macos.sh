@@ -10,7 +10,7 @@ set -e
 APP_NAME="Pheasant"
 BUNDLE_ID="com.github.suma.rusthex"
 VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
-TARGET="aarch64-apple-darwin"
+TARGET="${1:-aarch64-apple-darwin}"
 BUILD_DIR="target/${TARGET}/release"
 DIST_DIR="dist"
 APP_BUNDLE="${DIST_DIR}/${APP_NAME}.app"
@@ -26,9 +26,13 @@ if [ ! -f "Cargo.toml" ]; then
     exit 1
 fi
 
-# Build release binary
-echo "Building release binary..."
-cargo build --release --target ${TARGET}
+# Build release binary (skip if SKIP_BUILD=1, e.g. in CI)
+if [ "${SKIP_BUILD}" != "1" ]; then
+    echo "Building release binary..."
+    cargo build --release --target ${TARGET}
+else
+    echo "Skipping build (SKIP_BUILD=1)"
+fi
 
 if [ ! -f "${BUILD_DIR}/Pheasant" ]; then
     echo "Error: Build failed - binary not found"
@@ -132,39 +136,37 @@ echo ""
 BINARY_SIZE=$(du -h "${APP_BUNDLE}/Contents/MacOS/${APP_NAME}" | cut -f1)
 echo "Binary size: ${BINARY_SIZE}"
 
-# Optionally create DMG
+# Create DMG
 if command -v hdiutil &> /dev/null; then
+    # Extract architecture from target (e.g. aarch64-apple-darwin -> aarch64)
+    ARCH=$(echo "${TARGET}" | cut -d'-' -f1)
+    DMG_NAME="${APP_NAME}-v${VERSION}-${ARCH}.dmg"
+    DMG_PATH="${DIST_DIR}/${DMG_NAME}"
+
+    echo "Creating DMG..."
+    rm -f "${DMG_PATH}"
+
+    # Create temporary DMG directory
+    DMG_TEMP="${DIST_DIR}/dmg-temp"
+    rm -rf "${DMG_TEMP}"
+    mkdir -p "${DMG_TEMP}"
+    cp -R "${APP_BUNDLE}" "${DMG_TEMP}/"
+
+    # Create symbolic link to Applications folder
+    ln -s /Applications "${DMG_TEMP}/Applications"
+
+    # Create DMG
+    hdiutil create -volname "${APP_NAME}" \
+        -srcfolder "${DMG_TEMP}" \
+        -ov -format UDZO \
+        "${DMG_PATH}"
+
+    rm -rf "${DMG_TEMP}"
+
+    DMG_SIZE=$(du -h "${DMG_PATH}" | cut -f1)
     echo ""
-    read -p "Create DMG file? (y/N): " CREATE_DMG
-    if [ "$CREATE_DMG" = "y" ] || [ "$CREATE_DMG" = "Y" ]; then
-        DMG_NAME="${APP_NAME}-${VERSION}-aarch64.dmg"
-        DMG_PATH="${DIST_DIR}/${DMG_NAME}"
-
-        echo "Creating DMG..."
-        rm -f "${DMG_PATH}"
-
-        # Create temporary DMG directory
-        DMG_TEMP="${DIST_DIR}/dmg-temp"
-        rm -rf "${DMG_TEMP}"
-        mkdir -p "${DMG_TEMP}"
-        cp -R "${APP_BUNDLE}" "${DMG_TEMP}/"
-
-        # Create symbolic link to Applications folder
-        ln -s /Applications "${DMG_TEMP}/Applications"
-
-        # Create DMG
-        hdiutil create -volname "${APP_NAME}" \
-            -srcfolder "${DMG_TEMP}" \
-            -ov -format UDZO \
-            "${DMG_PATH}"
-
-        rm -rf "${DMG_TEMP}"
-
-        DMG_SIZE=$(du -h "${DMG_PATH}" | cut -f1)
-        echo ""
-        echo "DMG created: ${DMG_PATH}"
-        echo "DMG size: ${DMG_SIZE}"
-    fi
+    echo "DMG created: ${DMG_PATH}"
+    echo "DMG size: ${DMG_SIZE}"
 fi
 
 echo ""
