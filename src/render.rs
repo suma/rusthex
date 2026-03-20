@@ -24,8 +24,8 @@ fn app_icon_image() -> std::sync::Arc<gpui::RenderImage> {
         use smallvec::smallvec;
         use std::time::Duration;
 
-        const ICON_PNG: &[u8] = include_bytes!("../assets/icon64.png");
-        let decoded = image::load_from_memory(ICON_PNG).expect("embedded icon64.png is valid");
+        const ICON_PNG: &[u8] = include_bytes!("../assets/icon128.png");
+        let decoded = image::load_from_memory(ICON_PNG).expect("embedded icon128.png is valid");
         let rgba = decoded.to_rgba8();
         let (w, h) = rgba.dimensions();
         let buf: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::from_raw(w, h, rgba.into_raw())
@@ -2648,8 +2648,8 @@ impl HexEditor {
                     .on_mouse_down(gpui::MouseButton::Left, |_event, _window, _cx| {})
                     .child(
                         img(app_icon_image())
-                            .w(px(64.0))
-                            .h(px(64.0)),
+                            .w(px(128.0))
+                            .h(px(128.0)),
                     )
                     .child(div().h(px(4.0)))
                     .child(
