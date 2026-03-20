@@ -45,9 +45,17 @@ rm -rf "${APP_BUNDLE}"
 mkdir -p "${APP_BUNDLE}/Contents/MacOS"
 mkdir -p "${APP_BUNDLE}/Contents/Resources"
 
-# Copy binary
+# Copy binaries
 cp "${BUILD_DIR}/Pheasant" "${APP_BUNDLE}/Contents/MacOS/${APP_NAME}"
 chmod +x "${APP_BUNDLE}/Contents/MacOS/${APP_NAME}"
+
+if [ -f "${BUILD_DIR}/pheasant-mcp" ]; then
+    cp "${BUILD_DIR}/pheasant-mcp" "${APP_BUNDLE}/Contents/MacOS/pheasant-mcp"
+    chmod +x "${APP_BUNDLE}/Contents/MacOS/pheasant-mcp"
+    echo "Included: pheasant-mcp"
+else
+    echo "Warning: pheasant-mcp binary not found - skipping"
+fi
 
 # Create Info.plist
 cat > "${APP_BUNDLE}/Contents/Info.plist" << EOF

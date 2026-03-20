@@ -67,7 +67,10 @@ jobs:
           $version = "${{ github.ref_name }}"
           $zipName = "Pheasant-${version}-x86_64-pc-windows-msvc.zip"
           New-Item -ItemType Directory -Force -Path dist
-          Compress-Archive -Path "target/${{ matrix.target }}/release/Pheasant.exe" -DestinationPath "dist/$zipName"
+          $files = @("target/${{ matrix.target }}/release/Pheasant.exe")
+          $mcpPath = "target/${{ matrix.target }}/release/pheasant-mcp.exe"
+          if (Test-Path $mcpPath) { $files += $mcpPath }
+          Compress-Archive -Path $files -DestinationPath "dist/$zipName"
 
       - name: Upload Windows artifact
         if: matrix.os == 'windows'
