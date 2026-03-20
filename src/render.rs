@@ -2782,6 +2782,379 @@ impl HexEditor {
                     ),
             )
     }
+    // ── render() helper methods ──────────────────────────────────────
+
+    /// Update cached font metrics from current display settings.
+    /// Must be called at the start of each render frame.
+    fn update_font_metrics(&mut self, window: &mut Window) {
+        let font = Font {
+            family: self.settings.display.font_name.clone().into(),
+            features: FontFeatures::default(),
+            fallbacks: None,
+            weight: FontWeight::default(),
+            style: FontStyle::Normal,
+        };
+        let font_id = window.text_system().resolve_font(&font);
+
+        const PHI: f32 = 1.618034;
+
+        let font_size = px(self.settings.display.font_size);
+        let ascent = window.text_system().ascent(font_id, font_size);
+        self.cached_row_height = (self.settings.display.font_size * PHI).round() + 4.0;
+        self.cached_char_width = match window.text_system().em_advance(font_id, font_size) {
+            Ok(advance) => f32::from(advance),
+            Err(_) => f32::from(ascent) * 0.6,
+        };
+
+        self.cached_line_height_xl = (20.0 * PHI).round();
+        self.cached_line_height_sm = (14.0 * PHI).round();
+        self.cached_line_height_xs = (12.0 * PHI).round();
+    }
+
+    /// Resolve scroll position by reconciling logical row anchor with actual scroll offset.
+    fn resolve_scroll_position(&mut self, row_count: usize) {
+        let scroll_position = self.tab().scroll_handle.offset();
+
+        if self.tab().scroll_logical_row.is_some() {
+            if self.user_scrolled {
+                self.tab_mut().scroll_logical_row = None;
+                self.user_scrolled = false;
+                self.tab_mut().scroll_offset = scroll_position.y;
+            } else {
+                let expected_offset = ui::calculate_scroll_offset(
+                    self.tab().scroll_logical_row.unwrap(),
+                    self.content_view_rows,
+                    row_count,
+                    self.row_height(),
+                );
+                let diff = (f32::from(scroll_position.y) - f32::from(expected_offset)).abs();
+                if diff > 2.0 {
+                    self.tab_mut().scroll_logical_row = None;
+                    self.tab_mut().scroll_offset = scroll_position.y;
+                } else {
+                    self.tab_mut().scroll_handle.set_offset(
+                        gpui::Point::new(scroll_position.x, expected_offset),
+                    );
+                    self.tab_mut().scroll_offset = expected_offset;
+                }
+            }
+        } else {
+            self.user_scrolled = false;
+            self.tab_mut().scroll_offset = scroll_position.y;
+        }
+    }
+
+    /// Calculate viewport visible range, update render/bitmap caches, and return spacer heights.
+    fn calculate_viewport(
+        &mut self,
+        cx: &mut gpui::Context<Self>,
+        row_count: usize,
+    ) -> ViewportCalc {
+        let viewport_bounds = self.tab().scroll_handle.bounds();
+        let viewport_height = viewport_bounds.size.height;
+        let content_height = if f32::from(viewport_height) < 1.0 {
+            cx.notify();
+            px(self.content_view_rows.max(40) as f32 * self.row_height() as f32)
+        } else {
+            viewport_height.max(px(20.0))
+        };
+
+        let anchor_row = self.tab().scroll_logical_row;
+        let visible_range = ui::calculate_visible_range(
+            self.tab().scroll_offset,
+            content_height,
+            row_count,
+            self.row_height(),
+            anchor_row,
+        );
+        let render_start = visible_range.render_start;
+        let render_end = visible_range.render_end;
+
+        self.content_view_rows = visible_range.visible_rows;
+        self.update_render_cache(render_start, render_end);
+        if self.bitmap.visible {
+            self.update_bitmap_cache();
+        }
+
+        let (top_spacer_height, bottom_spacer_height) = ui::calculate_spacer_heights(
+            render_start,
+            render_end,
+            row_count,
+            self.row_height(),
+            self.tab().scroll_offset,
+            visible_range.buffer_before,
+        );
+
+        ViewportCalc {
+            render_start,
+            render_end,
+            content_height,
+            viewport_bounds,
+            top_spacer_height,
+            bottom_spacer_height,
+        }
+    }
+
+    /// Register all action handlers on the root div.
+    fn build_action_handlers(
+        &mut self,
+        root: gpui::Div,
+        cx: &mut gpui::Context<Self>,
+    ) -> gpui::Div {
+        root
+            .on_action(cx.listener(|this, _: &actions::Quit, window, cx| {
+                if this.force_close || !this.has_any_unsaved_changes() {
+                    this.save_layout();
+                    ipc::cleanup_socket();
+                    cx.quit();
+                } else {
+                    this.confirm_quit_app(window, cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &actions::Open, _window, cx| {
+                this.open_file_dialog(cx);
+            }))
+            .on_action(cx.listener(|_this, _: &actions::OpenInNewWindow, _window, cx| {
+                crate::open_in_new_window_global(cx);
+            }))
+            .on_action(cx.listener(|this, _: &actions::Save, window, cx| {
+                this.save_with_confirmation(window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &actions::SaveAs, _window, cx| {
+                this.save_as_dialog(cx);
+            }))
+            .when(self.has_selection() && !self.tab().document.is_empty(), |el| {
+                el.on_action(cx.listener(|this, _: &actions::SaveSelectionAs, _window, cx| {
+                    this.save_selection_as_dialog(cx);
+                }))
+                .on_action(cx.listener(|this, _: &actions::OpenSelectionInNewTab, window, cx| {
+                    this.open_selection_in_new_tab(window, cx);
+                    cx.notify();
+                }))
+            })
+            .on_action(cx.listener(|this, _: &actions::NewTab, _window, cx| {
+                this.new_tab();
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &actions::CloseTab, window, cx| {
+                if this.tabs.len() <= 1 {
+                    if this.force_close || !this.has_any_unsaved_changes() {
+                        this.save_layout();
+                        window.remove_window();
+                    } else {
+                        this.confirm_close_window(window, cx);
+                    }
+                } else {
+                    this.close_tab();
+                    cx.notify();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &actions::CloseWindow, window, cx| {
+                if this.force_close || !this.has_any_unsaved_changes() {
+                    this.save_layout();
+                    window.remove_window();
+                } else {
+                    this.confirm_close_window(window, cx);
+                }
+            }))
+            .on_action(cx.listener(|_this, _: &actions::NewWindow, _window, cx| {
+                crate::open_new_window(cx, None);
+            }))
+            .when(self.tab().document.can_undo(), |el| {
+                el.on_action(cx.listener(|this, _: &actions::Undo, _window, cx| {
+                    if let Some(offset) = this.tab_mut().document.undo() {
+                        this.push_cursor_history();
+                        this.move_position(offset);
+                        this.log(crate::log_panel::LogLevel::Info, "Undo");
+                    }
+                    cx.notify();
+                }))
+            })
+            .when(self.tab().document.can_redo(), |el| {
+                el.on_action(cx.listener(|this, _: &actions::Redo, _window, cx| {
+                    if let Some(offset) = this.tab_mut().document.redo() {
+                        this.push_cursor_history();
+                        this.move_position(offset);
+                        this.log(crate::log_panel::LogLevel::Info, "Redo");
+                    }
+                    cx.notify();
+                }))
+            })
+            .when(self.has_selection() && !self.tab().document.is_empty(), |el| {
+                el.on_action(cx.listener(|this, _: &actions::Copy, _window, cx| {
+                    this.copy_selection(cx);
+                }))
+                .on_action(cx.listener(|this, _: &actions::CopyAsAscii, _window, cx| {
+                    this.copy_as_ascii(cx);
+                }))
+                .on_action(cx.listener(|this, _: &actions::CopyAsHexString, _window, cx| {
+                    this.copy_as_hex_string(cx);
+                }))
+                .on_action(cx.listener(|this, _: &actions::CopyAsCArray, _window, cx| {
+                    this.copy_as_c_array(cx);
+                }))
+                .on_action(cx.listener(|this, _: &actions::CopyAsPython, _window, cx| {
+                    this.copy_as_python(cx);
+                }))
+            })
+            .on_action(cx.listener(|this, _: &actions::Paste, _window, cx| {
+                this.paste_from_clipboard(cx);
+            }))
+            .on_action(cx.listener(|this, _: &actions::SelectAll, _window, cx| {
+                if !this.tab().document.is_empty() {
+                    this.tab_mut().selection_start = Some(0);
+                    let end_pos = this.tab().document.len().saturating_sub(1);
+                    this.tab_mut().cursor_position = end_pos;
+                    this.log(crate::log_panel::LogLevel::Info, "Selected all");
+                }
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &actions::ToggleInsertMode, _window, cx| {
+                this.tab_mut().edit_mode = match this.tab().edit_mode {
+                    EditMode::Overwrite => EditMode::Insert,
+                    EditMode::Insert => EditMode::Overwrite,
+                };
+                this.tab_mut().hex_nibble = HexNibble::High;
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &actions::GoToAddress, _window, cx| {
+                this.show_goto_address();
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &actions::ToggleSearch, _window, cx| {
+                let visible = !this.tab().search_visible;
+                this.tab_mut().search_visible = visible;
+                if visible {
+                    this.tab_mut().goto_address_visible = false;
+                    this.tab_mut().bookmark_comment_editing = false;
+                } else {
+                    this.tab_mut().search_results.clear();
+                    this.tab_mut().current_search_index = None;
+                }
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &actions::ToggleInspector, _window, cx| {
+                this.toggle_inspector();
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &actions::ToggleBitmap, _window, cx| {
+                this.toggle_bitmap();
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &actions::TogglePatternPanel, _window, cx| {
+                this.toggle_pattern_panel();
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &actions::ToggleCompareMode, _window, cx| {
+                if this.compare.mode {
+                    this.exit_compare_mode();
+                } else {
+                    this.start_compare_mode();
+                }
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &actions::CycleEncoding, _window, cx| {
+                this.cycle_encoding();
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &actions::ToggleLogPanel, _window, cx| {
+                this.toggle_log_panel();
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &actions::ClearLog, _window, cx| {
+                this.log_panel.clear();
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &actions::FindNext, _window, cx| {
+                this.next_search_result();
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &actions::FindPrev, _window, cx| {
+                this.prev_search_result();
+                cx.notify();
+            }))
+            .when(self.has_selection() && !self.tab().document.is_empty(), |el| {
+                el.on_action(cx.listener(|this, _: &actions::AnalyzeSelection, _window, cx| {
+                    this.analyze_selection(cx);
+                }))
+                .on_action(cx.listener(|this, _: &actions::AnalyzeBinary, _window, cx| {
+                    this.analyze_binary(cx);
+                }))
+            })
+            .on_action(cx.listener(|this, _: &actions::About, _window, cx| {
+                this.about_visible = !this.about_visible;
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &actions::OpenSettings, _window, cx| {
+                if let Some(path) = crate::config::Settings::config_path() {
+                    if !path.exists() {
+                        let _ = this.settings.save();
+                    }
+                    let old_theme = this.settings.display.theme.clone();
+                    let (tx, rx) = std::sync::mpsc::channel::<()>();
+                    std::thread::spawn(move || {
+                        let child = {
+                            #[cfg(target_os = "macos")]
+                            {
+                                std::process::Command::new("open")
+                                    .arg("-W")
+                                    .arg("-a")
+                                    .arg("TextEdit")
+                                    .arg(&path)
+                                    .spawn()
+                            }
+                            #[cfg(target_os = "windows")]
+                            {
+                                std::process::Command::new("notepad.exe")
+                                    .arg(&path)
+                                    .spawn()
+                            }
+                            #[cfg(target_os = "linux")]
+                            {
+                                std::process::Command::new("xdg-open")
+                                    .arg(&path)
+                                    .spawn()
+                            }
+                        };
+                        if let Ok(mut child) = child {
+                            let _ = child.wait();
+                        }
+                        let _ = tx.send(());
+                    });
+                    cx.spawn(async move |entity, cx| {
+                        loop {
+                            if rx.try_recv().is_ok() {
+                                break;
+                            }
+                            gpui::Timer::after(std::time::Duration::from_millis(200)).await;
+                        }
+                        let _ = entity.update(cx, |editor, cx| {
+                            let new_settings = crate::config::Settings::load();
+                            editor.settings.display = new_settings.display.clone();
+                            editor.settings.editor = new_settings.editor;
+                            editor.settings.analyze = new_settings.analyze;
+                            editor.settings.pattern = new_settings.pattern;
+                            let new_theme_name = &new_settings.display.theme;
+                            if *new_theme_name != old_theme {
+                                let theme_name = crate::theme::ThemeName::from_str(new_theme_name);
+                                editor.set_theme(theme_name);
+                            }
+                            cx.notify();
+                        });
+                    }).detach();
+                }
+            }))
+    }
+}
+
+/// Viewport calculation results for render().
+struct ViewportCalc {
+    render_start: usize,
+    render_end: usize,
+    content_height: Pixels,
+    viewport_bounds: gpui::Bounds<Pixels>,
+    top_spacer_height: Pixels,
+    bottom_spacer_height: Pixels,
 }
 
 impl Render for HexEditor {
@@ -2809,43 +3182,10 @@ impl Render for HexEditor {
             size: content_size,
         });
 
-        // Calculate and cache font metrics for different text sizes
-        let font = Font {
-            family: self.settings.display.font_name.clone().into(),
-            features: FontFeatures::default(),
-            fallbacks: None,
-            weight: FontWeight::default(),
-            style: FontStyle::Normal,
-        };
-        let font_id = window.text_system().resolve_font(&font);
+        self.update_font_metrics(window);
         let font_name = self.settings.display.font_name.clone();
-
-        // gpui's default line_height is phi (golden ratio) * font_size.
-        // All height estimates must use this to match the actual rendered layout.
-        const PHI: f32 = 1.618034;
-
-        // Main content font (configurable size)
-        let font_size = px(self.settings.display.font_size);
-        let ascent = window.text_system().ascent(font_id, font_size);
-        // Row height = phi-based line height + mb_1 margin (4px)
-        self.cached_row_height = (self.settings.display.font_size * PHI).round() + 4.0;
-        // Monospace character width from em_advance (fallback to ascent * 0.6 if unavailable)
-        self.cached_char_width = match window.text_system().em_advance(font_id, font_size) {
-            Ok(advance) => f32::from(advance),
-            Err(_) => f32::from(ascent) * 0.6, // Fallback approximation
-        };
-        // Address column width: dynamic based on document size
         let address_chars = ui::address_chars(self.tab().document.len());
         let address_width = self.cached_char_width * address_chars as f32;
-
-        // text_xl (rems(1.25) = 20px at default rem 16px)
-        self.cached_line_height_xl = (20.0 * PHI).round();
-
-        // text_sm (rems(0.875) = 14px at default rem 16px)
-        self.cached_line_height_sm = (14.0 * PHI).round();
-
-        // text_xs (rems(0.75) = 12px at default rem 16px)
-        self.cached_line_height_xs = (12.0 * PHI).round();
 
         // Update search results if search completed
         if self.update_search_results() {
@@ -2863,87 +3203,8 @@ impl Render for HexEditor {
             }
         };
 
-        // Phase 1: Get current scroll position and handle programmatic vs user scroll
-        let scroll_position = self.tab().scroll_handle.offset();
-
-        if self.tab().scroll_logical_row.is_some() {
-            if self.user_scrolled {
-                // User scrolled via mouse wheel — clear the logical row anchor
-                self.tab_mut().scroll_logical_row = None;
-                self.user_scrolled = false;
-                self.tab_mut().scroll_offset = scroll_position.y;
-            } else {
-                // Check for scrollbar drag: large offset change (> 2px) without mouse wheel
-                let expected_offset = ui::calculate_scroll_offset(
-                    self.tab().scroll_logical_row.unwrap(),
-                    self.content_view_rows,
-                    row_count,
-                    self.row_height(),
-                );
-                let diff = (f32::from(scroll_position.y) - f32::from(expected_offset)).abs();
-                if diff > 2.0 {
-                    // Scrollbar drag or other external offset change
-                    self.tab_mut().scroll_logical_row = None;
-                    self.tab_mut().scroll_offset = scroll_position.y;
-                } else {
-                    // gpui clamping or no change — re-apply offset from logical_row
-                    self.tab_mut().scroll_handle.set_offset(
-                        gpui::Point::new(scroll_position.x, expected_offset),
-                    );
-                    self.tab_mut().scroll_offset = expected_offset;
-                }
-            }
-        } else {
-            self.user_scrolled = false;
-            self.tab_mut().scroll_offset = scroll_position.y;
-        }
-
-        // Phase 2: Calculate visible range based on viewport
-        // scroll_handle.bounds() returns the hex-content div's layout bounds,
-        // which already represents the content area (excluding header and status bar)
-        let viewport_bounds = self.tab().scroll_handle.bounds();
-        let viewport_height = viewport_bounds.size.height;
-        // On the first frame, scroll_handle.bounds() returns zero before layout
-        // is computed. Use a reasonable fallback and schedule a re-render.
-        let content_height = if f32::from(viewport_height) < 1.0 {
-            cx.notify();
-            px(self.content_view_rows.max(40) as f32 * self.row_height() as f32)
-        } else {
-            viewport_height.max(px(20.0))
-        };
-
-        let anchor_row = self.tab().scroll_logical_row;
-        let visible_range = ui::calculate_visible_range(
-            self.tab().scroll_offset,
-            content_height,
-            row_count,
-            self.row_height(),
-            anchor_row,
-        );
-        let render_start = visible_range.render_start;
-        let render_end = visible_range.render_end;
-
-        // Update content_view_rows from calculated visible rows
-        self.content_view_rows = visible_range.visible_rows;
-
-        // Update render cache for visible rows
-        self.update_render_cache(render_start, render_end);
-
-        // Update bitmap image cache if bitmap is visible
-        if self.bitmap.visible {
-            self.update_bitmap_cache();
-        }
-
-        // Phase 3: Calculate spacer heights for virtual scrolling
-        // Uses capped virtual height to avoid f32 precision issues with large files
-        let (top_spacer_height, bottom_spacer_height) = ui::calculate_spacer_heights(
-            render_start,
-            render_end,
-            row_count,
-            self.row_height(),
-            self.tab().scroll_offset,
-            visible_range.buffer_before,
-        );
+        self.resolve_scroll_position(row_count);
+        let viewport = self.calculate_viewport(cx, row_count);
 
         // Get display title
         let title = self
@@ -2958,13 +3219,13 @@ impl Render for HexEditor {
             font_name: font_name.clone(),
             address_width,
             address_chars,
-            render_start,
-            render_end,
+            render_start: viewport.render_start,
+            render_end: viewport.render_end,
             row_count,
-            top_spacer_height,
-            bottom_spacer_height,
-            content_height,
-            viewport_bounds,
+            top_spacer_height: viewport.top_spacer_height,
+            bottom_spacer_height: viewport.bottom_spacer_height,
+            content_height: viewport.content_height,
+            viewport_bounds: viewport.viewport_bounds,
         };
 
         let root = div()
@@ -3104,255 +3365,8 @@ impl Render for HexEditor {
                         }
                 }),
             )
-            // Action handlers (dispatched from menu bar and key bindings)
-            .on_action(cx.listener(|this, _: &actions::Quit, window, cx| {
-                if this.force_close || !this.has_any_unsaved_changes() {
-                    this.save_layout();
-                    ipc::cleanup_socket();
-                    cx.quit();
-                } else {
-                    this.confirm_quit_app(window, cx);
-                }
-            }))
-            .on_action(cx.listener(|this, _: &actions::Open, _window, cx| {
-                this.open_file_dialog(cx);
-            }))
-            .on_action(cx.listener(|_this, _: &actions::OpenInNewWindow, _window, cx| {
-                crate::open_in_new_window_global(cx);
-            }))
-            .on_action(cx.listener(|this, _: &actions::Save, window, cx| {
-                this.save_with_confirmation(window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &actions::SaveAs, _window, cx| {
-                this.save_as_dialog(cx);
-            }))
-            .when(self.has_selection() && !self.tab().document.is_empty(), |el| {
-                el.on_action(cx.listener(|this, _: &actions::SaveSelectionAs, _window, cx| {
-                    this.save_selection_as_dialog(cx);
-                }))
-                .on_action(cx.listener(|this, _: &actions::OpenSelectionInNewTab, window, cx| {
-                    this.open_selection_in_new_tab(window, cx);
-                    cx.notify();
-                }))
-            })
-            .on_action(cx.listener(|this, _: &actions::NewTab, _window, cx| {
-                this.new_tab();
-                cx.notify();
-            }))
-            .on_action(cx.listener(|this, _: &actions::CloseTab, window, cx| {
-                if this.tabs.len() <= 1 {
-                    // Last tab — close window instead
-                    if this.force_close || !this.has_any_unsaved_changes() {
-                        this.save_layout();
-                        window.remove_window();
-                    } else {
-                        this.confirm_close_window(window, cx);
-                    }
-                } else {
-                    this.close_tab();
-                    cx.notify();
-                }
-            }))
-            .on_action(cx.listener(|this, _: &actions::CloseWindow, window, cx| {
-                if this.force_close || !this.has_any_unsaved_changes() {
-                    this.save_layout();
-                    window.remove_window();
-                } else {
-                    this.confirm_close_window(window, cx);
-                }
-            }))
-            .on_action(cx.listener(|_this, _: &actions::NewWindow, _window, cx| {
-                crate::open_new_window(cx, None);
-            }))
-            .when(self.tab().document.can_undo(), |el| {
-                el.on_action(cx.listener(|this, _: &actions::Undo, _window, cx| {
-                    if let Some(offset) = this.tab_mut().document.undo() {
-                        this.push_cursor_history();
-                        this.move_position(offset);
-                        this.log(crate::log_panel::LogLevel::Info, "Undo");
-                    }
-                    cx.notify();
-                }))
-            })
-            .when(self.tab().document.can_redo(), |el| {
-                el.on_action(cx.listener(|this, _: &actions::Redo, _window, cx| {
-                    if let Some(offset) = this.tab_mut().document.redo() {
-                        this.push_cursor_history();
-                        this.move_position(offset);
-                        this.log(crate::log_panel::LogLevel::Info, "Redo");
-                    }
-                    cx.notify();
-                }))
-            })
-            .when(self.has_selection() && !self.tab().document.is_empty(), |el| {
-                el.on_action(cx.listener(|this, _: &actions::Copy, _window, cx| {
-                    this.copy_selection(cx);
-                }))
-                .on_action(cx.listener(|this, _: &actions::CopyAsAscii, _window, cx| {
-                    this.copy_as_ascii(cx);
-                }))
-                .on_action(cx.listener(|this, _: &actions::CopyAsHexString, _window, cx| {
-                    this.copy_as_hex_string(cx);
-                }))
-                .on_action(cx.listener(|this, _: &actions::CopyAsCArray, _window, cx| {
-                    this.copy_as_c_array(cx);
-                }))
-                .on_action(cx.listener(|this, _: &actions::CopyAsPython, _window, cx| {
-                    this.copy_as_python(cx);
-                }))
-            })
-            .on_action(cx.listener(|this, _: &actions::Paste, _window, cx| {
-                this.paste_from_clipboard(cx);
-            }))
-            .on_action(cx.listener(|this, _: &actions::SelectAll, _window, cx| {
-                if !this.tab().document.is_empty() {
-                    this.tab_mut().selection_start = Some(0);
-                    let end_pos = this.tab().document.len().saturating_sub(1);
-                    this.tab_mut().cursor_position = end_pos;
-                    this.log(crate::log_panel::LogLevel::Info, "Selected all");
-                }
-                cx.notify();
-            }))
-            .on_action(cx.listener(|this, _: &actions::ToggleInsertMode, _window, cx| {
-                this.tab_mut().edit_mode = match this.tab().edit_mode {
-                    EditMode::Overwrite => EditMode::Insert,
-                    EditMode::Insert => EditMode::Overwrite,
-                };
-                this.tab_mut().hex_nibble = HexNibble::High;
-                cx.notify();
-            }))
-            .on_action(cx.listener(|this, _: &actions::GoToAddress, _window, cx| {
-                this.show_goto_address();
-                cx.notify();
-            }))
-            .on_action(cx.listener(|this, _: &actions::ToggleSearch, _window, cx| {
-                let visible = !this.tab().search_visible;
-                this.tab_mut().search_visible = visible;
-                if visible {
-                    // Close other input bars (mutual exclusion)
-                    this.tab_mut().goto_address_visible = false;
-                    this.tab_mut().bookmark_comment_editing = false;
-                } else {
-                    this.tab_mut().search_results.clear();
-                    this.tab_mut().current_search_index = None;
-                }
-                cx.notify();
-            }))
-            .on_action(cx.listener(|this, _: &actions::ToggleInspector, _window, cx| {
-                this.toggle_inspector();
-                cx.notify();
-            }))
-            .on_action(cx.listener(|this, _: &actions::ToggleBitmap, _window, cx| {
-                this.toggle_bitmap();
-                cx.notify();
-            }))
-            .on_action(cx.listener(|this, _: &actions::TogglePatternPanel, _window, cx| {
-                this.toggle_pattern_panel();
-                cx.notify();
-            }))
-            .on_action(cx.listener(|this, _: &actions::ToggleCompareMode, _window, cx| {
-                if this.compare.mode {
-                    this.exit_compare_mode();
-                } else {
-                    this.start_compare_mode();
-                }
-                cx.notify();
-            }))
-            .on_action(cx.listener(|this, _: &actions::CycleEncoding, _window, cx| {
-                this.cycle_encoding();
-                cx.notify();
-            }))
-            .on_action(cx.listener(|this, _: &actions::ToggleLogPanel, _window, cx| {
-                this.toggle_log_panel();
-                cx.notify();
-            }))
-            .on_action(cx.listener(|this, _: &actions::ClearLog, _window, cx| {
-                this.log_panel.clear();
-                cx.notify();
-            }))
-            .on_action(cx.listener(|this, _: &actions::FindNext, _window, cx| {
-                this.next_search_result();
-                cx.notify();
-            }))
-            .on_action(cx.listener(|this, _: &actions::FindPrev, _window, cx| {
-                this.prev_search_result();
-                cx.notify();
-            }))
-            .when(self.has_selection() && !self.tab().document.is_empty(), |el| {
-                el.on_action(cx.listener(|this, _: &actions::AnalyzeSelection, _window, cx| {
-                    this.analyze_selection(cx);
-                }))
-                .on_action(cx.listener(|this, _: &actions::AnalyzeBinary, _window, cx| {
-                    this.analyze_binary(cx);
-                }))
-            })
-            .on_action(cx.listener(|this, _: &actions::About, _window, cx| {
-                this.about_visible = !this.about_visible;
-                cx.notify();
-            }))
-            .on_action(cx.listener(|this, _: &actions::OpenSettings, _window, cx| {
-                if let Some(path) = crate::config::Settings::config_path() {
-                    if !path.exists() {
-                        let _ = this.settings.save();
-                    }
-                    let old_theme = this.settings.display.theme.clone();
-                    let (tx, rx) = std::sync::mpsc::channel::<()>();
-                    // Spawn editor process in a background thread to avoid blocking async runtime
-                    std::thread::spawn(move || {
-                        let child = {
-                            #[cfg(target_os = "macos")]
-                            {
-                                std::process::Command::new("open")
-                                    .arg("-W")
-                                    .arg("-a")
-                                    .arg("TextEdit")
-                                    .arg(&path)
-                                    .spawn()
-                            }
-                            #[cfg(target_os = "windows")]
-                            {
-                                std::process::Command::new("notepad.exe")
-                                    .arg(&path)
-                                    .spawn()
-                            }
-                            #[cfg(target_os = "linux")]
-                            {
-                                std::process::Command::new("xdg-open")
-                                    .arg(&path)
-                                    .spawn()
-                            }
-                        };
-                        if let Ok(mut child) = child {
-                            let _ = child.wait();
-                        }
-                        let _ = tx.send(());
-                    });
-                    cx.spawn(async move |entity, cx| {
-                        // Poll until the editor process exits
-                        loop {
-                            if rx.try_recv().is_ok() {
-                                break;
-                            }
-                            gpui::Timer::after(std::time::Duration::from_millis(200)).await;
-                        }
-                        // Reload settings after editor closes
-                        let _ = entity.update(cx, |editor, cx| {
-                            let new_settings = crate::config::Settings::load();
-                            editor.settings.display = new_settings.display.clone();
-                            editor.settings.editor = new_settings.editor;
-                            editor.settings.analyze = new_settings.analyze;
-                            editor.settings.pattern = new_settings.pattern;
-                            // Update theme if changed
-                            let new_theme_name = &new_settings.display.theme;
-                            if *new_theme_name != old_theme {
-                                let theme_name = crate::theme::ThemeName::from_str(new_theme_name);
-                                editor.set_theme(theme_name);
-                            }
-                            cx.notify();
-                        });
-                    }).detach();
-                }
-            }))
+            ;
+        let root = self.build_action_handlers(root, cx)
             .on_key_down(cx.listener(keyboard::handle_key_event))
             .on_drop(cx.listener(|editor, paths: &ExternalPaths, _window, cx| {
                 editor.handle_file_drop(paths, cx);
