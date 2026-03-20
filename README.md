@@ -308,7 +308,7 @@ rusthex/
 │   └── theme.rs        # Color theme definitions (Dark, Light, Monokai)
 ├── crates/
 │   ├── pattern-lang/   # ImHex pattern language parser and evaluator
-│   └── rusthex-mcp/    # MCP server for binary file operations
+│   └── pheasant-mcp/    # MCP server for binary file operations
 ├── Cargo.toml
 ├── LICENSE-MIT
 ├── LICENSE-APACHE
@@ -317,7 +317,7 @@ rusthex/
 
 ## Performance
 
-RustHex is designed to handle large files efficiently:
+Pheasant is designed to handle large files efficiently:
 - **Virtual Scrolling**: Only renders visible rows, enabling smooth navigation of multi-gigabyte files
 - **Memory-Mapped Files**: Large files are not loaded entirely into memory
 - **Background Search**: Search operations run in separate threads to keep UI responsive
@@ -372,16 +372,16 @@ cargo check
 
 See [`crates/pattern-lang/README.md`](crates/pattern-lang/README.md#testing) for details on pattern-lang test structure.
 
-## MCP Server (rusthex-mcp)
+## MCP Server (pheasant-mcp)
 
-RustHex includes a standalone MCP (Model Context Protocol) server that enables AI assistants like Claude Code to read, edit, search, and analyze binary files.
+Pheasant includes a standalone MCP (Model Context Protocol) server that enables AI assistants like Claude Code to read, edit, search, and analyze binary files.
 
 ### Setup
 
 Build the binary once:
 
 ```bash
-cargo build -p rusthex-mcp --release
+cargo build -p pheasant-mcp --release
 ```
 
 Then add the following to `.claude/mcp.json` in the project root:
@@ -390,7 +390,7 @@ Then add the following to `.claude/mcp.json` in the project root:
 {
   "mcpServers": {
     "rusthex": {
-      "command": "/absolute/path/to/rusthex/target/release/rusthex-mcp",
+      "command": "/absolute/path/to/rusthex/target/release/pheasant-mcp",
       "args": []
     }
   }
