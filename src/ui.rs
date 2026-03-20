@@ -364,7 +364,7 @@ pub const ROW_HEIGHT: f64 = 24.0;
 
 /// Maximum virtual height to avoid f32 precision issues
 /// f32 loses precision above ~16 million, so we cap at 10 million pixels
-const MAX_VIRTUAL_HEIGHT: f64 = 10_000_000.0;
+pub const MAX_VIRTUAL_HEIGHT: f64 = 10_000_000.0;
 
 /// Buffer rows above/below visible area to prevent flickering during scroll
 const BUFFER_ROWS: usize = 10;

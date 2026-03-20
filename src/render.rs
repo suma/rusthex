@@ -2867,9 +2867,9 @@ impl HexEditor {
     fn recompute_logical_row_from_offset(&mut self, row_count: usize, offset: gpui::Pixels) {
         let row_height = self.row_height();
         let actual_total_height = row_count as f64 * row_height;
-        if actual_total_height > 10_000_000.0 {
+        if actual_total_height > ui::MAX_VIRTUAL_HEIGHT {
             let scroll_abs = (-f64::from(f32::from(offset))).max(0.0);
-            let scroll_ratio = (scroll_abs / 10_000_000.0).clamp(0.0, 1.0);
+            let scroll_ratio = (scroll_abs / ui::MAX_VIRTUAL_HEIGHT).clamp(0.0, 1.0);
             let first_visible = (scroll_ratio * row_count as f64).floor() as usize;
             self.tab_mut().scroll_logical_row = Some(first_visible);
         }
