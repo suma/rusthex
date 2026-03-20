@@ -744,6 +744,8 @@ fn build_menus() -> Vec<Menu> {
             name: SharedString::from("Pheasant"),
             items: vec![
                 MenuItem::action("About Pheasant", actions::About),
+                #[cfg(not(target_os = "linux"))]
+                MenuItem::action("Settings", actions::OpenSettings),
                 MenuItem::separator(),
                 MenuItem::os_submenu("Services", SystemMenuType::Services),
                 MenuItem::separator(),

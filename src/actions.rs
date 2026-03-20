@@ -41,6 +41,7 @@ actions!(
         ClearLog,
         // Application
         About,
+        OpenSettings,
         // Navigation
         NavigateBack,
         NavigateForward,
