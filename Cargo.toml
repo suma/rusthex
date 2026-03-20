@@ -10,6 +10,7 @@ authors = ["Shuzo Kashihara <suman.orega.warukatta@gmail.com>"]
 license = "MIT OR Apache-2.0"
 description = "A modern hex editor built with Rust and gpui"
 repository = "https://github.com/suma/rusthex"
+publish = false
 
 [dependencies]
 gpui = "0.2.2"
