@@ -135,6 +135,12 @@ else
     echo "Warning: assets/icon.png not found - app will use default icon"
 fi
 
+# Ad-hoc code sign the app bundle
+# Without signing, macOS Gatekeeper marks downloaded apps as "damaged"
+echo "Code signing app bundle (ad-hoc)..."
+codesign --force --deep -s - "${APP_BUNDLE}"
+echo "Code signing complete"
+
 echo ""
 echo "=== Build Complete ==="
 echo "App bundle: ${APP_BUNDLE}"
