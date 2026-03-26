@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name = "rusthex"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 authors = ["Shuzo Kashihara <suman.orega.warukatta@gmail.com>"]
 license = "MIT OR Apache-2.0"
