@@ -74,7 +74,12 @@ fn inspector_float_row(
     let display = if value.is_nan() || value.is_infinite() {
         format!("{}", value)
     } else {
-        format!("{:.prec$}", value, prec = precision)
+        let abs = value.abs();
+        if abs != 0.0 && (abs >= 1e15 || abs < 1e-4) {
+            format!("{:.prec$e}", value, prec = precision)
+        } else {
+            format!("{:.prec$}", value, prec = precision)
+        }
     };
     inspector_row(label, display, label_color, value_color, value_width)
 }
