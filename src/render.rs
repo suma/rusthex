@@ -1249,6 +1249,7 @@ impl HexEditor {
                                                     let new_offset = gpui::Point::new(current_offset.x, new_y_offset);
                                                     this.tab_mut().scroll_handle.set_offset(new_offset);
                                                     this.tab_mut().scroll_offset = new_y_offset;
+                                                    this.tab_mut().scroll_logical_row = Some(target_row);
 
                                                     cx.notify();
                                                 }))
@@ -2975,6 +2976,7 @@ impl HexEditor {
             let new_offset = gpui::Point::new(current_offset.x, new_y_offset);
             self.tab_mut().scroll_handle.set_offset(new_offset);
             self.tab_mut().scroll_offset = new_y_offset;
+            self.tab_mut().scroll_logical_row = Some(new_row);
             true
         } else {
             false
