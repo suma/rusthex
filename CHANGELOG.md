@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 (Unreleased)
+## 0.1.2 (Unreleased)
 
 - Fixed virtual scroll precision, bitmap scroll anchor, drag coordinate drift, and various UI issues
 
