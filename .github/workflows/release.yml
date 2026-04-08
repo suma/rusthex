@@ -52,7 +52,7 @@ jobs:
 
       - name: Upload macOS artifact
         if: matrix.os == 'macos'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: Pheasant-${{ matrix.target }}
           path: dist/*.dmg
@@ -71,7 +71,7 @@ jobs:
 
       - name: Upload Windows artifact
         if: matrix.os == 'windows'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: Pheasant-${{ matrix.target }}
           path: dist/*.zip
