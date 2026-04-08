@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Fixed Ctrl+E not toggling endianness when the Data Inspector was hidden
+- Added "Toggle Endianness" to the View and context menus so endianness can be toggled in Vim mode
+
 ## 0.1.2 (2026-04-02)
 
 - Fixed virtual scroll precision, bitmap scroll anchor, drag coordinate drift, and various UI issues

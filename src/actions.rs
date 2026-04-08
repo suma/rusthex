@@ -37,6 +37,7 @@ actions!(
         TogglePatternPanel,
         ToggleCompareMode,
         CycleEncoding,
+        ToggleEndian,
         ToggleLogPanel,
         ClearLog,
         // Application

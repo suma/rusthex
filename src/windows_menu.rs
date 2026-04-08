@@ -259,6 +259,7 @@ fn shortcut_for_action(action_name: &str) -> Option<&'static str> {
         "rusthex::TogglePatternPanel" => Some("Ctrl+P"),
         "rusthex::ToggleCompareMode" => Some("Ctrl+K"),
         "rusthex::CycleEncoding" => Some("Ctrl+Shift+E"),
+        "rusthex::ToggleEndian" => None,
         "rusthex::FindNext" => Some("F3"),
         "rusthex::FindPrev" => Some("Shift+F3"),
         _ => None,

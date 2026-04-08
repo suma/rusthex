@@ -798,6 +798,7 @@ fn build_menus() -> Vec<Menu> {
                 MenuItem::action("Compare", actions::ToggleCompareMode),
                 MenuItem::separator(),
                 MenuItem::action("Cycle Encoding", actions::CycleEncoding),
+                MenuItem::action("Toggle Endianness", actions::ToggleEndian),
             ],
         },
     ]

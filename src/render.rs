@@ -752,6 +752,7 @@ impl HexEditor {
                                         .menu("Select All", Box::new(actions::SelectAll))
                                         .separator()
                                         .menu("Toggle Inspector", Box::new(actions::ToggleInspector))
+                                        .menu("Toggle Endianness", Box::new(actions::ToggleEndian))
                                         .menu("Toggle Log Panel", Box::new(actions::ToggleLogPanel))
                                         .menu("Clear Log", Box::new(actions::ClearLog))
                                 }
@@ -3173,6 +3174,10 @@ impl HexEditor {
             }))
             .on_action(cx.listener(|this, _: &actions::CycleEncoding, _window, cx| {
                 this.cycle_encoding();
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &actions::ToggleEndian, _window, cx| {
+                this.toggle_inspector_endian();
                 cx.notify();
             }))
             .on_action(cx.listener(|this, _: &actions::ToggleLogPanel, _window, cx| {

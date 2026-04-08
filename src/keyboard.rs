@@ -142,7 +142,7 @@ fn handle_command_shortcuts(
         }
         ("i", false) => editor.toggle_inspector(),
         ("e", true) => editor.cycle_encoding(),
-        ("e", false) if editor.inspector_visible => editor.toggle_inspector_endian(),
+        ("e", false) => editor.toggle_inspector_endian(),
         ("k", _) => {
             if editor.compare.mode {
                 editor.exit_compare_mode();
