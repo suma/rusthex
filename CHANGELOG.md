@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.3 (2026-04-09)
 
 - Fixed Ctrl+E not toggling endianness when the Data Inspector was hidden
 - Added "Toggle Endianness" to the View and context menus so endianness can be toggled in Vim mode
