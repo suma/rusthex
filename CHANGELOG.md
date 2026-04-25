@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.4 (Unreleased)
+## 0.1.4 (2026-04-25)
 
 - Display third-party license notices in the About dialog
 
