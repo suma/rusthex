@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.4 (Unreleased)
+
+- Display third-party license notices in the About dialog
+
 ## 0.1.3 (2026-04-09)
 
 - Fixed Ctrl+E not toggling endianness when the Data Inspector was hidden

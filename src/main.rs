@@ -50,7 +50,8 @@ use config::Settings;
 use document::Document;
 use gpui::{
     App, Application, Bounds, FocusHandle, Focusable, KeyBinding, Menu, MenuItem, OsAction,
-    SharedString, SystemMenuType, Timer, WindowBounds, WindowOptions, prelude::*, point, px, size,
+    SharedString, SystemMenuType, Timer, UniformListScrollHandle, WindowBounds, WindowOptions,
+    prelude::*, point, px, size,
 };
 use render_cache::{CacheState, RenderCache};
 pub use search::SearchMode;
@@ -110,6 +111,8 @@ struct HexEditor {
     user_scrolled: bool,
     // About dialog visibility
     about_visible: bool,
+    // Scroll handle for the licenses text inside the About dialog
+    about_licenses_scroll: UniformListScrollHandle,
     // Cached window bounds (updated each render frame for save on quit)
     cached_window_bounds: Option<Bounds<gpui::Pixels>>,
 }
@@ -160,6 +163,7 @@ impl HexEditor {
             search_debounce_gen: Arc::new(AtomicU64::new(0)),
             user_scrolled: false,
             about_visible: false,
+            about_licenses_scroll: UniformListScrollHandle::new(),
             cached_window_bounds: None,
         };
         editor.apply_layout(&layout);

@@ -1,0 +1,27 @@
+Third-Party Licenses
+====================
+
+This software bundles the following third-party Rust crates. Each crate is
+distributed under the license shown alongside it. The full text of every
+license used is reproduced at the end of this document.
+
+Crates
+------
+{{#each overview}}
+  - {{{name}}} ({{count}} crate{{#if (gt count 1)}}s{{/if}})
+{{/each}}
+
+{{#each licenses}}
+
+================================================================================
+{{{name}}} ({{{id}}})
+================================================================================
+
+Used by:
+{{#each used_by}}
+  - {{{crate.name}}} {{{crate.version}}}{{#if crate.repository}} <{{{crate.repository}}}>{{/if}}
+{{/each}}
+
+{{{text}}}
+
+{{/each}}
